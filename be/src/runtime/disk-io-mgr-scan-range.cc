@@ -18,6 +18,7 @@
 #include "common/query-logging.h"
 #include "util/error-util.h"
 #include "util/hdfs-util.h"
+#include "util/lock-tracker.h"
 
 using namespace boost;
 using namespace impala;
@@ -37,7 +38,7 @@ const int MIN_QUEUE_CAPACITY = 2;
 // This must be called with the reader lock taken.
 bool DiskIoMgr::ScanRange::EnqueueBuffer(BufferDescriptor* buffer) {
   {
-    unique_lock<mutex> scan_range_lock(lock_);
+    unique_lock<Lock> scan_range_lock(lock_);
     DCHECK(Validate()) << DebugString();
     DCHECK(!eosr_returned_);
     DCHECK(!eosr_queued_);
@@ -64,7 +65,7 @@ bool DiskIoMgr::ScanRange::EnqueueBuffer(BufferDescriptor* buffer) {
     }
   }
 
-  buffer_ready_cv_.notify_one();
+  buffer_ready_cv_.NotifyOne();
 
   return blocked_on_queue_;
 }
@@ -73,7 +74,7 @@ Status DiskIoMgr::ScanRange::GetNext(BufferDescriptor** buffer) {
   *buffer = NULL;
 
   {
-    unique_lock<mutex> scan_range_lock(lock_);
+    unique_lock<Lock> scan_range_lock(lock_);
     if (eosr_returned_) return Status::OK;
     DCHECK(Validate()) << DebugString();
 
@@ -85,7 +86,7 @@ Status DiskIoMgr::ScanRange::GetNext(BufferDescriptor** buffer) {
     }
 
     while (ready_buffers_.empty() && !is_cancelled_) {
-      buffer_ready_cv_.wait(scan_range_lock);
+      buffer_ready_cv_.Wait(&scan_range_lock);
     }
 
     if (is_cancelled_) {
@@ -114,7 +115,7 @@ Status DiskIoMgr::ScanRange::GetNext(BufferDescriptor** buffer) {
     return status;
   }
 
-  unique_lock<mutex> reader_lock(reader_->lock_);
+  unique_lock<Lock> reader_lock(reader_->lock_);
   if (eosr_returned_) {
     reader_->total_range_queue_capacity_ += ready_buffers_capacity_;
     ++reader_->num_finished_ranges_;
@@ -149,14 +150,14 @@ void DiskIoMgr::ScanRange::Cancel(const Status& status) {
   DCHECK(!status.ok());
   {
     // Grab both locks to make sure that all working threads see is_cancelled_.
-    unique_lock<mutex> scan_range_lock(lock_);
-    unique_lock<mutex> hdfs_lock(hdfs_lock_);
+    unique_lock<Lock> scan_range_lock(lock_);
+    unique_lock<Lock> hdfs_lock(hdfs_lock_);
     DCHECK(Validate()) << DebugString();
     if (is_cancelled_) return;
     is_cancelled_ = true;
     status_ = status;
   }
-  buffer_ready_cv_.notify_all();
+  buffer_ready_cv_.NotifyAll();
   CleanupQueuedBuffers();
 
   // For cached buffers, we can't close the range until the cached buffer is returned.
@@ -204,7 +205,9 @@ bool DiskIoMgr::ScanRange::Validate() {
 }
 
 DiskIoMgr::ScanRange::ScanRange(int capacity)
-  : ready_buffers_capacity_(capacity) {
+  : lock_("ScanRange"),
+    ready_buffers_capacity_(capacity),
+    hdfs_lock_("ScanRangeLibHdfs") {
   request_type_ = RequestType::READ;
   Reset(NULL, "", -1, -1, -1, false, false);
 }
@@ -231,7 +234,8 @@ void DiskIoMgr::ScanRange::Reset(hdfsFS fs, const char* file, int64_t len, int64
   hdfs_file_ = NULL;
 }
 
-void DiskIoMgr::ScanRange::InitInternal(DiskIoMgr* io_mgr, RequestContext* reader) {
+void DiskIoMgr::ScanRange::InitInternal(DiskIoMgr* io_mgr, RequestContext* reader,
+    LockTracker* lock_tracker) {
   DCHECK(hdfs_file_ == NULL);
   io_mgr_ = io_mgr;
   reader_ = reader;
@@ -246,11 +250,18 @@ void DiskIoMgr::ScanRange::InitInternal(DiskIoMgr* io_mgr, RequestContext* reade
     ready_buffers_capacity_ = reader->initial_scan_range_queue_capacity();
     DCHECK_GE(ready_buffers_capacity_, MIN_QUEUE_CAPACITY);
   }
+
+  lock_.ClearCounters();
+  hdfs_lock_.ClearCounters();
+  if (lock_tracker != NULL) {
+    lock_tracker->RegisterLock(&lock_);
+    lock_tracker->RegisterLock(&hdfs_lock_);
+  }
   DCHECK(Validate()) << DebugString();
 }
 
 Status DiskIoMgr::ScanRange::Open() {
-  unique_lock<mutex> hdfs_lock(hdfs_lock_);
+  unique_lock<Lock> hdfs_lock(hdfs_lock_);
   if (is_cancelled_) return Status::CANCELLED;
 
   if (fs_ != NULL) {
@@ -301,7 +312,7 @@ Status DiskIoMgr::ScanRange::Open() {
 }
 
 void DiskIoMgr::ScanRange::Close() {
-  unique_lock<mutex> hdfs_lock(hdfs_lock_);
+  unique_lock<Lock> hdfs_lock(hdfs_lock_);
   if (fs_ != NULL) {
     if (hdfs_file_ == NULL) return;
 
@@ -361,7 +372,7 @@ int64_t DiskIoMgr::ScanRange::MaxReadChunkSize() const {
 // 1MB read into 8 128K reads?
 // TODO: look at linux disk scheduling
 Status DiskIoMgr::ScanRange::Read(char* buffer, int64_t* bytes_read, bool* eosr) {
-  unique_lock<mutex> hdfs_lock(hdfs_lock_);
+  unique_lock<Lock> hdfs_lock(hdfs_lock_);
   if (is_cancelled_) return Status::CANCELLED;
 
   *eosr = false;
@@ -417,7 +428,7 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
   if (fs_ == NULL) return Status::OK;
 
   {
-    unique_lock<mutex> hdfs_lock(hdfs_lock_);
+    unique_lock<Lock> hdfs_lock(hdfs_lock_);
     if (is_cancelled_) return Status::CANCELLED;
 
     DCHECK(hdfs_file_ != NULL);

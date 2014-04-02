@@ -24,15 +24,14 @@
 #include <boost/unordered_set.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <boost/thread/condition_variable.hpp>
-#include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
 
 #include "exec/scan-node.h"
 #include "rpc/thrift-client.h"
 #include "runtime/descriptors.h"
 #include "runtime/thread-resource-mgr.h"
+#include "util/locks.h"
 #include "util/progress-updater.h"
-#include "util/spinlock.h"
 #include "util/thread.h"
 
 #include "gen-cpp/PlanNodes_types.h"
@@ -86,7 +85,7 @@ class RecordServiceScanNode : public ScanNode {
   ThreadGroup scanner_threads_;
 
   // Protects the fields below
-  boost::mutex lock_;
+  Lock lock_;
 
   // Status of the scan, set asychronously in the scanner threads.
   Status status_;

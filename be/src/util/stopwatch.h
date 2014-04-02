@@ -106,8 +106,12 @@ class MonotonicStopWatch {
     if (!running_) return total_time_;
     timespec end;
     clock_gettime(CLOCK_MONOTONIC, &end);
-    return (end.tv_sec - start_.tv_sec) * 1000L * 1000L * 1000L +
-        (end.tv_nsec - start_.tv_nsec);
+    return ComputeDeltaNs(start_, end);
+  }
+
+  static uint64_t ComputeDeltaNs(const timespec& start, const timespec& end) {
+    return (end.tv_sec - start.tv_sec) * 1000L * 1000L * 1000L +
+        (end.tv_nsec - start.tv_nsec);
   }
 
  private:

@@ -84,7 +84,8 @@ SimpleScheduler::SimpleScheduler(StatestoreSubscriber* subscriber,
     const string& backend_id, const TNetworkAddress& backend_address,
     MetricGroup* metrics, Webserver* webserver, ResourceBroker* resource_broker,
     RequestPoolService* request_pool_service)
-  : metrics_(metrics->GetChildGroup("scheduler")),
+  : backend_map_lock_("SimpleScheduler::backend_map", LockTracker::global()),
+    metrics_(metrics->GetChildGroup("scheduler")),
     webserver_(webserver),
     statestore_subscriber_(subscriber),
     backend_id_(backend_id),
@@ -257,7 +258,7 @@ void SimpleScheduler::UpdateMembership(
     // under a lock and applied to the shared backend maps (backend_map_ and
     // backend_ip_map_) in place.
     {
-      lock_guard<mutex> lock(backend_map_lock_);
+      lock_guard<Lock> lock(backend_map_lock_);
       if (!delta.is_delta) {
         current_membership_.clear();
         backend_map_.clear();
@@ -352,7 +353,7 @@ Status SimpleScheduler::GetBackends(
 
 Status SimpleScheduler::GetBackend(const TNetworkAddress& data_location,
     TBackendDescriptor* backend) {
-  lock_guard<mutex> lock(backend_map_lock_);
+  lock_guard<Lock> lock(backend_map_lock_);
   if (backend_map_.size() == 0) {
     return Status("No backends configured");
   }
@@ -404,7 +405,7 @@ Status SimpleScheduler::GetBackend(const TNetworkAddress& data_location,
 }
 
 void SimpleScheduler::GetAllKnownBackends(BackendList* backends) {
-  lock_guard<mutex> lock(backend_map_lock_);
+  lock_guard<Lock> lock(backend_map_lock_);
   backends->clear();
   BOOST_FOREACH(const BackendMap::value_type& backend_list, backend_map_) {
     backends->insert(backends->end(), backend_list.second.begin(),

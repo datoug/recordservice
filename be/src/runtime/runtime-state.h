@@ -16,9 +16,6 @@
 #ifndef IMPALA_RUNTIME_RUNTIME_STATE_H
 #define IMPALA_RUNTIME_RUNTIME_STATE_H
 
-// needed for scoped_ptr to work on ObjectPool
-#include "common/object-pool.h"
-
 #include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
 #include <vector>
@@ -26,17 +23,20 @@
 // stringstream is a typedef, so can't forward declare it.
 #include <sstream>
 
+#include "common/object-pool.h"
 #include "common/query-logging.h"
-#include "statestore/query-resource-mgr.h"
 #include "runtime/exec-env.h"
 #include "runtime/descriptors.h"  // for PlanNodeId
 #include "runtime/disk-io-mgr.h"  // for DiskIoMgr::RequestContext
 #include "runtime/mem-tracker.h"
 #include "runtime/thread-resource-mgr.h"
+#include "statestore/query-resource-mgr.h"
+#include "util/lock-tracker.h"
+#include "util/runtime-profile.h"
+
 #include "gen-cpp/PlanNodes_types.h"
 #include "gen-cpp/Types_types.h"  // for TUniqueId
 #include "gen-cpp/ImpalaInternalService_types.h"  // for TQueryOptions
-#include "util/runtime-profile.h"
 
 namespace impala {
 
@@ -48,6 +48,7 @@ class Status;
 class ExecEnv;
 class Expr;
 class LlvmCodeGen;
+class Lock;
 class TimestampValue;
 class DataStreamRecvr;
 
@@ -142,6 +143,7 @@ class RuntimeState {
   MemTracker* instance_mem_tracker() { return instance_mem_tracker_.get(); }
   MemTracker* query_mem_tracker() { return query_mem_tracker_.get(); }
   ThreadResourceMgr::ResourcePool* resource_pool() { return resource_pool_; }
+  LockTracker* lock_tracker() { return &lock_tracker_; }
 
   FileMoveMap* hdfs_files_to_move() { return &hdfs_files_to_move_; }
   std::vector<DiskIoMgr::RequestContext*>* reader_contexts() { return &reader_contexts_; }
@@ -202,9 +204,12 @@ class RuntimeState {
   }
 
   Status query_status() {
-    ScopedSpinLock l(&query_status_lock_);
+    boost::lock_guard<SpinLock> l(query_status_lock_);
     return query_status_;
   };
+
+  // Add lock contention counters for each lock to the runtime profile.
+  void AddLockContentionCounters();
 
   // Log an error that will be sent back to the coordinator based on an instance of the
   // ErrorMsg class. The runtime state aggregates log messages based on type with one
@@ -214,7 +219,7 @@ class RuntimeState {
 
   // Returns true if the error log has not reached max_errors_.
   bool LogHasSpace() {
-    ScopedSpinLock l(&error_log_lock_);
+    boost::lock_guard<SpinLock> l(error_log_lock_);
     return error_log_.size() < query_options().max_errors;
   }
 
@@ -240,6 +245,9 @@ class RuntimeState {
   bool is_cancelled() const { return is_cancelled_; }
   void set_is_cancelled(bool v) { is_cancelled_ = v; }
 
+  // Child profile of this profile that contains information about time spent in locks.
+  RuntimeProfile* lock_profile_;
+
   RuntimeProfile::Counter* total_cpu_timer() { return total_cpu_timer_; }
   RuntimeProfile::Counter* total_storage_wait_timer() {
     return total_storage_wait_timer_;
@@ -253,7 +261,7 @@ class RuntimeState {
 
   // Sets query_status_ with err_msg if no error has been set yet.
   void set_query_status(const std::string& err_msg) {
-    ScopedSpinLock l(&query_status_lock_);
+    boost::lock_guard<SpinLock> l(query_status_lock_);
     if (!query_status_.ok()) return;
     query_status_ = Status(err_msg);
   }
@@ -385,6 +393,9 @@ class RuntimeState {
   // Logger to use for this query.
   // TODO: this should really come from the plan-fragment-executor/query-exec-state
   Logger logger_;
+
+  // Locks registered with the runtime state.
+  LockTracker lock_tracker_;
 
   // prohibit copies
   RuntimeState(const RuntimeState&);

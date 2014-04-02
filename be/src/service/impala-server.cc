@@ -243,9 +243,21 @@ void ImpalaServer::RegisterToCatalogTopic() {
 }
 
 ImpalaServer::ImpalaServer(ExecEnv* exec_env)
-  : exec_env_(exec_env),
+  : query_log_lock_(
+        "ImpalaServer::query_log", LockTracker::global()),
+    exec_env_(exec_env),
+    query_exec_state_map_lock_(
+        "ImpalaServer::query_exec_state_map", LockTracker::global()),
+    session_state_map_lock_(
+        "ImpalaServer::session_state_map", LockTracker::global()),
+    connection_to_sessions_map_lock_(
+        "ImpalaServer::connection_session_map", LockTracker::global()),
+    query_locations_lock_(
+        "ImpalaServer::query_locations", LockTracker::global()),
+    uuid_lock_(
+        "ImpalaServer::uuid", LockTracker::global()),
     recordservice_planner_server_(NULL),
-    recordservice_worker_server_(NULL) {
+    recordservice_worker_server_(NULL){
   // Initialize default config
   InitializeConfigVariables();
 
@@ -559,7 +571,7 @@ Status ImpalaServer::GetRuntimeProfileStr(const TUniqueId& query_id,
   DCHECK(output != NULL);
   // Search for the query id in the active query map
   {
-    lock_guard<mutex> l(query_exec_state_map_lock_);
+    lock_guard<Lock> l(query_exec_state_map_lock_);
     QueryExecStateMap::const_iterator exec_state = query_exec_state_map_.find(query_id);
     if (exec_state != query_exec_state_map_.end()) {
       if (base64_encoded) {
@@ -573,7 +585,7 @@ Status ImpalaServer::GetRuntimeProfileStr(const TUniqueId& query_id,
 
   // The query was not found the active query map, search the query log.
   {
-    lock_guard<mutex> l(query_log_lock_);
+    lock_guard<Lock> l(query_log_lock_);
     QueryLogIndex::const_iterator query_record = query_log_index_.find(query_id);
     if (query_record == query_log_index_.end()) {
       stringstream ss;
@@ -596,7 +608,7 @@ Status ImpalaServer::GetExecSummary(const TUniqueId& query_id, TExecSummary* res
     if (exec_state != NULL) {
       lock_guard<mutex> l(*exec_state->lock(), adopt_lock_t());
       if (exec_state->coord() != NULL) {
-        ScopedSpinLock lock(exec_state->coord()->GetExecSummaryLock());
+        lock_guard<SpinLock> lock(*exec_state->coord()->GetExecSummaryLock());
         *result = exec_state->coord()->exec_summary();
         return Status::OK;
       }
@@ -605,7 +617,7 @@ Status ImpalaServer::GetExecSummary(const TUniqueId& query_id, TExecSummary* res
 
   // Look for the query in completed query log.
   {
-    lock_guard<mutex> l(query_log_lock_);
+    lock_guard<Lock> l(query_log_lock_);
     QueryLogIndex::const_iterator query_record = query_log_index_.find(query_id);
     if (query_record == query_log_index_.end()) {
       stringstream ss;
@@ -675,11 +687,11 @@ void ImpalaServer::ArchiveQuery(const QueryExecState& query) {
   if (FLAGS_query_log_size == 0) return;
   QueryStateRecord record(query, true, encoded_profile_str);
   if (query.coord() != NULL) {
-    ScopedSpinLock lock(query.coord()->GetExecSummaryLock());
+    lock_guard<SpinLock> lock(*query.coord()->GetExecSummaryLock());
     record.exec_summary = query.coord()->exec_summary();
   }
   {
-    lock_guard<mutex> l(query_log_lock_);
+    lock_guard<Lock> l(query_log_lock_);
     // Add record to the beginning of the log, and to the lookup index.
     query_log_index_[query.query_id()] = query_log_.insert(query_log_.begin(), record);
 
@@ -812,7 +824,7 @@ Status ImpalaServer::ExecuteInternal(
     const unordered_set<TNetworkAddress>& unique_hosts =
         exec_state->schedule()->unique_hosts();
     if (!unique_hosts.empty()) {
-      lock_guard<mutex> l(query_locations_lock_);
+      lock_guard<Lock> l(query_locations_lock_);
       BOOST_FOREACH(const TNetworkAddress& port, unique_hosts) {
         query_locations_[port].insert(exec_state->query_id());
       }
@@ -846,7 +858,7 @@ Status ImpalaServer::RegisterQuery(shared_ptr<SessionState> session_state,
   const TUniqueId& query_id = exec_state->query_id();
   VLOG_REQUEST << "RegisterQuery(): query_id=" << exec_state->query_id();
   {
-    lock_guard<mutex> l(query_exec_state_map_lock_);
+    lock_guard<Lock> l(query_exec_state_map_lock_);
     QueryExecStateMap::iterator entry = query_exec_state_map_.find(query_id);
     if (entry != query_exec_state_map_.end()) {
       // There shouldn't be an active query with that same id.
@@ -899,7 +911,7 @@ Status ImpalaServer::UnregisterQuery(const TUniqueId& query_id, bool check_infli
 
   shared_ptr<QueryExecState> exec_state;
   {
-    lock_guard<mutex> l(query_exec_state_map_lock_);
+    lock_guard<Lock> l(query_exec_state_map_lock_);
     QueryExecStateMap::iterator entry = query_exec_state_map_.find(query_id);
     if (entry == query_exec_state_map_.end()) {
       return Status("Invalid or unknown query handle");
@@ -920,7 +932,7 @@ Status ImpalaServer::UnregisterQuery(const TUniqueId& query_id, bool check_infli
   if (exec_state->coord() != NULL) {
     string exec_summary;
     {
-      ScopedSpinLock lock(exec_state->coord()->GetExecSummaryLock());
+      lock_guard<SpinLock> lock(*exec_state->coord()->GetExecSummaryLock());
       const TExecSummary& summary = exec_state->coord()->exec_summary();
       exec_summary = PrintExecSummary(summary);
     }
@@ -929,7 +941,7 @@ Status ImpalaServer::UnregisterQuery(const TUniqueId& query_id, bool check_infli
     const unordered_set<TNetworkAddress>& unique_hosts =
         exec_state->schedule()->unique_hosts();
     if (!unique_hosts.empty()) {
-      lock_guard<mutex> l(query_locations_lock_);
+      lock_guard<Lock> l(query_locations_lock_);
       BOOST_FOREACH(const TNetworkAddress& hostport, unique_hosts) {
         // Query may have been removed already by cancellation path. In particular, if
         // node to fail was last sender to an exchange, the coordinator will realise and
@@ -984,7 +996,7 @@ Status ImpalaServer::CloseSessionInternal(const TUniqueId& session_id,
   // Find the session_state and remove it from the map.
   shared_ptr<SessionState> session_state;
   {
-    lock_guard<mutex> l(session_state_map_lock_);
+    lock_guard<Lock> l(session_state_map_lock_);
     SessionStateMap::iterator entry = session_state_map_.find(session_id);
     if (entry == session_state_map_.end()) {
       if (ignore_if_absent) {
@@ -1032,7 +1044,7 @@ Status ImpalaServer::CloseSessionInternal(const TUniqueId& session_id,
 
 Status ImpalaServer::GetSessionState(const TUniqueId& session_id,
     shared_ptr<SessionState>* session_state, bool mark_active) {
-  lock_guard<mutex> l(session_state_map_lock_);
+  lock_guard<Lock> l(session_state_map_lock_);
   SessionStateMap::iterator i = session_state_map_.find(session_id);
   if (i == session_state_map_.end()) {
     *session_state = boost::shared_ptr<SessionState>();
@@ -1428,7 +1440,7 @@ void ImpalaServer::MembershipCallback(
       // Build a list of queries that are running on failed hosts (as evidenced by their
       // absence from the membership list).
       // TODO: crash-restart failures can give false negatives for failed Impala demons.
-      lock_guard<mutex> l(query_locations_lock_);
+      lock_guard<Lock> l(query_locations_lock_);
       QueryLocations::const_iterator loc_entry = query_locations_.begin();
       while (loc_entry != query_locations_.end()) {
         if (current_membership.find(loc_entry->first) == current_membership.end()) {
@@ -1740,14 +1752,14 @@ void ImpalaServer::ConnectionStart(
               << " service=" << connection_context.server_name
               << " user=" << session_state->connected_user;
     {
-      lock_guard<mutex> l(session_state_map_lock_);
+      lock_guard<Lock> l(session_state_map_lock_);
       bool success =
           session_state_map_.insert(make_pair(session_id, session_state)).second;
       // The session should not have already existed.
       DCHECK(success);
     }
     {
-      lock_guard<mutex> l(connection_to_sessions_map_lock_);
+      lock_guard<Lock> l(connection_to_sessions_map_lock_);
       connection_to_sessions_map_[connection_context.connection_id].push_back(session_id);
     }
     if (is_beeswax) {
@@ -1762,7 +1774,7 @@ void ImpalaServer::ConnectionStart(
 
 void ImpalaServer::ConnectionEnd(
     const ThriftServer::ConnectionContext& connection_context) {
-  unique_lock<mutex> l(connection_to_sessions_map_lock_);
+  unique_lock<Lock> l(connection_to_sessions_map_lock_);
   ConnectionToSessionMap::iterator it =
       connection_to_sessions_map_.find(connection_context.connection_id);
 
@@ -1787,7 +1799,7 @@ void ImpalaServer::ExpireSessions() {
     // Sleep for half the session timeout; the maximum delay between a session expiring
     // and this method picking it up is equal to the size of this sleep.
     SleepForMs(FLAGS_idle_session_timeout * 500);
-    lock_guard<mutex> l(session_state_map_lock_);
+    lock_guard<Lock> l(session_state_map_lock_);
     int64_t now = UnixMillis();
     VLOG(3) << "Session expiration thread waking up";
     // TODO: If holding session_state_map_lock_ for the duration of this loop is too
@@ -2051,7 +2063,7 @@ Status ImpalaServer::StartRecordServiceServices(ExecEnv* exec_env,
 bool ImpalaServer::GetSessionIdForQuery(const TUniqueId& query_id,
     TUniqueId* session_id) {
   DCHECK(session_id != NULL);
-  lock_guard<mutex> l(query_exec_state_map_lock_);
+  lock_guard<Lock> l(query_exec_state_map_lock_);
   QueryExecStateMap::iterator i = query_exec_state_map_.find(query_id);
   if (i == query_exec_state_map_.end()) {
     return false;
@@ -2063,7 +2075,7 @@ bool ImpalaServer::GetSessionIdForQuery(const TUniqueId& query_id,
 
 shared_ptr<ImpalaServer::QueryExecState> ImpalaServer::GetQueryExecState(
     const TUniqueId& query_id, bool lock) {
-  lock_guard<mutex> l(query_exec_state_map_lock_);
+  lock_guard<Lock> l(query_exec_state_map_lock_);
   QueryExecStateMap::iterator i = query_exec_state_map_.find(query_id);
   if (i == query_exec_state_map_.end()) {
     return shared_ptr<QueryExecState>();

@@ -23,9 +23,12 @@
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
 
+#include "util/locks.h"
 #include "util/runtime-profile.h"
 
 namespace impala {
+
+class LockTracker;
 
 // Singleton utility class that updates counter values. This is used to sample some
 // metric (e.g. memory used) at regular intervals. The samples can be summarized in
@@ -43,6 +46,8 @@ class PeriodicCounterUpdater {
 
   // Tears down the update thread.
   ~PeriodicCounterUpdater();
+
+  static void RegisterWithLockTracker(LockTracker* lock_tracker);
 
   // Registers a periodic counter to be updated by the update thread.
   // Either sample_fn or dst_counter must be non-NULL.  When the periodic counter

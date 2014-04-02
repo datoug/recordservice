@@ -21,6 +21,7 @@
 #include <list>
 #include <unistd.h>
 
+#include "util/condition-var.h"
 #include "util/stopwatch.h"
 
 namespace impala {
@@ -33,9 +34,10 @@ namespace impala {
 template <typename T>
 class BlockingQueue {
  public:
-  BlockingQueue(size_t max_elements)
+  BlockingQueue(size_t max_elements, const char* name = "BlockingQueue")
     : shutdown_(false),
       max_elements_(max_elements),
+      lock_(name),
       total_get_wait_time_(0),
       total_put_wait_time_(0) {
   }
@@ -45,21 +47,21 @@ class BlockingQueue {
   // are no more elements available.
   bool BlockingGet(T* out) {
     MonotonicStopWatch timer;
-    boost::unique_lock<boost::mutex> unique_lock(lock_);
+    boost::unique_lock<Lock> lock(lock_);
 
     while (true) {
       if (!list_.empty()) {
         *out = list_.front();
         list_.pop_front();
         total_get_wait_time_ += timer.ElapsedTime();
-        unique_lock.unlock();
-        put_cv_.notify_one();
+        lock.unlock();
+        put_cv_.NotifyOne();
         return true;
       }
       if (shutdown_) return false;
 
       timer.Start();
-      get_cv_.wait(unique_lock);
+      get_cv_.Wait(&lock);
       timer.Stop();
     }
   }
@@ -68,11 +70,11 @@ class BlockingQueue {
   // If the queue is shut down, returns false.
   bool BlockingPut(const T& val) {
     MonotonicStopWatch timer;
-    boost::unique_lock<boost::mutex> unique_lock(lock_);
+    boost::unique_lock<Lock> lock(lock_);
 
     while (list_.size() >= max_elements_ && !shutdown_) {
       timer.Start();
-      put_cv_.wait(unique_lock);
+      put_cv_.Wait(&lock);
       timer.Stop();
     }
     total_put_wait_time_ += timer.ElapsedTime();
@@ -80,49 +82,49 @@ class BlockingQueue {
 
     DCHECK_LT(list_.size(), max_elements_);
     list_.push_back(val);
-    unique_lock.unlock();
-    get_cv_.notify_one();
+    lock.unlock();
+    get_cv_.NotifyOne();
     return true;
   }
 
   // Shut down the queue. Wakes up all threads waiting on BlockingGet or BlockingPut.
   void Shutdown() {
     {
-      boost::lock_guard<boost::mutex> guard(lock_);
+      boost::lock_guard<Lock> guard(lock_);
       shutdown_ = true;
     }
 
-    get_cv_.notify_all();
-    put_cv_.notify_all();
+    get_cv_.NotifyAll();
+    put_cv_.NotifyAll();
   }
 
   uint32_t GetSize() const {
-    boost::unique_lock<boost::mutex> l(lock_);
+    boost::unique_lock<Lock> l(lock_);
     return list_.size();
   }
 
   // Returns the total amount of time threads have blocked in BlockingGet.
-  uint64_t total_get_wait_time() const {
-    boost::lock_guard<boost::mutex> guard(lock_);
+  int64_t total_get_wait_time() const {
+    boost::lock_guard<Lock> guard(lock_);
     return total_get_wait_time_;
   }
 
   // Returns the total amount of time threads have blocked in BlockingPut.
-  uint64_t total_put_wait_time() const {
-    boost::lock_guard<boost::mutex> guard(lock_);
+  int64_t total_put_wait_time() const {
+    boost::lock_guard<Lock> guard(lock_);
     return total_put_wait_time_;
   }
 
- private:
+ protected:
   bool shutdown_;
   const int max_elements_;
-  boost::condition_variable get_cv_;   // 'get' callers wait on this
-  boost::condition_variable put_cv_;   // 'put' callers wait on this
+  ConditionVariable get_cv_;   // 'get' callers wait on this
+  ConditionVariable put_cv_;   // 'put' callers wait on this
   // lock_ guards access to list_, total_get_wait_time, and total_put_wait_time
-  mutable boost::mutex lock_;
+  mutable Lock lock_;
   std::list<T> list_;
-  uint64_t total_get_wait_time_;
-  uint64_t total_put_wait_time_;
+  int64_t total_get_wait_time_;
+  int64_t total_put_wait_time_;
 };
 
 }

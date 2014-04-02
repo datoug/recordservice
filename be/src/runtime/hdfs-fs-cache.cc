@@ -69,7 +69,7 @@ Status HdfsFsCache::GetConnection(const string& path, hdfsFS* fs,
   }
   // Otherwise, check the global cache.
   {
-    lock_guard<mutex> l(lock_);
+    lock_guard<Lock> l(lock_);
     HdfsFsMap::iterator i = fs_map_.find(namenode);
     if (i == fs_map_.end()) {
       hdfsBuilder* hdfs_builder = hdfsNewBuilder();

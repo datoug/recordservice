@@ -31,12 +31,14 @@
 #include "runtime/thread-resource-mgr.h"
 #include "util/bit-util.h"
 #include "util/error-util.h"
+#include "util/condition-var.h"
 #include "util/internal-queue.h"
 #include "util/runtime-profile.h"
 #include "util/thread.h"
 
 namespace impala {
 
+class LockTracker;
 class Logger;
 class MemTracker;
 
@@ -331,7 +333,7 @@ class DiskIoMgr {
     friend class DiskIoMgr;
 
     // Initialize internal fields
-    void InitInternal(DiskIoMgr* io_mgr, RequestContext* reader);
+    void InitInternal(DiskIoMgr* io_mgr, RequestContext* reader, LockTracker*);
 
     // Enqueues a buffer for this range. This does not block.
     // Returns true if this scan range has hit the queue capacity, false otherwise.
@@ -397,7 +399,7 @@ class DiskIoMgr {
 
     // Lock protecting fields below.
     // This lock should not be taken during Open/Read/Close.
-    boost::mutex lock_;
+    Lock lock_;
 
     // Number of bytes read so far for this scan range
     int bytes_read_;
@@ -419,7 +421,7 @@ class DiskIoMgr {
 
     // IO buffers that are queued for this scan range.
     // Condition variable for GetNext
-    boost::condition_variable buffer_ready_cv_;
+    ConditionVariable buffer_ready_cv_;
     std::list<BufferDescriptor*> ready_buffers_;
 
     // The soft capacity limit for ready_buffers_. ready_buffers_ can exceed
@@ -434,7 +436,7 @@ class DiskIoMgr {
     // that the disk threads are finished with HDFS calls before is_cancelled_ is set
     // to true and cleanup starts.
     // If this lock and lock_ need to be taken, lock_ must be taken first.
-    boost::mutex hdfs_lock_;
+    Lock hdfs_lock_;
 
     // If true, this scan range has been cancelled.
     bool is_cancelled_;
@@ -502,7 +504,8 @@ class DiskIoMgr {
   //    GetNext().
   // logger: If non-NULL, the logger to use to log additional debug info.
   Status RegisterContext(RequestContext** request_context,
-      MemTracker* reader_mem_tracker = NULL, const Logger* logger = NULL);
+      MemTracker* reader_mem_tracker = NULL, const Logger* logger = NULL,
+      LockTracker* lock_tracker = NULL);
 
   // Unregisters context from the disk IoMgr. This must be called for every
   // RegisterContext() regardless of cancellation and must be called in the
@@ -664,7 +667,7 @@ class DiskIoMgr {
   boost::scoped_ptr<RequestContextCache> request_context_cache_;
 
   // Protects free_buffers_ and free_buffer_descs_
-  boost::mutex free_buffers_lock_;
+  SpinLock free_buffers_lock_;
 
   // Free buffers that can be handed out to clients. There is one list for each buffer
   // size, indexed by the Log2 of the buffer size in units of min_buffer_size_. The

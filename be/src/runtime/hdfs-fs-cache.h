@@ -19,10 +19,10 @@
 #include <string>
 #include <boost/scoped_ptr.hpp>
 #include <boost/unordered_map.hpp>
-#include <boost/thread/mutex.hpp>
 #include <hdfs.h>
 
 #include "common/status.h"
+#include "util/lock-tracker.h"
 
 namespace impala {
 
@@ -59,13 +59,14 @@ class HdfsFsCache {
       HdfsFsMap* local_cache = NULL);
 
  private:
+  HdfsFsCache() : lock_("HdfsFsCache", LockTracker::global()) {}
+
   // Singleton instance. Instantiated in Init().
   static boost::scoped_ptr<HdfsFsCache> instance_;
 
-  boost::mutex lock_;  // protects fs_map_
+  Lock lock_;  // protects fs_map_
   HdfsFsMap fs_map_;
 
-  HdfsFsCache() { };
   HdfsFsCache(HdfsFsCache const& l); // disable copy ctor
   HdfsFsCache& operator=(HdfsFsCache const& l); // disable assignment
 };

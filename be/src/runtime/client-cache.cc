@@ -42,7 +42,7 @@ Status ClientCacheHelper::GetClient(const TNetworkAddress& address,
     ClientFactory factory_method, ClientKey* client_key) {
   shared_ptr<PerHostCache> host_cache;
   {
-    lock_guard<mutex> lock(cache_lock_);
+    lock_guard<Lock> lock(cache_lock_);
     VLOG(2) << "GetClient(" << address << ")";
     shared_ptr<PerHostCache>* ptr = &per_host_caches_[address];
     if (ptr->get() == NULL) ptr->reset(new PerHostCache());
@@ -50,7 +50,7 @@ Status ClientCacheHelper::GetClient(const TNetworkAddress& address,
   }
 
   {
-    lock_guard<mutex> lock(host_cache->lock);
+    lock_guard<Lock> lock(host_cache->lock);
     if (!host_cache->clients.empty()) {
       *client_key = host_cache->clients.front();
       VLOG(2) << "GetClient(): returning cached client for " << address;
@@ -73,7 +73,7 @@ Status ClientCacheHelper::ReopenClient(ClientFactory factory_method,
   shared_ptr<ThriftClientImpl> client_impl;
   ClientMap::iterator client;
   {
-    lock_guard<mutex> lock(client_map_lock_);
+    lock_guard<Lock> lock(client_map_lock_);
     client = client_map_.find(*client_key);
     DCHECK(client != client_map_.end());
     client_impl = client->second;
@@ -92,7 +92,7 @@ Status ClientCacheHelper::ReopenClient(ClientFactory factory_method,
   // This helps to ensure the proper accounting of metrics in the presence of
   // re-connection failures (the original client should be released as usual).
   if (status.ok()) {
-    lock_guard<mutex> lock(client_map_lock_);
+    lock_guard<Lock> lock(client_map_lock_);
     client_map_.erase(client);
   } else {
     // Restore the client used before the failed re-opening attempt, so the caller can
@@ -117,7 +117,7 @@ Status ClientCacheHelper::CreateClient(const TNetworkAddress& address,
 
   // Because the client starts life 'checked out', we don't add it to its host cache.
   {
-    lock_guard<mutex> lock(client_map_lock_);
+    lock_guard<Lock> lock(client_map_lock_);
     client_map_[*client_key] = client_impl;
   }
 
@@ -129,17 +129,17 @@ void ClientCacheHelper::ReleaseClient(ClientKey* client_key) {
   DCHECK(*client_key != NULL) << "Trying to release NULL client";
   shared_ptr<ThriftClientImpl> client_impl;
   {
-    lock_guard<mutex> lock(client_map_lock_);
+    lock_guard<Lock> lock(client_map_lock_);
     ClientMap::iterator client = client_map_.find(*client_key);
     DCHECK(client != client_map_.end());
     client_impl = client->second;
   }
   VLOG(2) << "Releasing client for " << client_impl->address() << " back to cache";
   {
-    lock_guard<mutex> lock(cache_lock_);
+    lock_guard<Lock> lock(cache_lock_);
     PerHostCacheMap::iterator cache = per_host_caches_.find(client_impl->address());
     DCHECK(cache != per_host_caches_.end());
-    lock_guard<mutex> entry_lock(cache->second->lock);
+    lock_guard<Lock> entry_lock(cache->second->lock);
     cache->second->clients.push_back(*client_key);
   }
   if (metrics_enabled_) clients_in_use_metric_->Increment(-1);
@@ -149,7 +149,7 @@ void ClientCacheHelper::ReleaseClient(ClientKey* client_key) {
 void ClientCacheHelper::CloseConnections(const TNetworkAddress& address) {
   PerHostCache* cache;
   {
-    lock_guard<mutex> lock(cache_lock_);
+    lock_guard<Lock> lock(cache_lock_);
     PerHostCacheMap::iterator cache_it = per_host_caches_.find(address);
     if (cache_it == per_host_caches_.end()) return;
     cache = cache_it->second.get();
@@ -158,8 +158,8 @@ void ClientCacheHelper::CloseConnections(const TNetworkAddress& address) {
   {
     VLOG(2) << "Invalidating all " << cache->clients.size() << " clients for: "
             << address;
-    lock_guard<mutex> entry_lock(cache->lock);
-    lock_guard<mutex> map_lock(client_map_lock_);
+    lock_guard<Lock> entry_lock(cache->lock);
+    lock_guard<Lock> map_lock(client_map_lock_);
     BOOST_FOREACH(ClientKey client_key, cache->clients) {
       ClientMap::iterator client_map_entry = client_map_.find(client_key);
       DCHECK(client_map_entry != client_map_.end());
@@ -169,13 +169,13 @@ void ClientCacheHelper::CloseConnections(const TNetworkAddress& address) {
 }
 
 string ClientCacheHelper::DebugString() {
-  lock_guard<mutex> lock(cache_lock_);
+  lock_guard<Lock> lock(cache_lock_);
   stringstream out;
   out << "ClientCacheHelper(#hosts=" << per_host_caches_.size()
       << " [";
   bool first = true;
   BOOST_FOREACH(const PerHostCacheMap::value_type& cache, per_host_caches_) {
-    lock_guard<mutex> host_cache_lock(cache.second->lock);
+    lock_guard<Lock> host_cache_lock(cache.second->lock);
     if (!first) out << " ";
     out << cache.first << ":" << cache.second->clients.size();
     first = false;
@@ -187,7 +187,7 @@ string ClientCacheHelper::DebugString() {
 void ClientCacheHelper::TestShutdown() {
   vector<TNetworkAddress> addresses;
   {
-    lock_guard<mutex> lock(cache_lock_);
+    lock_guard<Lock> lock(cache_lock_);
     BOOST_FOREACH(const PerHostCacheMap::value_type& cache_entry, per_host_caches_) {
       addresses.push_back(cache_entry.first);
     }
@@ -201,7 +201,7 @@ void ClientCacheHelper::InitMetrics(MetricGroup* metrics, const string& key_pref
   DCHECK(metrics != NULL);
   // Not strictly needed if InitMetrics is called before any cache usage, but ensures that
   // metrics_enabled_ is published.
-  lock_guard<mutex> lock(cache_lock_);
+  lock_guard<Lock> lock(cache_lock_);
   stringstream count_ss;
   count_ss << key_prefix << ".client-cache.clients-in-use";
   clients_in_use_metric_ = metrics->AddGauge(count_ss.str(), 0L);

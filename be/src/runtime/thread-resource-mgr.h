@@ -26,6 +26,7 @@
 #include <list>
 
 #include "common/status.h"
+#include "util/lock-tracker.h"
 
 namespace impala {
 
@@ -209,7 +210,7 @@ class ThreadResourceMgr {
   int system_threads_quota_;
 
   // Lock for the entire object.  Protects all fields below.
-  boost::mutex lock_;
+  Lock lock_;
 
   // Pools currently being managed
   typedef std::set<ResourcePool*> Pools;

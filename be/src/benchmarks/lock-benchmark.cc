@@ -21,7 +21,7 @@
 #include <boost/thread/mutex.hpp>
 #include "util/benchmark.h"
 #include "util/cpu-info.h"
-#include "util/spinlock.h"
+#include "util/locks.h"
 
 using namespace boost;
 using namespace impala;
@@ -31,35 +31,36 @@ using namespace std;
 // Machine Info: Intel(R) Core(TM) i7-2600 CPU @ 3.40GHz
 // locking:              Function     Rate (iters/ms)          Comparison
 // ----------------------------------------------------------------------
-//       Unlocked 2-Total Threads                45.5                  1X
-//         Atomic 2-Total Threads               2.734            0.06009X
-//       SpinLock 2-Total Threads               2.245            0.04934X
-//          Boost 2-Total Threads              0.5453            0.01198X
-// 
-//       Unlocked 6-Total Threads               61.16                  1X
-//         Atomic 6-Total Threads               2.875              0.047X
-//       SpinLock 6-Total Threads               1.368            0.02236X
-//          Boost 6-Total Threads              0.3173           0.005187X
-// 
-//      Unlocked 10-Total Threads               52.18                  1X
-//        Atomic 10-Total Threads               2.061             0.0395X
-//      SpinLock 10-Total Threads               1.236            0.02369X
-//         Boost 10-Total Threads              0.3184           0.006101X
-// 
-//      Unlocked 14-Total Threads               54.18                  1X
-//        Atomic 14-Total Threads               2.659            0.04907X
-//      SpinLock 14-Total Threads               1.274            0.02351X
-//         Boost 14-Total Threads              0.3252           0.006002X
-// 
-//      Unlocked 18-Total Threads               53.36                  1X
-//        Atomic 18-Total Threads               1.952            0.03659X
-//      SpinLock 18-Total Threads               1.308            0.02452X
-//         Boost 18-Total Threads              0.3259           0.006109X
-// 
-//      Unlocked 22-Total Threads               56.91                  1X
-//        Atomic 22-Total Threads               2.711            0.04764X
-//      SpinLock 22-Total Threads               1.311            0.02303X
-//         Boost 22-Total Threads              0.3254           0.005718X
+//       Unlocked 2-Total Threads               46.05                  1X
+//         Atomic 2-Total Threads               2.512            0.05455X
+//       SpinLock 2-Total Threads               2.204            0.04787X
+//          Boost 2-Total Threads              0.5222            0.01134X
+//
+//       Unlocked 6-Total Threads               61.41                  1X
+//         Atomic 6-Total Threads               2.724            0.04436X
+//       SpinLock 6-Total Threads               1.251            0.02038X
+//          Boost 6-Total Threads              0.2947           0.004799X
+//
+//      Unlocked 10-Total Threads               53.91                  1X
+//        Atomic 10-Total Threads               2.022            0.03751X
+//      SpinLock 10-Total Threads               1.093            0.02028X
+//         Boost 10-Total Threads              0.2973           0.005514X
+//
+//      Unlocked 14-Total Threads               56.65                  1X
+//        Atomic 14-Total Threads               2.696             0.0476X
+//      SpinLock 14-Total Threads               1.182            0.02087X
+//         Boost 14-Total Threads              0.3065            0.00541X
+//
+//      Unlocked 18-Total Threads               53.12                  1X
+//        Atomic 18-Total Threads               1.943            0.03657X
+//      SpinLock 18-Total Threads               1.241            0.02337X
+//         Boost 18-Total Threads              0.3105           0.005844X
+//
+//      Unlocked 22-Total Threads               57.51                  1X
+//        Atomic 22-Total Threads               2.684            0.04667X
+//      SpinLock 22-Total Threads               1.248            0.02169X
+//         Boost 22-Total Threads                0.31            0.00539X
+
 struct TestData {
   int num_producer_threads;
   int num_consumer_threads;
@@ -67,10 +68,10 @@ struct TestData {
   int64_t num_consumes;
   int64_t value;
 };
-  
+
 mutex lock_;
 SpinLock spinlock_;
-  
+
 typedef function<void (int64_t, int64_t*)> Fn;
 
 void UnlockedConsumeThread(int64_t n, int64_t* value) {
@@ -101,13 +102,13 @@ void AtomicProduceThread(int64_t n, int64_t* value) {
 
 void SpinLockConsumeThread(int64_t n, int64_t* value) {
   for (int64_t i = 0; i < n; ++i) {
-    ScopedSpinLock l(&spinlock_);
+    lock_guard<SpinLock> l(spinlock_);
     --(*value);
   }
 }
 void SpinLockProduceThread(int64_t n, int64_t* value) {
   for (int64_t i = 0; i < n; ++i) {
-    ScopedSpinLock l(&spinlock_);
+    lock_guard<SpinLock> l(spinlock_);
     ++(*value);
   }
 }
@@ -173,7 +174,7 @@ int main(int argc, char **argv) {
 
   int64_t N = 10000L;
   const int max_producers = 12;
-  
+
   Benchmark suite("locking");
   TestData data[max_producers];
   for (int i = 0; i < max_producers; i += 2) {
@@ -193,11 +194,11 @@ int main(int argc, char **argv) {
     name.str("");
     name << "Atomic" << suffix.str();
     suite.AddBenchmark(name.str(), TestAtomic, &data[i], baseline);
-    
+
     name.str("");
     name << "SpinLock" << suffix.str();
     suite.AddBenchmark(name.str(), TestSpinLock, &data[i], baseline);
-    
+
     name.str("");
     name << "Boost" << suffix.str();
     suite.AddBenchmark(name.str(), TestBoost, &data[i], baseline);

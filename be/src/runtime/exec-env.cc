@@ -37,10 +37,12 @@
 #include "statestore/statestore-subscriber.h"
 #include "util/debug-util.h"
 #include "util/default-path-handlers.h"
+#include "util/lock-tracker.h"
 #include "util/mem-info.h"
 #include "util/metrics.h"
 #include "util/network-util.h"
 #include "util/parse-util.h"
+#include "util/periodic-counter-updater.h"
 #include "util/memory-metrics.h"
 #include "util/webserver.h"
 #include "util/mem-info.h"
@@ -140,6 +142,7 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service,
   : is_record_service_(is_record_service),
     running_record_service_(running_record_service),
     server_id_(server_id),
+    lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
     impalad_client_cache_(new ImpalaInternalServiceClientCache()),
     catalogd_client_cache_(new CatalogServiceClientCache()),
@@ -176,6 +179,8 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service,
   }
   if (exec_env_ == NULL) exec_env_ = this;
   if (FLAGS_enable_rm) resource_broker_->set_scheduler(scheduler_.get());
+
+  PeriodicCounterUpdater::RegisterWithLockTracker(LockTracker::global());
 }
 
 ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
@@ -183,6 +188,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
   : is_record_service_(false),
     running_record_service_(false),
     server_id_(Substitute("impalad@$0:$1", hostname, backend_port)),
+    lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
     impalad_client_cache_(new ImpalaInternalServiceClientCache()),
     catalogd_client_cache_(new CatalogServiceClientCache()),
@@ -216,6 +222,8 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
   }
   if (exec_env_ == NULL) exec_env_ = this;
   if (FLAGS_enable_rm) resource_broker_->set_scheduler(scheduler_.get());
+
+  PeriodicCounterUpdater::RegisterWithLockTracker(LockTracker::global());
 }
 
 void ExecEnv::InitStatestoreSubscriber() {
@@ -418,7 +426,7 @@ Status ExecEnv::StartServices() {
 
   // Start services in order to ensure that dependencies between them are met
   if (enable_webserver_) {
-    AddDefaultUrlCallbacks(webserver_.get(), mem_tracker_.get());
+    AddDefaultUrlCallbacks(webserver_.get(), mem_tracker_.get(), lock_tracker_.get());
     RETURN_IF_ERROR(webserver_->Start());
     Webserver::UrlCallback backends_callback =
         bind<void>(mem_fn(&ExecEnv::BackendsUrlCallback), this, _1, _2);

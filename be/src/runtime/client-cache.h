@@ -22,6 +22,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/bind.hpp>
 
+#include "util/lock-tracker.h"
 #include "util/metrics.h"
 #include "rpc/thrift-client.h"
 #include "rpc/thrift-util.h"
@@ -106,7 +107,9 @@ class ClientCacheHelper {
   // Private constructor so that only ClientCache can instantiate this class.
   ClientCacheHelper(uint32_t num_tries, uint64_t wait_ms, int32_t send_timeout_ms,
       int32_t recv_timeout_ms)
-      : num_tries_(num_tries),
+      : cache_lock_("ClientCache::cache", LockTracker::global()),
+        client_map_lock_("ClientCache::client_map", LockTracker::global()),
+        num_tries_(num_tries),
         wait_ms_(wait_ms),
         send_timeout_ms_(send_timeout_ms),
         recv_timeout_ms_(recv_timeout_ms),
@@ -130,14 +133,18 @@ class ClientCacheHelper {
   // until they are released for the first time.
   struct PerHostCache {
     // Protects clients.
-    boost::mutex lock;
+    Lock lock;
 
     // List of client keys for this entry's host.
     std::list<ClientKey> clients;
+
+    PerHostCache() : lock("ClientCache::PerHostCache") {
+    }
+
   };
 
   // Protects per_host_caches_
-  boost::mutex cache_lock_;
+  Lock cache_lock_;
 
   // Map from an address to a PerHostCache containing a list of keys that have entries in
   // client_map_ for that host. The value type is wrapped in a shared_ptr so that the copy
@@ -147,7 +154,7 @@ class ClientCacheHelper {
   PerHostCacheMap per_host_caches_;
 
   // Protects client_map_.
-  boost::mutex client_map_lock_;
+  Lock client_map_lock_;
 
   // Map from client key back to its associated ThriftClientImpl transport. This is where
   // all the clients are actually stored, and client instances are owned by this class and

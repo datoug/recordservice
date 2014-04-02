@@ -76,7 +76,7 @@ void MetricGroup::CMCompatibleCallback(const Webserver::ArgumentMap& args,
   // If the request has a 'metric' argument, search all top-level metrics for that metric
   // only. Otherwise, return document with list of all metrics at the top level.
   Webserver::ArgumentMap::const_iterator metric_name = args.find("metric");
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   if (metric_name != args.end()) {
     MetricMap::const_iterator metric = metric_map_.find(metric_name->second);
     if (metric != metric_map_.end()) {
@@ -104,7 +104,7 @@ void MetricGroup::CMCompatibleCallback(const Webserver::ArgumentMap& args,
 void MetricGroup::TemplateCallback(const Webserver::ArgumentMap& args,
     Document* document) {
   Webserver::ArgumentMap::const_iterator metric_group = args.find("metric_group");
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   // If no particular metric group is requested, render this metric group (and all its
   // children).
   if (metric_group == args.end()) {
@@ -168,7 +168,7 @@ void MetricGroup::ToJson(bool include_children, Document* document, Value* out_v
 }
 
 MetricGroup* MetricGroup::GetChildGroup(const std::string& name) {
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   ChildGroupMap::iterator it = children_.find(name);
   if (it != children_.end()) return it->second;
   MetricGroup* group = obj_pool_->Add(new MetricGroup(name));

@@ -20,12 +20,12 @@
 #include <string>
 #include <list>
 #include <boost/unordered_map.hpp>
-#include <boost/thread/mutex.hpp>
 
 #include "common/status.h"
 #include "statestore/scheduler.h"
 #include "statestore/statestore-subscriber.h"
 #include "statestore/statestore.h"
+#include "util/lock-tracker.h"
 #include "util/metrics.h"
 #include "scheduling/admission-controller.h"
 #include "gen-cpp/Types_types.h"  // for TNetworkAddress
@@ -79,7 +79,7 @@ class SimpleScheduler : public Scheduler {
   virtual void GetAllKnownBackends(BackendList* backends);
 
   virtual bool HasLocalBackend(const TNetworkAddress& data_location) {
-    boost::lock_guard<boost::mutex> l(backend_map_lock_);
+    boost::lock_guard<Lock> l(backend_map_lock_);
     BackendMap::iterator entry = backend_map_.find(data_location.hostname);
     return (entry != backend_map_.end() && entry->second.size() > 0);
   }
@@ -97,7 +97,7 @@ class SimpleScheduler : public Scheduler {
   // Protects access to backend_map_ and backend_ip_map_, which might otherwise be updated
   // asynchronously with respect to reads. Also protects the locality
   // counters, which are updated in GetBackends.
-  boost::mutex backend_map_lock_;
+  Lock backend_map_lock_;
 
   // Map from a datanode's IP address to a list of backend addresses running on that node.
   typedef boost::unordered_map<std::string, std::list<TBackendDescriptor> > BackendMap;

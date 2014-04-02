@@ -45,6 +45,7 @@ class CgroupsManager;
 class ImpalaServer;
 class RequestPoolService;
 class Frontend;
+class LockTracker;
 
 // Execution environment for queries/plan fragments.
 // Contains all required global structures, and handles to
@@ -141,6 +142,7 @@ class ExecEnv {
   const std::string server_id_;
 
   // Leave protected so that subclasses can override
+  boost::scoped_ptr<LockTracker> lock_tracker_;
   boost::scoped_ptr<DataStreamMgr> stream_mgr_;
   boost::scoped_ptr<ResourceBroker> resource_broker_;
   boost::scoped_ptr<Scheduler> scheduler_;

@@ -53,10 +53,10 @@ RecordServiceScanNode::RecordServiceScanNode(
     ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
   : ScanNode(pool, tnode, descs),
     tuple_id_(tnode.hdfs_scan_node.tuple_id),
+    lock_("RecordServiceScanNode"),
     done_(false),
     // TODO: this needs to be more complex to stop scanner threads when this
     // queue is full.
-    materialized_row_batches_(new RowBatchQueue(10)),
     num_active_scanners_(0) {
 }
 
@@ -67,6 +67,9 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   RETURN_IF_ERROR(ScanNode::Prepare(state));
   state_ = state;
+  state_->lock_tracker()->RegisterLock(&lock_);
+
+  materialized_row_batches_.reset(new RowBatchQueue(state, 10));
 
   DCHECK(scan_range_params_ != NULL)
       << "Must call SetScanRanges() before calling Prepare()";
@@ -215,7 +218,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
 
   Status status;
   {
-    unique_lock<mutex> l(lock_);
+    unique_lock<Lock> l(lock_);
     status = status_;
   }
   if (status.ok()) LOG_ROW_BATCH_ROWS(row_batch, state->logger());
@@ -225,7 +228,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
 void RecordServiceScanNode::ThreadTokenAvailableCb(
     ThreadResourceMgr::ResourcePool* pool) {
   while (true) {
-    unique_lock<mutex> lock(lock_);
+    unique_lock<Lock> lock(lock_);
     if (done_ || task_id_ >= tasks_.size()) {
       // We're either done or all tasks have been assigned a thread
       break;
@@ -269,7 +272,7 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
     if (status.ok()) status = ProcessTask(&client, task_id, per_thread_conjunct_ctxs);
 
     // Check status, and grab the next task id.
-    unique_lock<mutex> l(lock_);
+    unique_lock<Lock> l(lock_);
     // Check for errors.
     if (UNLIKELY(!status.ok())) {
       if (status_.ok()) {
@@ -460,7 +463,7 @@ Status RecordServiceScanNode::ProcessTask(
 void RecordServiceScanNode::Close(RuntimeState* state) {
   if (is_closed()) return;
   if (!done_) {
-    unique_lock<mutex> l(lock_);
+    unique_lock<Lock> l(lock_);
     done_ = true;
     materialized_row_batches_->Shutdown();
   }

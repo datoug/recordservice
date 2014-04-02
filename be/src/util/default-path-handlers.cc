@@ -25,6 +25,7 @@
 #include "common/logging.h"
 #include "runtime/mem-tracker.h"
 #include "util/debug-util.h"
+#include "util/lock-tracker.h"
 #include "util/pprof-path-handlers.h"
 #include "util/webserver.h"
 
@@ -108,13 +109,26 @@ void MemUsageHandler(MemTracker* mem_tracker, const Webserver::ArgumentMap& args
   }
 }
 
+// Registered to handle "/locks", and prints out lock contention statistics.
+void LockTrackerHandler(LockTracker* lock_tracker, const Webserver::ArgumentMap& args,
+    Document* document) {
+  DCHECK(lock_tracker != NULL);
+  Value v(lock_tracker->ToString().c_str(), document->GetAllocator());
+  document->AddMember("contention", v, document->GetAllocator());
+}
+
 void impala::AddDefaultUrlCallbacks(
-    Webserver* webserver, MemTracker* process_mem_tracker) {
+    Webserver* webserver, MemTracker* process_mem_tracker, LockTracker* lock_tracker) {
   webserver->RegisterUrlCallback("/logs", "logs.tmpl", LogsHandler);
   webserver->RegisterUrlCallback("/varz", "common-pre.tmpl", FlagsHandler);
+
   if (process_mem_tracker != NULL) {
     webserver->RegisterUrlCallback("/memz","memz.tmpl",
         bind<void>(&MemUsageHandler, process_mem_tracker, _1, _2));
+  }
+  if (lock_tracker != NULL) {
+    webserver->RegisterUrlCallback("/locks", "locks.tmpl",
+        bind<void>(&LockTrackerHandler, lock_tracker, _1, _2));
   }
 
 #ifndef ADDRESS_SANITIZER

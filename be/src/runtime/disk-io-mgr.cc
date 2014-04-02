@@ -19,6 +19,9 @@
 #include <gutil/strings/substitute.h>
 #include <boost/algorithm/string.hpp>
 
+#include "runtime/exec-env.h"
+#include "util/lock-tracker.h"
+
 DECLARE_bool(disable_mem_pools);
 
 using namespace boost;
@@ -68,19 +71,22 @@ const int DiskIoMgr::DEFAULT_QUEUE_CAPACITY = 2;
 // All functions on this object are thread safe
 class DiskIoMgr::RequestContextCache {
  public:
-  RequestContextCache(DiskIoMgr* io_mgr) : io_mgr_(io_mgr) {}
+  RequestContextCache(DiskIoMgr* io_mgr)
+    : io_mgr_(io_mgr),
+      lock_("DiskIoMgr::RequestContextCache", LockTracker::global()) {
+  }
 
   // Returns a context to the cache.  This object can now be reused.
   void ReturnContext(RequestContext* reader) {
     DCHECK(reader->state_ != RequestContext::Inactive);
     reader->state_ = RequestContext::Inactive;
-    lock_guard<mutex> l(lock_);
+    lock_guard<SpinLock> l(lock_);
     inactive_contexts_.push_back(reader);
   }
 
   // Returns a new RequestContext object.  Allocates a new object if necessary.
   RequestContext* GetNewContext() {
-    lock_guard<mutex> l(lock_);
+    lock_guard<SpinLock> l(lock_);
     if (!inactive_contexts_.empty()) {
       RequestContext* reader = inactive_contexts_.front();
       inactive_contexts_.pop_front();
@@ -119,7 +125,7 @@ class DiskIoMgr::RequestContextCache {
   DiskIoMgr* io_mgr_;
 
   // lock to protect all members below
-  mutex lock_;
+  SpinLock lock_;
 
   // List of all request contexts created.  Used for debugging
   list<RequestContext*> all_contexts_;
@@ -129,11 +135,11 @@ class DiskIoMgr::RequestContextCache {
 };
 
 string DiskIoMgr::RequestContextCache::DebugString() {
-  lock_guard<mutex> l(lock_);
+  lock_guard<SpinLock> l(lock_);
   stringstream ss;
   for (list<RequestContext*>::iterator it = all_contexts_.begin();
       it != all_contexts_.end(); ++it) {
-    unique_lock<mutex> lock((*it)->lock_);
+    unique_lock<Lock> lock((*it)->lock_);
     ss << (*it)->DebugString() << endl;
   }
   return ss.str();
@@ -145,7 +151,7 @@ string DiskIoMgr::DebugString() {
 
   ss << "Disks: " << endl;
   for (int i = 0; i < disk_queues_.size(); ++i) {
-    unique_lock<mutex> lock(disk_queues_[i]->lock);
+    unique_lock<SpinLock> lock(disk_queues_[i]->lock);
     ss << "  " << (void*) disk_queues_[i] << ":" ;
     if (!disk_queues_[i]->request_contexts.empty()) {
       ss << " Readers: ";
@@ -223,7 +229,8 @@ DiskIoMgr::DiskIoMgr() :
     cached_read_options_(NULL),
     shut_down_(false),
     total_bytes_read_counter_(TUnit::BYTES),
-    read_timer_(TUnit::TIME_NS) {
+    read_timer_(TUnit::TIME_NS),
+    free_buffers_lock_("DiskIoMgr::FreeBuffers") {
   int64_t max_buffer_size_scaled = BitUtil::Ceil(max_buffer_size_, min_buffer_size_);
   free_buffers_.resize(BitUtil::Log2(max_buffer_size_scaled) + 1);
   int num_local_disks = FLAGS_num_disks == 0 ? DiskInfo::num_disks() : FLAGS_num_disks;
@@ -239,7 +246,8 @@ DiskIoMgr::DiskIoMgr(int num_local_disks, int threads_per_disk, int min_buffer_s
     cached_read_options_(NULL),
     shut_down_(false),
     total_bytes_read_counter_(TUnit::BYTES),
-    read_timer_(TUnit::TIME_NS) {
+    read_timer_(TUnit::TIME_NS),
+    free_buffers_lock_("DiskIoMgr::FreeBuffers", LockTracker::global()) {
   int64_t max_buffer_size_scaled = BitUtil::Ceil(max_buffer_size_, min_buffer_size_);
   free_buffers_.resize(BitUtil::Log2(max_buffer_size_scaled) + 1);
   if (num_local_disks == 0) num_local_disks = DiskInfo::num_disks();
@@ -256,9 +264,9 @@ DiskIoMgr::~DiskIoMgr() {
       // This lock is necessary to properly use the condition var to notify
       // the disk worker threads.  The readers also grab this lock so updates
       // to shut_down_ are protected.
-      unique_lock<mutex> disk_lock(disk_queues_[i]->lock);
+      unique_lock<SpinLock> disk_lock(disk_queues_[i]->lock);
     }
-    disk_queues_[i]->work_available.notify_all();
+    disk_queues_[i]->work_available.NotifyAll();
   }
   disk_thread_group_.JoinAll();
 
@@ -334,10 +342,10 @@ Status DiskIoMgr::Init(MemTracker* process_mem_tracker) {
 }
 
 Status DiskIoMgr::RegisterContext(RequestContext** request_context,
-    MemTracker* mem_tracker, const Logger* logger) {
+    MemTracker* mem_tracker, const Logger* logger, LockTracker* lock_tracker) {
   DCHECK(request_context_cache_.get() != NULL) << "Must call Init() first.";
   *request_context = request_context_cache_->GetNewContext();
-  (*request_context)->Reset(mem_tracker, logger);
+  (*request_context)->Reset(mem_tracker, logger, lock_tracker);
   return Status::OK;
 }
 
@@ -346,7 +354,7 @@ void DiskIoMgr::UnregisterContext(RequestContext* reader) {
   CancelContext(reader, true);
 
   // All the disks are done with clean, validate nothing is leaking.
-  unique_lock<mutex> reader_lock(reader->lock_);
+  unique_lock<Lock> reader_lock(reader->lock_);
   DCHECK_EQ(reader->num_buffers_in_reader_, 0) << endl << reader->DebugString();
   DCHECK_EQ(reader->num_used_buffers_, 0) << endl << reader->DebugString();
 
@@ -378,10 +386,10 @@ void DiskIoMgr::CancelContext(RequestContext* context, bool wait_for_disks_compl
   context->Cancel(Status::CANCELLED);
 
   if (wait_for_disks_completion) {
-    unique_lock<mutex> lock(context->lock_);
+    unique_lock<Lock> lock(context->lock_);
     DCHECK(context->Validate()) << endl << context->DebugString();
     while (context->num_disks_with_ranges_ > 0) {
-      context->disks_complete_cond_var_.wait(lock);
+      context->disks_complete_cond_var_.Wait(&lock);
     }
   }
 }
@@ -409,7 +417,7 @@ int64_t DiskIoMgr::queue_size(RequestContext* reader) const {
 }
 
 Status DiskIoMgr::context_status(RequestContext* context) const {
-  unique_lock<mutex> lock(context->lock_);
+  unique_lock<Lock> reader_lock(context->lock_);
   return context->status_;
 }
 
@@ -459,11 +467,11 @@ Status DiskIoMgr::AddScanRanges(RequestContext* reader,
   // Validate and initialize all ranges
   for (int i = 0; i < ranges.size(); ++i) {
     RETURN_IF_ERROR(ValidateScanRange(ranges[i]));
-    ranges[i]->InitInternal(this, reader);
+    ranges[i]->InitInternal(this, reader, reader->lock_tracker_);
   }
 
   // disks that this reader needs to be scheduled on.
-  unique_lock<mutex> reader_lock(reader->lock_);
+  unique_lock<Lock> reader_lock(reader->lock_);
   DCHECK(reader->Validate()) << endl << reader->DebugString();
 
   if (reader->state_ == RequestContext::Cancelled) {
@@ -504,7 +512,7 @@ Status DiskIoMgr::GetNextRange(RequestContext* reader, ScanRange** range) {
   *range = NULL;
   Status status = Status::OK;
 
-  unique_lock<mutex> reader_lock(reader->lock_);
+  unique_lock<Lock> reader_lock(reader->lock_);
   DCHECK(reader->Validate()) << endl << reader->DebugString();
 
   while (true) {
@@ -536,7 +544,7 @@ Status DiskIoMgr::GetNextRange(RequestContext* reader, ScanRange** range) {
     }
 
     if (reader->ready_to_start_ranges_.empty()) {
-      reader->ready_to_start_ranges_cv_.wait(reader_lock);
+      reader->ready_to_start_ranges_cv_.Wait(&reader_lock);
     } else {
       *range = reader->ready_to_start_ranges_.Dequeue();
       DCHECK_NOTNULL(*range);
@@ -601,7 +609,7 @@ void DiskIoMgr::ReturnBuffer(BufferDescriptor* buffer_desc) {
 
 void DiskIoMgr::ReturnBufferDesc(BufferDescriptor* desc) {
   DCHECK(desc != NULL);
-  unique_lock<mutex> lock(free_buffers_lock_);
+  lock_guard<SpinLock> l(free_buffers_lock_);
   DCHECK(find(free_buffer_descs_.begin(), free_buffer_descs_.end(), desc)
          == free_buffer_descs_.end());
   free_buffer_descs_.push_back(desc);
@@ -611,7 +619,7 @@ DiskIoMgr::BufferDescriptor* DiskIoMgr::GetBufferDesc(
     RequestContext* reader, ScanRange* range, char* buffer, int64_t buffer_size) {
   BufferDescriptor* buffer_desc;
   {
-    unique_lock<mutex> lock(free_buffers_lock_);
+    lock_guard<SpinLock> l(free_buffers_lock_);
     if (free_buffer_descs_.empty()) {
       buffer_desc = pool_.Add(new BufferDescriptor(this));
     } else {
@@ -633,7 +641,7 @@ char* DiskIoMgr::GetFreeBuffer(int64_t* buffer_size) {
   // convert to bytes
   *buffer_size = (1 << idx) * min_buffer_size_;
 
-  unique_lock<mutex> lock(free_buffers_lock_);
+  lock_guard<SpinLock> l(free_buffers_lock_);
   char* buffer = NULL;
   if (free_buffers_[idx].empty()) {
     ++num_allocated_buffers_;
@@ -659,7 +667,7 @@ char* DiskIoMgr::GetFreeBuffer(int64_t* buffer_size) {
 }
 
 void DiskIoMgr::GcIoBuffers() {
-  unique_lock<mutex> lock(free_buffers_lock_);
+  lock_guard<SpinLock> l(free_buffers_lock_);
   int buffers_freed = 0;
   int bytes_freed = 0;
   for (int idx = 0; idx < free_buffers_.size(); ++idx) {
@@ -699,7 +707,7 @@ void DiskIoMgr::ReturnFreeBuffer(char* buffer, int64_t buffer_size) {
   DCHECK_EQ(BitUtil::Ceil(buffer_size, min_buffer_size_) & ~(1 << idx), 0)
       << "buffer_size_ / min_buffer_size_ should be power of 2, got buffer_size = "
       << buffer_size << ", min_buffer_size_ = " << min_buffer_size_;
-  unique_lock<mutex> lock(free_buffers_lock_);
+  lock_guard<SpinLock> l(free_buffers_lock_);
   if (!FLAGS_disable_mem_pools && free_buffers_[idx].size() < FLAGS_max_free_io_buffers) {
     free_buffers_[idx].push_back(buffer);
     if (ImpaladMetrics::IO_MGR_NUM_UNUSED_BUFFERS != NULL) {
@@ -737,11 +745,11 @@ bool DiskIoMgr::GetNextRequestRange(DiskQueue* disk_queue, RequestRange** range,
     *request_context = NULL;
     RequestContext::PerDiskState* request_disk_state = NULL;
     {
-      unique_lock<mutex> disk_lock(disk_queue->lock);
+      unique_lock<SpinLock> disk_lock(disk_queue->lock);
 
       while (!shut_down_ && disk_queue->request_contexts.empty()) {
         // wait if there are no readers on the queue
-        disk_queue->work_available.wait(disk_lock);
+        disk_queue->work_available.Wait(&disk_lock);
       }
       if (shut_down_) break;
       DCHECK(!disk_queue->request_contexts.empty());
@@ -775,7 +783,7 @@ bool DiskIoMgr::GetNextRequestRange(DiskQueue* disk_queue, RequestRange** range,
       (*request_context)->Cancel(Status::MEM_LIMIT_EXCEEDED);
     }
 
-    unique_lock<mutex> request_lock((*request_context)->lock_);
+    unique_lock<Lock> reader_lock((*request_context)->lock_);
     VLOG_FILE << "Disk (id=" << disk_id << ") reading for "
               << (*request_context)->DebugString();
 
@@ -802,9 +810,9 @@ bool DiskIoMgr::GetNextRequestRange(DiskQueue* disk_queue, RequestRange** range,
         // All the ranges have been started, notify everyone blocked on GetNextRange.
         // Only one of them will get work so make sure to return NULL to the other
         // caller threads.
-        (*request_context)->ready_to_start_ranges_cv_.notify_all();
+        (*request_context)->ready_to_start_ranges_cv_.NotifyAll();
       } else {
-        (*request_context)->ready_to_start_ranges_cv_.notify_one();
+        (*request_context)->ready_to_start_ranges_cv_.NotifyOne();
       }
     }
 
@@ -851,7 +859,7 @@ void DiskIoMgr::HandleWriteFinished(RequestContext* writer, WriteRange* write_ra
   // The status of the write does not affect the status of the writer context.
   write_range->callback_(write_status);
   {
-    unique_lock<mutex> writer_lock(writer->lock_);
+    unique_lock<Lock> writer_lock(writer->lock_);
     DCHECK(writer->Validate()) << endl << writer->DebugString();
     RequestContext::PerDiskState& state = writer->disk_states_[write_range->disk_id_];
     if (writer->state_ == RequestContext::Cancelled) {
@@ -865,7 +873,7 @@ void DiskIoMgr::HandleWriteFinished(RequestContext* writer, WriteRange* write_ra
 
 void DiskIoMgr::HandleReadFinished(DiskQueue* disk_queue, RequestContext* reader,
     BufferDescriptor* buffer) {
-  unique_lock<mutex> reader_lock(reader->lock_);
+  unique_lock<Lock> reader_lock(reader->lock_);
 
   RequestContext::PerDiskState& state = reader->disk_states_[disk_queue->disk_id];
   DCHECK(reader->Validate()) << endl << reader->DebugString();
@@ -969,7 +977,7 @@ void DiskIoMgr::ReadRange(DiskQueue* disk_queue, RequestContext* reader,
 
   if (!enough_memory) {
     RequestContext::PerDiskState& state = reader->disk_states_[disk_queue->disk_id];
-    unique_lock<mutex> reader_lock(reader->lock_);
+    unique_lock<Lock> reader_lock(reader->lock_);
 
     // Just grabbed the reader lock, check for cancellation.
     if (reader->state_ == RequestContext::Cancelled) {
@@ -1102,7 +1110,7 @@ int DiskIoMgr::free_buffers_idx(int64_t buffer_size) {
 
 Status DiskIoMgr::AddWriteRange(RequestContext* writer, WriteRange* write_range) {
   DCHECK_LE(write_range->len(), max_buffer_size_);
-  unique_lock<mutex> writer_lock(writer->lock_);
+  unique_lock<Lock> writer_lock(writer->lock_);
 
   if (writer->state_ == RequestContext::Cancelled) {
     DCHECK(!writer->status_.ok());

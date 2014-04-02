@@ -55,7 +55,7 @@ class TRowBatch;
 // per-query memory limits.
 class DataStreamMgr {
  public:
-  DataStreamMgr() {}
+  DataStreamMgr();
 
   // Create a receiver for a specific fragment_instance_id/node_id destination;
   // If is_merging is true, the receiver maintains a separate queue of incoming row
@@ -94,7 +94,7 @@ class DataStreamMgr {
   friend class DataStreamRecvr;
 
   // protects all fields below
-  boost::mutex lock_;
+  SpinLock lock_;
 
   // map from hash value of fragment instance id/node id pair to stream receivers;
   // Ownership of the stream revcr is shared between this instance and the caller of

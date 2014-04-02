@@ -28,9 +28,9 @@
 #include "common/atomic.h"
 #include "util/debug-util.h"
 #include "util/internal-queue.h"
+#include "util/locks.h"
 #include "util/metrics.h"
 #include "util/runtime-profile.h"
-#include "util/spinlock.h"
 
 #include "gen-cpp/Types_types.h" // for TUniqueId
 

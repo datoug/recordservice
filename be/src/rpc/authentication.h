@@ -25,7 +25,7 @@
 #include "sasl/sasl.h"
 #include "transport/TSaslServerTransport.h"
 #include "transport/TSasl.h"
-#include "util/spinlock.h"
+#include "util/locks.h"
 
 using namespace ::apache::thrift::transport;
 

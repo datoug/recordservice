@@ -53,7 +53,7 @@ Status FragmentMgr::ExecPlanFragment(const TExecPlanFragmentParams& exec_params)
   RETURN_IF_ERROR(exec_state->Prepare(exec_params));
 
   {
-    lock_guard<mutex> l(fragment_exec_state_map_lock_);
+    lock_guard<Lock> l(fragment_exec_state_map_lock_);
     // register exec_state before starting exec thread
     fragment_exec_state_map_.insert(
         make_pair(exec_params.fragment_instance_ctx.fragment_instance_id, exec_state));
@@ -78,7 +78,7 @@ void FragmentMgr::FragmentExecThread(FragmentExecState* exec_state) {
   // from the map.
   shared_ptr<FragmentExecState> exec_state_reference;
   {
-    lock_guard<mutex> l(fragment_exec_state_map_lock_);
+    lock_guard<Lock> l(fragment_exec_state_map_lock_);
     FragmentExecStateMap::iterator i =
         fragment_exec_state_map_.find(exec_state->fragment_instance_id());
     if (i != fragment_exec_state_map_.end()) {
@@ -105,7 +105,7 @@ void FragmentMgr::FragmentExecThread(FragmentExecState* exec_state) {
 
 shared_ptr<FragmentMgr::FragmentExecState> FragmentMgr::GetFragmentExecState(
     const TUniqueId& fragment_instance_id) {
-  lock_guard<mutex> l(fragment_exec_state_map_lock_);
+  lock_guard<Lock> l(fragment_exec_state_map_lock_);
   FragmentExecStateMap::iterator i = fragment_exec_state_map_.find(fragment_instance_id);
   if (i == fragment_exec_state_map_.end()) {
     return shared_ptr<FragmentExecState>();

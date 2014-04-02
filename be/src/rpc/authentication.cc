@@ -1114,26 +1114,26 @@ AuthProvider* AuthManager::GetNoAuthProvider() {
 }
 
 void AuthManager::AddDigestMd5Connection(sasl_conn_t* conn) {
-  ScopedSpinLock l(&digest_connection_lock_);
+  lock_guard<SpinLock> l(digest_connection_lock_);
   DCHECK(digest_connections_.find(conn) == digest_connections_.end());
   digest_connections_[conn] = "";
 }
 
 void AuthManager::RemoveDigestMd5Connection(sasl_conn_t* conn) {
-  ScopedSpinLock l(&digest_connection_lock_);
+  lock_guard<SpinLock> l(digest_connection_lock_);
   DCHECK(digest_connections_.find(conn) == digest_connections_.end());
   digest_connections_.erase(conn);
 }
 
 void AuthManager::SetDigestMd5ConnectedUser(sasl_conn_t* conn, const string& user) {
-  ScopedSpinLock l(&digest_connection_lock_);
+  lock_guard<SpinLock> l(digest_connection_lock_);
   DCHECK(digest_connections_.find(conn) != digest_connections_.end());
   DCHECK_EQ(digest_connections_[conn], "");
   digest_connections_[conn] = user;
 }
 
 const string& AuthManager::GetDigestMd5ConnectedUser(sasl_conn_t* conn) {
-  ScopedSpinLock l(&digest_connection_lock_);
+  lock_guard<SpinLock> l(digest_connection_lock_);
   unordered_map<sasl_conn_t*, string>::const_iterator it =
       digest_connections_.find(conn);
   if (it == digest_connections_.end()) {

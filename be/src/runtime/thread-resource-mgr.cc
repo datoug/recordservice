@@ -31,7 +31,8 @@ using namespace std;
 // thrashing.
 DEFINE_int32(num_threads_per_core, 3, "Number of threads per core.");
 
-ThreadResourceMgr::ThreadResourceMgr(int threads_quota) {
+ThreadResourceMgr::ThreadResourceMgr(int threads_quota)
+  : lock_("ThreadResourceMgr", LockTracker::global()) {
   DCHECK_GE(threads_quota, 0);
   if (threads_quota == 0) {
     system_threads_quota_ = CpuInfo::num_cores() * FLAGS_num_threads_per_core;
@@ -41,7 +42,7 @@ ThreadResourceMgr::ThreadResourceMgr(int threads_quota) {
   per_pool_quota_ = 0;
 }
 
-ThreadResourceMgr::ResourcePool::ResourcePool(ThreadResourceMgr* parent) 
+ThreadResourceMgr::ResourcePool::ResourcePool(ThreadResourceMgr* parent)
   : parent_(parent) {
 }
 
@@ -51,14 +52,14 @@ void ThreadResourceMgr::ResourcePool::Reset() {
   thread_available_fn_ = NULL;
   max_quota_ = INT_MAX;
 }
-  
+
 void ThreadResourceMgr::ResourcePool::ReserveOptionalTokens(int num) {
   DCHECK_GE(num, 0);
   num_reserved_optional_threads_ = num;
 }
 
 ThreadResourceMgr::ResourcePool* ThreadResourceMgr::RegisterPool() {
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   ResourcePool* pool = NULL;
   if (free_pool_objs_.empty()) {
     pool = new ResourcePool(this);
@@ -79,7 +80,7 @@ ThreadResourceMgr::ResourcePool* ThreadResourceMgr::RegisterPool() {
 
 void ThreadResourceMgr::UnregisterPool(ResourcePool* pool) {
   DCHECK(pool != NULL);
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   DCHECK(pools_.find(pool) != pools_.end());
   pools_.erase(pool);
   free_pool_objs_.push_back(pool);
@@ -94,7 +95,7 @@ void ThreadResourceMgr::ResourcePool::SetThreadAvailableCb(ThreadAvailableCb fn)
 
 void ThreadResourceMgr::UpdatePoolQuotas(ResourcePool* new_pool) {
   if (pools_.empty()) return;
-  per_pool_quota_ = 
+  per_pool_quota_ =
       ceil(static_cast<double>(system_threads_quota_) / pools_.size());
   for (Pools::iterator it = pools_.begin(); it != pools_.end(); ++it) {
     ResourcePool* pool = *it;

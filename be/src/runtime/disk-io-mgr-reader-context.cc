@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "runtime/disk-io-mgr-internal.h"
+#include "util/lock-tracker.h"
 
 #include "common/query-logging.h"
 
@@ -26,7 +27,7 @@ void DiskIoMgr::RequestContext::Cancel(const Status& status) {
   // Callbacks are collected in this vector and invoked while no lock is held.
   vector<WriteRange::WriteDoneCallback> write_callbacks;
   {
-    lock_guard<mutex> lock(lock_);
+    lock_guard<Lock> reader_lock(lock_);
     DCHECK(Validate()) << endl << DebugString();
 
     // Already being cancelled
@@ -87,7 +88,7 @@ void DiskIoMgr::RequestContext::Cancel(const Status& status) {
 
   // Signal reader and unblock the GetNext/Read thread.  That read will fail with
   // a cancelled status.
-  ready_to_start_ranges_cv_.notify_all();
+  ready_to_start_ranges_cv_.NotifyAll();
 }
 
 void DiskIoMgr::RequestContext::AddRequestRange(
@@ -134,12 +135,17 @@ DiskIoMgr::RequestContext::RequestContext(DiskIoMgr* parent, int num_disks)
     read_timer_(NULL),
     active_read_thread_counter_(NULL),
     disks_accessed_bitmap_(NULL),
+    lock_("ReaderContext"),
     state_(Inactive),
+    cached_ranges_("RequestContext::CachedRanges"),
+    ready_to_start_ranges_("RequestContext::ReadyToStartRanges"),
+    blocked_ranges_("RequestContext::BlockedRanges"),
     disk_states_(num_disks) {
 }
 
 // Resets this object.
-void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger) {
+void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger,
+    LockTracker* lock_tracker) {
   DCHECK_EQ(state_, Inactive);
   status_ = Status::OK;
 
@@ -151,6 +157,7 @@ void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger)
   state_ = Active;
   mem_tracker_ = tracker;
   logger_ = (logger == NULL ? Logger::NullLogger() : logger);
+  lock_tracker_ = lock_tracker;
 
   num_unstarted_scan_ranges_ = 0;
   num_disks_with_ranges_ = 0;
@@ -171,7 +178,15 @@ void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger)
   DCHECK(cached_ranges_.empty());
 
   for (int i = 0; i < disk_states_.size(); ++i) {
-    disk_states_[i].Reset();
+    disk_states_[i].Reset(lock_tracker);
+  }
+
+  lock_.ClearCounters();
+  if (lock_tracker != NULL) {
+    lock_tracker->RegisterLock(&lock_);
+    cached_ranges_.RegisterLockTracker(lock_tracker_);
+    ready_to_start_ranges_.RegisterLockTracker(lock_tracker_);
+    blocked_ranges_.RegisterLockTracker(lock_tracker_);
   }
 }
 

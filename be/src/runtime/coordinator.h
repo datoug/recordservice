@@ -171,7 +171,7 @@ class Coordinator {
   // Returns the exec summary. The exec summary lock must already have been taken.
   // The caller must not block while holding the lock.
   const TExecSummary& exec_summary() const {
-    exec_summary_lock_.DCheckLocked();
+    DCHECK(exec_summary_lock_.is_locked());
     return exec_summary_;
   }
 

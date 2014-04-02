@@ -22,13 +22,13 @@
 #include <boost/foreach.hpp>
 #include <boost/function.hpp>
 #include <boost/scoped_ptr.hpp>
-#include <boost/thread/mutex.hpp>
 
 #include "common/logging.h"
 #include "common/status.h"
 #include "common/object-pool.h"
 #include "util/debug-util.h"
 #include "util/json-util.h"
+#include "util/lock-tracker.h"
 #include "util/pretty-printer.h"
 #include "util/webserver.h"
 
@@ -104,7 +104,8 @@ class SimpleMetric : public Metric {
  public:
   SimpleMetric(const std::string& key, const TUnit::type unit,
       const T& initial_value, const std::string& description = "")
-      : Metric(key, description), unit_(unit), value_(initial_value)
+    : Metric(key, description), unit_(unit), lock_("Metric", LockTracker::global()),
+      value_(initial_value)
   { }
 
   SimpleMetric(const std::string& key, const TUnit::type unit,
@@ -115,14 +116,14 @@ class SimpleMetric : public Metric {
 
   // Returns the current value, updating it if necessary. Thread-safe.
   T value() {
-    boost::lock_guard<boost::mutex> l(lock_);
+    boost::lock_guard<Lock> l(lock_);
     CalculateValue();
     return value_;
   }
 
   // Sets the current value. Thread-safe.
   void set_value(const T& value) {
-    boost::lock_guard<boost::mutex> l(lock_);
+    boost::lock_guard<Lock> l(lock_);
     value_ = value;
   }
 
@@ -132,7 +133,7 @@ class SimpleMetric : public Metric {
         << "Can't change value of PROPERTY metric: " << key();
     DCHECK(kind() != TMetricKind::COUNTER || delta >= 0)
         << "Can't decrement value of COUNTER metric: " << key();
-    boost::lock_guard<boost::mutex> l(lock_);
+    boost::lock_guard<Lock> l(lock_);
     value_ += delta;
   }
 
@@ -177,7 +178,7 @@ class SimpleMetric : public Metric {
   const TUnit::type unit_;
 
   // Guards access to value_
-  boost::mutex lock_;
+  Lock lock_;
 
   // The current value of the metric
   T value_;
@@ -208,7 +209,7 @@ class MetricGroup {
   // M must be a subclass of Metric.
   template <typename M>
   M* RegisterMetric(M* metric) {
-    boost::lock_guard<boost::mutex> l(lock_);
+    boost::lock_guard<Lock> l(lock_);
     DCHECK(!metric->key_.empty());
     DCHECK(metric_map_.find(metric->key_) == metric_map_.end());
 
@@ -250,7 +251,7 @@ class MetricGroup {
   // Used for testing only.
   template <typename M>
   M* FindMetricForTesting(const std::string& key) {
-    boost::lock_guard<boost::mutex> l(lock_);
+    boost::lock_guard<Lock> l(lock_);
     std::stack<MetricGroup*> groups;
     groups.push(this);
     while (!groups.empty()) {
@@ -289,7 +290,7 @@ class MetricGroup {
   std::string name_;
 
   // Guards metric_map_ and children_
-  boost::mutex lock_;
+  Lock lock_;
 
   // Contains all Metric objects, indexed by key
   typedef std::map<std::string, Metric*> MetricMap;

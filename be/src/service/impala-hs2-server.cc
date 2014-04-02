@@ -564,7 +564,7 @@ void ImpalaServer::OpenSession(TOpenSessionResp& return_val,
   // Generate session ID and the secret
   TUniqueId session_id;
   {
-    lock_guard<mutex> l(uuid_lock_);
+    lock_guard<Lock> l(uuid_lock_);
     uuid secret = uuid_generator_();
     uuid session_uuid = uuid_generator_();
     return_val.sessionHandle.sessionId.guid.assign(
@@ -621,12 +621,12 @@ void ImpalaServer::OpenSession(TOpenSessionResp& return_val,
 
   // Put the session state in session_state_map_
   {
-    lock_guard<mutex> l(session_state_map_lock_);
+    lock_guard<Lock> l(session_state_map_lock_);
     session_state_map_.insert(make_pair(session_id, state));
   }
 
   {
-    lock_guard<mutex> l(connection_to_sessions_map_lock_);
+    lock_guard<Lock> l(connection_to_sessions_map_lock_);
     const TUniqueId& connection_id = ThriftServer::GetThreadConnectionId();
     connection_to_sessions_map_[connection_id].push_back(session_id);
   }
@@ -899,7 +899,7 @@ void ImpalaServer::GetOperationStatus(TGetOperationStatusResp& return_val,
       request.operationHandle.operationId, &query_id, &secret), SQLSTATE_GENERAL_ERROR);
   VLOG_ROW << "GetOperationStatus(): query_id=" << PrintId(query_id);
 
-  lock_guard<mutex> l(query_exec_state_map_lock_);
+  lock_guard<Lock> l(query_exec_state_map_lock_);
   QueryExecStateMap::iterator entry = query_exec_state_map_.find(query_id);
   if (entry != query_exec_state_map_.end()) {
     QueryState::type query_state = entry->second->query_state();

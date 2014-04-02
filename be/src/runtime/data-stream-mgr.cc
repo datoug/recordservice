@@ -35,6 +35,9 @@ using namespace apache::thrift;
 
 namespace impala {
 
+DataStreamMgr::DataStreamMgr() : lock_("DataStreamMgr", LockTracker::global()) {
+}
+
 inline uint32_t DataStreamMgr::GetHashValue(
     const TUniqueId& fragment_instance_id, PlanNodeId node_id) {
   uint32_t value = RawValue::GetHashValue(&fragment_instance_id.lo, TYPE_BIGINT, 0);
@@ -55,7 +58,7 @@ shared_ptr<DataStreamRecvr> DataStreamMgr::CreateRecvr(RuntimeState* state,
           fragment_instance_id, dest_node_id, num_senders, is_merging, buffer_size,
           profile));
   size_t hash_value = GetHashValue(fragment_instance_id, dest_node_id);
-  lock_guard<mutex> l(lock_);
+  lock_guard<SpinLock> l(lock_);
   fragment_stream_set_.insert(make_pair(fragment_instance_id, dest_node_id));
   receiver_map_.insert(make_pair(hash_value, recvr));
   return recvr;
@@ -128,7 +131,7 @@ Status DataStreamMgr::DeregisterRecvr(
   VLOG_QUERY << "DeregisterRecvr(): fragment_instance_id=" << fragment_instance_id
              << ", node=" << node_id;
   size_t hash_value = GetHashValue(fragment_instance_id, node_id);
-  lock_guard<mutex> l(lock_);
+  lock_guard<SpinLock> l(lock_);
   pair<StreamMap::iterator, StreamMap::iterator> range =
       receiver_map_.equal_range(hash_value);
   while (range.first != range.second) {
@@ -154,7 +157,7 @@ Status DataStreamMgr::DeregisterRecvr(
 
 void DataStreamMgr::Cancel(const TUniqueId& fragment_instance_id) {
   VLOG_QUERY << "cancelling all streams for fragment=" << fragment_instance_id;
-  lock_guard<mutex> l(lock_);
+  lock_guard<SpinLock> l(lock_);
   FragmentStreamSet::iterator i =
       fragment_stream_set_.lower_bound(make_pair(fragment_instance_id, 0));
   while (i != fragment_stream_set_.end() && i->first == fragment_instance_id) {

@@ -64,8 +64,9 @@ int ExecNode::GetNodeIdFromProfile(RuntimeProfile* p) {
   return p->metadata();
 }
 
-ExecNode::RowBatchQueue::RowBatchQueue(int max_batches) :
-    BlockingQueue<RowBatch*>(max_batches) {
+ExecNode::RowBatchQueue::RowBatchQueue(RuntimeState* state, int max_batches) :
+    BlockingQueue<RowBatch*>(max_batches, "RowBatchQueue") {
+  state->lock_tracker()->RegisterLock(&lock_);
 }
 
 ExecNode::RowBatchQueue::~RowBatchQueue() {
@@ -74,7 +75,7 @@ ExecNode::RowBatchQueue::~RowBatchQueue() {
 
 void ExecNode::RowBatchQueue::AddBatch(RowBatch* batch) {
   if (!BlockingPut(batch)) {
-    ScopedSpinLock l(&lock_);
+    lock_guard<Lock> guard(lock_);
     cleanup_queue_.push_back(batch);
   }
 }
@@ -94,7 +95,7 @@ int ExecNode::RowBatchQueue::Cleanup() {
     delete batch;
   }
 
-  ScopedSpinLock l(&lock_);
+  lock_guard<Lock> guard(lock_);
   for (list<RowBatch*>::iterator it = cleanup_queue_.begin();
       it != cleanup_queue_.end(); ++it) {
     num_io_buffers += (*it)->num_io_buffers();
@@ -180,7 +181,7 @@ void ExecNode::Close(RuntimeState* state) {
 }
 
 void ExecNode::AddRuntimeExecOption(const string& str) {
-  lock_guard<mutex> l(exec_options_lock_);
+  lock_guard<SpinLock> l(exec_options_lock_);
   if (runtime_exec_options_.empty()) {
     runtime_exec_options_ = str;
   } else {

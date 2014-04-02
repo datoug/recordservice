@@ -43,6 +43,8 @@ add_library(Util
   impalad-metrics.cc
   jni-util.cc
   llama-util.cc
+  locks.cc
+  lock-tracker.cc
   logging-support.cc
   mem-info.cc
   memory-metrics.cc

@@ -200,7 +200,7 @@ void ImpalaServer::QueryProfileEncodedUrlCallback(const Webserver::ArgumentMap& 
 
 void ImpalaServer::InflightQueryIdsUrlCallback(const Webserver::ArgumentMap& args,
     Document* document) {
-  lock_guard<mutex> l(query_exec_state_map_lock_);
+  lock_guard<Lock> l(query_exec_state_map_lock_);
   stringstream ss;
   BOOST_FOREACH(const QueryExecStateMap::value_type& exec_state, query_exec_state_map_) {
     ss << exec_state.second->query_id() << "\n";
@@ -268,7 +268,7 @@ void ImpalaServer::QueryStateUrlCallback(const Webserver::ArgumentMap& args,
     Document* document) {
   set<QueryStateRecord, QueryStateRecord> sorted_query_records;
   {
-    lock_guard<mutex> l(query_exec_state_map_lock_);
+    lock_guard<Lock> l(query_exec_state_map_lock_);
     BOOST_FOREACH(
         const QueryExecStateMap::value_type& exec_state, query_exec_state_map_) {
       // TODO: Do this in the browser so that sorts on other keys are possible.
@@ -288,7 +288,7 @@ void ImpalaServer::QueryStateUrlCallback(const Webserver::ArgumentMap& args,
 
   Value completed_queries(kArrayType);
   {
-    lock_guard<mutex> l(query_log_lock_);
+    lock_guard<Lock> l(query_log_lock_);
     BOOST_FOREACH(const QueryStateRecord& log_entry, query_log_) {
       Value record_json(kObjectType);
       QueryStateToJson(log_entry, &record_json, document);
@@ -301,7 +301,7 @@ void ImpalaServer::QueryStateUrlCallback(const Webserver::ArgumentMap& args,
 
   Value query_locations(kArrayType);
   {
-    lock_guard<mutex> l(query_locations_lock_);
+    lock_guard<Lock> l(query_locations_lock_);
     BOOST_FOREACH(const QueryLocations::value_type& location, query_locations_) {
       Value location_json(kObjectType);
       Value location_name(lexical_cast<string>(location.first).c_str(),
@@ -318,7 +318,7 @@ void ImpalaServer::QueryStateUrlCallback(const Webserver::ArgumentMap& args,
 
 void ImpalaServer::SessionsUrlCallback(const Webserver::ArgumentMap& args,
     Document* document) {
-  lock_guard<mutex> l(session_state_map_lock_);
+  lock_guard<Lock> l(session_state_map_lock_);
   Value sessions(kArrayType);
   BOOST_FOREACH(const SessionStateMap::value_type& session, session_state_map_) {
     shared_ptr<SessionState> state = session.second;
@@ -587,7 +587,7 @@ void ImpalaServer::QuerySummaryCallback(bool include_json_plan, bool include_sum
       stmt = exec_state->sql_stmt();
       plan = exec_state->exec_request().query_exec_request.query_plan;
       if (include_json_plan || include_summary) {
-        ScopedSpinLock lock(exec_state->coord()->GetExecSummaryLock());
+        lock_guard<SpinLock> lock(*exec_state->coord()->GetExecSummaryLock());
         summary = exec_state->coord()->exec_summary();
       }
       if (include_json_plan) {
@@ -597,7 +597,7 @@ void ImpalaServer::QuerySummaryCallback(bool include_json_plan, bool include_sum
   }
 
   if (!found) {
-    lock_guard<mutex> l(query_log_lock_);
+    lock_guard<Lock> l(query_log_lock_);
     QueryLogIndex::const_iterator query_record = query_log_index_.find(query_id);
     if (query_record == query_log_index_.end()) {
       const string& err = Substitute("Unknown query id: $0", PrintId(query_id));

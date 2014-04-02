@@ -16,11 +16,11 @@
 #define IMPALA_SERVICE_FRAGMENT_MGR_H
 
 #include <boost/shared_ptr.hpp>
-#include <boost/thread/mutex.hpp>
 #include <boost/unordered_map.hpp>
 
 #include "gen-cpp/ImpalaInternalService.h"
 #include "common/status.h"
+#include "util/lock-tracker.h"
 
 namespace impala {
 
@@ -37,6 +37,10 @@ namespace impala {
 // for ExecPlanFragment()'s return value.
 class FragmentMgr {
  public:
+  FragmentMgr()
+    : fragment_exec_state_map_lock_("FragmentMgr", LockTracker::global()) {
+  }
+
   // Registers a new FragmentExecState, Prepare()'s it, and launches the thread that runs
   // FragmentExecThread() before returning. Returns OK if there was no error, otherwise
   // returns an error if the fragment is malformed (e.g. no sink), or if there is an error
@@ -60,7 +64,7 @@ class FragmentMgr {
   void FragmentExecThread(FragmentExecState* exec_state);
 
   // protects fragment_exec_state_map_
-  boost::mutex fragment_exec_state_map_lock_;
+  Lock fragment_exec_state_map_lock_;
 
   // map from fragment id to exec state; FragmentExecState is owned by us and
   // referenced as a shared_ptr to allow asynchronous calls to CancelPlanFragment()

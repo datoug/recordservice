@@ -90,6 +90,7 @@ HdfsScanNode::HdfsScanNode(ObjectPool* pool, const TPlanNode& tnode,
       initial_ranges_issued_(false),
       scanner_thread_bytes_required_(0),
       disks_accessed_bitmap_(TUnit::UNIT, 0),
+      lock_("HdfsScanNode"),
       done_(false),
       all_ranges_started_(false),
       counters_running_(false),
@@ -102,7 +103,6 @@ HdfsScanNode::HdfsScanNode(ObjectPool* pool, const TPlanNode& tnode,
     max_materialized_row_batches_ =
         10 * (DiskInfo::num_disks() + DiskIoMgr::REMOTE_NUM_DISKS);
   }
-  materialized_row_batches_.reset(new RowBatchQueue(max_materialized_row_batches_));
 }
 
 HdfsScanNode::~HdfsScanNode() {
@@ -201,7 +201,7 @@ Status HdfsScanNode::GetNextInternal(
   // The RowBatchQueue was shutdown either because all scan ranges are complete or a
   // scanner thread encountered an error.  Check status_ to distinguish those cases.
   *eos = true;
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   return status_;
 }
 
@@ -233,13 +233,13 @@ HdfsFileDesc* HdfsScanNode::GetFileDesc(const string& filename) {
 }
 
 void HdfsScanNode::SetFileMetadata(const string& filename, void* metadata) {
-  unique_lock<mutex> l(metadata_lock_);
+  lock_guard<SpinLock> l(metadata_lock_);
   DCHECK(per_file_metadata_.find(filename) == per_file_metadata_.end());
   per_file_metadata_[filename] = metadata;
 }
 
 void* HdfsScanNode::GetFileMetadata(const string& filename) {
-  unique_lock<mutex> l(metadata_lock_);
+  lock_guard<SpinLock> l(metadata_lock_);
   map<string, void*>::iterator it = per_file_metadata_.find(filename);
   if (it == per_file_metadata_.end()) return NULL;
   return it->second;
@@ -303,7 +303,7 @@ Tuple* HdfsScanNode::InitTemplateTuple(RuntimeState* state,
   // use internal memory.
   Tuple* template_tuple = InitEmptyTemplateTuple();
 
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   for (int i = 0; i < partition_key_slots_.size(); ++i) {
     const SlotDescriptor* slot_desc = partition_key_slots_[i];
     // Exprs guaranteed to be literals, so can safely be evaluated without a row context
@@ -316,7 +316,7 @@ Tuple* HdfsScanNode::InitTemplateTuple(RuntimeState* state,
 Tuple* HdfsScanNode::InitEmptyTemplateTuple() {
   Tuple* template_tuple = NULL;
   {
-    unique_lock<mutex> l(lock_);
+    unique_lock<Lock> l(lock_);
     template_tuple = Tuple::Create(tuple_desc_->byte_size(), scan_node_pool_.get());
   }
   memset(template_tuple, 0, tuple_desc_->byte_size());
@@ -324,7 +324,7 @@ Tuple* HdfsScanNode::InitEmptyTemplateTuple() {
 }
 
 void HdfsScanNode::TransferToScanNodePool(MemPool* pool) {
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   scan_node_pool_->AcquireData(pool, false);
 }
 
@@ -333,6 +333,10 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   QUERY_VLOG_FRAGMENT(runtime_state_->logger()) << "Node " << id() << " Prepare()";
   RETURN_IF_ERROR(ScanNode::Prepare(state));
+  state->lock_tracker()->RegisterLock(&lock_);
+
+  materialized_row_batches_.reset(
+      new RowBatchQueue(state, max_materialized_row_batches_));
 
   tuple_desc_ = state->desc_tbl().GetTupleDescriptor(tuple_id_);
   DCHECK(tuple_desc_ != NULL);
@@ -579,7 +583,7 @@ Status HdfsScanNode::Open(RuntimeState* state) {
   Expr::Open(conjunct_ctxs_, state);
 
   RETURN_IF_ERROR(runtime_state_->io_mgr()->RegisterContext(
-      &reader_context_, mem_tracker(), runtime_state_->logger()));
+      &reader_context_, mem_tracker(), runtime_state_->logger(), state->lock_tracker()));
 
   // Initialize HdfsScanNode specific counters
   read_timer_ = ADD_TIMER(runtime_profile(), TOTAL_HDFS_READ_TIMER);
@@ -786,7 +790,7 @@ void HdfsScanNode::ThreadTokenAvailableCb(ThreadResourceMgr::ResourcePool* pool)
     // all_ranges_started_ etc. a chance to grab the lock.
     // TODO: This still leans heavily on starvation-free locks, come up with a more
     // correct way to communicate between this method and ScannerThreadHelper
-    unique_lock<mutex> lock(lock_);
+    unique_lock<Lock> lock(lock_);
     // Cases 1, 2, 3.
     if (done_ || all_ranges_started_ ||
       active_scanner_thread_counter_.value() >= progress_.remaining()) {
@@ -837,7 +841,7 @@ void HdfsScanNode::ScannerThread() {
     if (!runtime_state_->is_record_service_request()) {
       // Check if we have enough resources (thread token and memory) to keep using
       // this thread.
-      unique_lock<mutex> l(lock_);
+      unique_lock<Lock> l(lock_);
       if (active_scanner_thread_counter_.value() > 1) {
         if (runtime_state_->resource_pool()->optional_exceeded() ||
             !EnoughMemoryForScannerThread(false)) {
@@ -911,7 +915,7 @@ void HdfsScanNode::ScannerThread() {
 
     if (!status.ok()) {
       {
-        unique_lock<mutex> l(lock_);
+        unique_lock<Lock> l(lock_);
         // If there was already an error, the main thread will do the cleanup
         if (!status_.ok()) break;
 
@@ -941,7 +945,7 @@ void HdfsScanNode::ScannerThread() {
     if (scan_range == NULL && num_unqueued_files == 0) {
       // TODO: Based on the usage pattern of all_ranges_started_, it looks like it is not
       // needed to acquire the lock in x86.
-      unique_lock<mutex> l(lock_);
+      unique_lock<Lock> l(lock_);
       // All ranges have been queued and GetNextRange() returned NULL. This means that
       // every range is either done or being processed by another thread.
       all_ranges_started_ = true;
@@ -976,7 +980,7 @@ void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
   progress_.Update(1);
 
   {
-    ScopedSpinLock l(&file_type_counts_lock_);
+    lock_guard<SpinLock> l(file_type_counts_lock_);
     for (int i = 0; i < compression_types.size(); ++i) {
       ++file_type_counts_[make_pair(file_type, compression_types[i])];
     }
@@ -985,7 +989,7 @@ void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
 
 void HdfsScanNode::SetDone() {
   {
-    unique_lock<mutex> l(lock_);
+    unique_lock<Lock> l(lock_);
     if (done_) return;
     done_ = true;
   }
@@ -1022,7 +1026,7 @@ void HdfsScanNode::ComputeSlotMaterializationOrder(vector<int>* order) const {
 }
 
 void HdfsScanNode::StopAndFinalizeCounters() {
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   if (!counters_running_) return;
   counters_running_ = false;
 
@@ -1052,7 +1056,7 @@ void HdfsScanNode::StopAndFinalizeCounters() {
   if (!file_type_counts_.empty()) {
     stringstream ss;
     {
-      ScopedSpinLock l2(&file_type_counts_lock_);
+      lock_guard<SpinLock> l2(file_type_counts_lock_);
       for (FileTypeCountsMap::const_iterator it = file_type_counts_.begin();
           it != file_type_counts_.end(); ++it) {
         ss << it->first.first << "/" << it->first.second << ":" << it->second << " ";

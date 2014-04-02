@@ -34,6 +34,7 @@
 #include "rpc/thrift-server.h"
 #include "common/status.h"
 #include "service/frontend.h"
+#include "util/lock-tracker.h"
 #include "util/metrics.h"
 #include "util/runtime-profile.h"
 #include "util/simple-logger.h"
@@ -849,7 +850,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   string ComputeHMAC(const std::string& key, const std::string& data);
 
   // Guards query_log_ and query_log_index_
-  boost::mutex query_log_lock_;
+  Lock query_log_lock_;
 
   // FIFO list of query records, which are written after the query finishes executing
   typedef std::list<QueryStateRecord> QueryLog;
@@ -895,7 +896,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   typedef boost::unordered_map<TUniqueId, boost::shared_ptr<QueryExecState> >
       QueryExecStateMap;
   QueryExecStateMap query_exec_state_map_;
-  boost::mutex query_exec_state_map_lock_;  // protects query_exec_state_map_
+  Lock query_exec_state_map_lock_;  // protects query_exec_state_map_
 
   // Default query options in the form of TQueryOptions and beeswax::ConfigVariable
   TQueryOptions default_query_options_;
@@ -1009,7 +1010,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Protects session_state_map_. Should be taken before any query exec-state locks,
   // including query_exec_state_map_lock_. Should be taken before individual session-state
   // locks.
-  boost::mutex session_state_map_lock_;
+  Lock session_state_map_lock_;
 
   // A map from session identifier to a structure containing per-session information
   typedef boost::unordered_map<TUniqueId, boost::shared_ptr<SessionState> >
@@ -1017,7 +1018,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   SessionStateMap session_state_map_;
 
   // Protects connection_to_sessions_map_. May be taken before session_state_map_lock_.
-  boost::mutex connection_to_sessions_map_lock_;
+  Lock connection_to_sessions_map_lock_;
 
   // Lock to prevent multiple concurrent requests using the same tmp table. A hack
   // for now (otherwise, we'd have to generate unique table names and maintain them).
@@ -1051,7 +1052,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // protects query_locations_. Must always be taken after
   // query_exec_state_map_lock_ if both are required.
-  boost::mutex query_locations_lock_;
+  Lock query_locations_lock_;
 
   // A map from backend to the list of queries currently running there.
   typedef boost::unordered_map<TNetworkAddress, boost::unordered_set<TUniqueId> >
@@ -1082,7 +1083,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   boost::uuids::random_generator uuid_generator_;
 
   // Lock to protect uuid_generator
-  boost::mutex uuid_lock_;
+  Lock uuid_lock_;
 
   // Lock for catalog_update_version_info_, min_subscriber_catalog_topic_version_,
   // and catalog_version_update_cv_

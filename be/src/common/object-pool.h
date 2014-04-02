@@ -17,8 +17,7 @@
 #define IMPALA_COMMON_OBJECT_POOL_H
 
 #include <vector>
-#include <boost/thread/mutex.hpp>
-#include "util/spinlock.h"
+#include "util/lock-tracker.h"
 
 namespace impala {
 
@@ -27,7 +26,7 @@ namespace impala {
 // Thread-safe.
 class ObjectPool {
  public:
-  ObjectPool(): objects_() {}
+  ObjectPool(): objects_(), lock_("ObjectPool") {}
 
   ~ObjectPool() {
     for (ElementVector::iterator i = objects_.begin();
@@ -41,10 +40,12 @@ class ObjectPool {
     // Create the object to be pushed to the shared vector outside the critical section.
     // TODO: Consider using a lock-free structure.
     SpecificElement<T>* obj = new SpecificElement<T>(t);
-    ScopedSpinLock l(&lock_);
+    boost::lock_guard<SpinLock> l(lock_);
     objects_.push_back(obj);
     return t;
   }
+
+  void RegisterLockTracker(LockTracker* tracker) { tracker->RegisterLock(&lock_); }
 
  private:
   struct GenericElement {

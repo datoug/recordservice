@@ -501,9 +501,10 @@ void PlanFragmentExecutor::FragmentComplete() {
       - runtime_state_->total_network_send_timer()->value()
       - runtime_state_->total_network_receive_timer()->value();
   // Timing is not perfect.
-  if (cpu_time < 0)
-    cpu_time = 0;
+  if (cpu_time < 0) cpu_time = 0;
   runtime_state_->total_cpu_timer()->Add(cpu_time);
+
+  runtime_state_->AddLockContentionCounters();
 
   ReleaseThreadToken();
   StopReportThread();
@@ -512,7 +513,6 @@ void PlanFragmentExecutor::FragmentComplete() {
 
 void PlanFragmentExecutor::UpdateStatus(const Status& status) {
   if (status.ok()) return;
-
   bool send_report = completed_report_sent_.CompareAndSwap(0,1);
 
   {

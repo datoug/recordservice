@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IMPALA_UTIL_DEFAULT_PATH_HANDLERS_H
-#define IMPALA_UTIL_DEFAULT_PATH_HANDLERS_H
+#include "util/locks.h"
 
-#include <stdio.h>
+#include "util/lock-tracker.h"
 
-namespace impala {
+using namespace impala;
 
-class LockTracker;
-class MemTracker;
-class Webserver;
-
-// Adds a set of default path handlers to the webserver to display
-// logs and configuration flags
-void AddDefaultUrlCallbacks(Webserver* webserver, MemTracker* process_mem_tracker = NULL,
-    LockTracker* = NULL);
+Lock::Lock(const char* name, LockTracker* tracker)
+  : is_locked_(false), desc_(name) {
+  if (tracker != NULL) tracker->RegisterLock(this);
+  ClearCounters();
 }
 
-#endif // IMPALA_UTIL_DEFAULT_PATH_HANDLERS_H
+SpinLock::SpinLock(const char* name, LockTracker* tracker)
+    : locked_(false), desc_(name) {
+  if (tracker != NULL) tracker->RegisterLock(this);
+  ClearCounters();
+}
