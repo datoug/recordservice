@@ -196,7 +196,7 @@ public class HdfsTable extends Table {
 
   public boolean spansMultipleFileSystems() { return multipleFileSystems_; }
 
-  protected HdfsTable(TableId id, org.apache.hadoop.hive.metastore.api.Table msTbl,
+  public HdfsTable(TableId id, org.apache.hadoop.hive.metastore.api.Table msTbl,
       Db db, String name, String owner) {
     super(id, msTbl, db, name, owner);
     this.partitions_ = Lists.newArrayList();
@@ -360,7 +360,7 @@ public class HdfsTable extends Table {
         throw new TableLoadingException(
             String.format("Failed to load metadata for table '%s' because of " +
                 "unsupported partition-column type '%s' in partition column '%s'",
-                getName(), type.toString(), s.getName()));
+                getFullName(), type.toString(), s.getName()));
       }
 
       Column col = new Column(s.getName(), type, s.getComment(), pos);
@@ -942,7 +942,8 @@ public class HdfsTable extends Table {
     } catch (TableLoadingException e) {
       throw e;
     } catch (Exception e) {
-      throw new TableLoadingException("Failed to load metadata for table: " + name_, e);
+      throw new TableLoadingException("Failed to load metadata for table: " +
+          getFullName(), e);
     } finally {
       // Stop timer for loadTblMetadata.
       LOG.info("{}: {}millisec", loadTblMetadataTimerName_, loadTblMetadataTimer.stop()
