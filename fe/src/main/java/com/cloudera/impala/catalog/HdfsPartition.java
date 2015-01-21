@@ -188,7 +188,9 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
       }
     }
 
+    public void setOffset(long offset) { fileBlock_.setOffset(offset); }
     public long getOffset() { return fileBlock_.getOffset(); }
+    public void setLength(long length) { fileBlock_.setLength(length); }
     public long getLength() { return fileBlock_.getLength(); }
     // Returns true if at there at least one cached replica.
     public boolean isCached() { return isCached_; }

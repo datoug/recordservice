@@ -149,6 +149,10 @@ public class Analyzer {
   public boolean isSubquery() { return isSubquery_; }
   public boolean setHasPlanHints() { return globalState_.hasPlanHints = true; }
   public boolean hasPlanHints() { return globalState_.hasPlanHints; }
+  public InputSplitFilter getInputSplitFilter() { return globalState_.inputSplitFilter; }
+  public void setInputSplitFilter(InputSplitFilter filter) {
+    globalState_.inputSplitFilter = filter;
+  }
 
   // state shared between all objects of an Analyzer tree
   private static class GlobalState {
@@ -167,6 +171,10 @@ public class Analyzer {
 
     // Indicates whether the query has plan hints.
     public boolean hasPlanHints = false;
+
+    // If set, only data within this input split (file name, offset, length) will be
+    // considered. Set via a select list plan hint.
+    private InputSplitFilter inputSplitFilter = null;
 
     // True if at least one of the analyzers belongs to a subquery.
     public boolean containsSubquery = false;

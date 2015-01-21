@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
+import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +35,7 @@ import com.cloudera.impala.analysis.DescriptorTable;
 import com.cloudera.impala.analysis.Expr;
 import com.cloudera.impala.analysis.ExprSubstitutionMap;
 import com.cloudera.impala.analysis.InPredicate;
+import com.cloudera.impala.analysis.InputSplitFilter;
 import com.cloudera.impala.analysis.IsNullPredicate;
 import com.cloudera.impala.analysis.LiteralExpr;
 import com.cloudera.impala.analysis.NullLiteral;
@@ -48,6 +50,7 @@ import com.cloudera.impala.catalog.HdfsPartition.FileBlock;
 import com.cloudera.impala.catalog.HdfsTable;
 import com.cloudera.impala.catalog.Type;
 import com.cloudera.impala.catalog.PrimitiveType;
+import com.cloudera.impala.common.FileSystemUtil;
 import com.cloudera.impala.common.InternalException;
 import com.cloudera.impala.common.PrintUtils;
 import com.cloudera.impala.common.RuntimeEnv;
@@ -171,6 +174,34 @@ public class HdfsScanNode extends ScanNode {
             // TODO: do something meaningful with that
             continue;
           }
+
+          // If an InputSplitFilter was specified, only include FileBlocks which
+          // are within the InputSplit range.
+          // TODO: This is throw away code. Once Impala natively supports the
+          // RecordService API this can be taken out.
+          InputSplitFilter inputSplitFilter = analyzer.getInputSplitFilter();
+          if (inputSplitFilter != null) {
+            Path path = new Path(partition.getLocation(), fileDesc.getFileName());
+            Path inputSplitPath = FileSystemUtil.createFullyQualifiedPath(
+                new Path(inputSplitFilter.getFileName()));
+            if (!path.equals(inputSplitPath)) {
+              LOG.info("Skipping: " + path.toString() +
+                  " because it does not match: " + inputSplitPath.toString());
+              continue;
+            }
+
+            long start = block.getOffset();
+            long end = start + block.getLength();
+
+            if (inputSplitFilter.getOffset() + block.getLength() < start ||
+                inputSplitFilter.getOffset() > end) {
+              // Skip it.
+              continue;
+            }
+            LOG.info("Path: " + path.toString() + " within range : " +
+                inputSplitPath.toString());
+          }
+
           // Collect the network address and volume ID of all replicas of this block.
           List<TScanRangeLocation> locations = Lists.newArrayList();
           for (int i = 0; i < replicaHostIdxs.size(); ++i) {

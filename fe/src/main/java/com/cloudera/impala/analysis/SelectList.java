@@ -16,6 +16,7 @@ package com.cloudera.impala.analysis;
 
 import java.util.List;
 
+import com.cloudera.impala.common.AnalysisException;
 import com.google.common.collect.Lists;
 
 /**
@@ -71,9 +72,20 @@ public class SelectList {
   public boolean isStraightJoin() { return isStraightJoin_; }
   public boolean hasPlanHints() { return planHints_ != null; }
 
-  public void analyzePlanHints(Analyzer analyzer) {
+  public void analyzePlanHints(Analyzer analyzer) throws AnalysisException {
     if (planHints_ == null) return;
     for (String hint: planHints_) {
+      hint = hint.toLowerCase();
+
+      // Hint to only consider data files within the specified input split.
+      if (hint.startsWith("__input_split__=")) {
+        InputSplitFilter filter = new InputSplitFilter(
+            hint.replace("__input_split__=", ""));
+        filter.analyze(analyzer);
+        analyzer.setInputSplitFilter(filter);
+        continue;
+      }
+
       if (!hint.equalsIgnoreCase("straight_join")) {
         analyzer.addWarning("PLAN hint not recognized: " + hint);
       }
