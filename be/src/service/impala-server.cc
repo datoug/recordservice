@@ -155,6 +155,11 @@ DEFINE_string(local_nodemanager_url, "", "The URL of the local Yarn Node Manager
 DECLARE_bool(enable_rm);
 DECLARE_bool(compact_catalog_topic);
 
+
+DEFINE_int32(recordservice_port, 40000, "Port to run record service");
+DEFINE_int32(recordservice_planner_port, 40001, "Port to run record service planner");
+DEFINE_int32(recordservice_worker_port, 40002, "Port to run record service worker");
+
 namespace impala {
 
 // Prefix of profile, event and lineage log filenames. The version number is
@@ -1611,9 +1616,32 @@ void ImpalaServer::ExpireQueries() {
   }
 }
 
+template<typename T>
+Status CreateServer(ExecEnv* exec_env, const shared_ptr<ImpalaServer>& handler,
+    int port, const string& service_name, ThriftServer** server) {
+  shared_ptr<TProcessor> processor(new T(handler));
+  shared_ptr<TProcessorEventHandler> event_handler(
+      new RpcEventHandler(service_name, exec_env->metrics()));
+  processor->setEventHandler(event_handler);
+
+  *server = new ThriftServer(service_name, processor, port,
+      AuthManager::GetInstance()->GetExternalAuthProvider(), exec_env->metrics(),
+      FLAGS_fe_service_threads, ThriftServer::ThreadPool);
+
+  (*server)->SetConnectionHandler(handler.get());
+  if (!FLAGS_ssl_server_certificate.empty()) {
+    LOG(INFO) << "Enabling SSL for " << service_name;
+    RETURN_IF_ERROR((*server)->EnableSsl(
+            FLAGS_ssl_server_certificate, FLAGS_ssl_private_key));
+  }
+  LOG(ERROR) << service_name << " server listening on port " << port;
+  return Status::OK;
+}
+
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int be_port,
     ThriftServer** beeswax_server, ThriftServer** hs2_server, ThriftServer** be_server,
-    ThriftServer** recordservice_server, ImpalaServer** impala_server) {
+    ThriftServer** recordservice_server, ThriftServer** recordservice_planner,
+    ThriftServer** recordservice_worker, ImpalaServer** impala_server) {
   DCHECK((beeswax_port == 0) == (beeswax_server == NULL));
   DCHECK((hs2_port == 0) == (hs2_server == NULL));
   DCHECK((be_port == 0) == (be_server == NULL));
@@ -1664,24 +1692,21 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
   }
 
   if (recordservice_server != NULL) {
-    const int RECORD_SERVICE_PORT = 21025;
-    shared_ptr<TProcessor> processor(
-        new recordservice::RecordServiceProcessor(handler));
-    shared_ptr<TProcessorEventHandler> event_handler(
-        new RpcEventHandler("recordservice", exec_env->metrics()));
-    processor->setEventHandler(event_handler);
+    RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceProcessor>(
+          exec_env, handler, FLAGS_recordservice_port, "record-service",
+          recordservice_server));
+  }
 
-    *recordservice_server = new ThriftServer("record-service", processor, RECORD_SERVICE_PORT,
-        AuthManager::GetInstance()->GetExternalAuthProvider(), exec_env->metrics(),
-        FLAGS_fe_service_threads, ThriftServer::ThreadPool);
+  if (recordservice_planner != NULL) {
+    RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
+          exec_env, handler, FLAGS_recordservice_planner_port, "record-service-planner",
+          recordservice_planner));
+  }
 
-    (*recordservice_server)->SetConnectionHandler(handler.get());
-    if (!FLAGS_ssl_server_certificate.empty()) {
-      LOG(INFO) << "Enabling SSL for RecordService";
-      RETURN_IF_ERROR((*recordservice_server)->EnableSsl(
-              FLAGS_ssl_server_certificate, FLAGS_ssl_private_key));
-    }
-    LOG(ERROR) << "RecordService listening on port " << RECORD_SERVICE_PORT;
+  if (recordservice_worker != NULL) {
+    RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
+          exec_env, handler, FLAGS_recordservice_worker_port, "record-service-worker",
+          recordservice_worker));
   }
 
   if (be_port != 0 && be_server != NULL) {

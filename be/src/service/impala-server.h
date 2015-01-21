@@ -28,6 +28,8 @@
 #include "gen-cpp/ImpalaHiveServer2Service.h"
 #include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/RecordService.h"
+#include "gen-cpp/RecordServicePlanner.h"
+#include "gen-cpp/RecordServiceWorker.h"
 #include "gen-cpp/Frontend_types.h"
 #include "rpc/thrift-server.h"
 #include "common/status.h"
@@ -82,7 +84,9 @@ class TGetExecSummaryReq;
 // that via the statestore. This still needs to be implemented.
 class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
                      public ThriftServer::ConnectionHandlerIf,
-                     public recordservice::RecordServiceIf {
+                     public recordservice::RecordServiceIf,
+                     public recordservice::RecordServicePlannerIf,
+                     public recordservice::RecordServiceWorkerIf {
  public:
   ImpalaServer(ExecEnv* exec_env);
   ~ImpalaServer();
@@ -206,7 +210,22 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   virtual void ExecRequest(recordservice::TExecRequestResult& return_val,
     const recordservice::TExecRequestParams& req);
   virtual void GetCount(recordservice::TGetCountResult& return_val,
-      const recordservice::TGetCountParams& req);
+      const recordservice::TGetParams& req);
+  virtual void GetColumnarBatch(recordservice::TColumnarRowBatch& return_val,
+      const recordservice::TGetParams& req);
+  template<typename T>
+  bool GetInternal(const recordservice::TGetParams& req, T* result);
+
+  // Record service planner rpcs.
+  virtual void PlanRequest(recordservice::TPlanRequestResult& return_val,
+      const recordservice::TPlanRequestParams& req);
+
+  // Record service worker rpcs.
+  virtual void ExecTask(recordservice::TExecTaskResult& return_val,
+      const recordservice::TExecTaskParams& req);
+  virtual void Fetch(recordservice::TColumnarRowBatch& return_val,
+      const recordservice::TFetchParams& req);
+  virtual void CancelTask(const recordservice::TUniqueId& req);
 
   // ImpalaService common extensions (implemented in impala-server.cc)
   // ImpalaInternalService rpcs
@@ -293,7 +312,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   class AsciiQueryResultSet;
   class HS2RowOrientedResultSet;
   class HS2ColumnarResultSet;
-  class RecordServiceResultSet;
+  class BaseResultSet;
+  class RecordServiceCountResultSet;
+  class RecordServiceColumnarResultSet;
 
   struct SessionState;
 
@@ -726,6 +747,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Set is_offline_ to the argument's value.
   void SetOffline(bool offline);
 
+  // Creates/returns singleton record service session.
+  boost::shared_ptr<SessionState> GetRecordServiceSession();
+
   // Guards query_log_ and query_log_index_
   boost::mutex query_log_lock_;
 
@@ -1050,7 +1074,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 // which case none of the output parameters can be assumed to be valid.
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
     int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
-    ThriftServer** be_server, ThriftServer** recordservice_server,
+    ThriftServer** be_server,
+    ThriftServer** recordservice_server,
+    ThriftServer** recordservice_planner_server,
+    ThriftServer** recordservice_worker_server,
     ImpalaServer** impala_server);
 
 }

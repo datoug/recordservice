@@ -116,7 +116,8 @@ struct TQueryOptions {
 // Impala currently has two types of sessions: Beeswax and HiveServer2
 enum TSessionType {
   BEESWAX,
-  HIVESERVER2
+  HIVESERVER2,
+  RECORDSERVICE, // TODO split this out to the service types.
 }
 
 // Per-client session state
