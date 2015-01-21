@@ -19,14 +19,9 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/unordered_set.hpp>
-#include <jni.h>
 #include <thrift/protocol/TDebugProtocol.h>
-#include <gtest/gtest.h>
 #include <boost/foreach.hpp>
-#include <boost/bind.hpp>
 #include <boost/algorithm/string.hpp>
-#include <google/heap-profiler.h>
-#include <google/malloc_extension.h>
 #include <gutil/strings/substitute.h>
 
 #include "common/logging.h"
@@ -42,9 +37,6 @@
 
 using namespace std;
 using namespace boost;
-using namespace boost::algorithm;
-using namespace boost::uuids;
-using namespace apache::thrift;
 using namespace strings;
 using namespace beeswax; // Converting QueryState
 
@@ -107,8 +99,9 @@ void ImpalaServer::ExecRequest(recordservice::TExecRequestResult& return_val,
   shared_ptr<QueryExecState> exec_state;
   Status status = Execute(&query_ctx, record_service_session_, &exec_state);
   if (!status.ok()) {
-    LOG(ERROR) << status.GetErrorMsg();
-    return;
+    recordservice::RecordServiceException ex;
+    ex.message = status.GetErrorMsg();
+    throw ex;
   }
   exec_state->UpdateQueryState(QueryState::RUNNING);
   exec_state->WaitAsync();
@@ -122,7 +115,6 @@ void ImpalaServer::ExecRequest(recordservice::TExecRequestResult& return_val,
 
 void ImpalaServer::GetCount(recordservice::TGetCountResult& return_val,
     const recordservice::TGetCountParams& req) {
-  LOG(ERROR) << "RecordService::GetCount";
   return_val.num_rows = 0;
   return_val.done = true;
 
@@ -132,8 +124,9 @@ void ImpalaServer::GetCount(recordservice::TGetCountResult& return_val,
 
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
   if (exec_state.get() == NULL) {
-    LOG(ERROR) << "Invalid handle";
-    return;
+    recordservice::RecordServiceException ex;
+    ex.message = "Invalid handle";
+    throw ex;
   }
 
   exec_state->BlockOnWait();
@@ -144,8 +137,9 @@ void ImpalaServer::GetCount(recordservice::TGetCountResult& return_val,
   RecordServiceResultSet results;
   Status status = exec_state->FetchRows(1024, &results);
   if (!status.ok()) {
-    LOG(ERROR) << status.GetErrorMsg();
-    return;
+    recordservice::RecordServiceException ex;
+    ex.message = status.GetErrorMsg();
+    throw ex;
   }
 
   return_val.num_rows = results.size();
