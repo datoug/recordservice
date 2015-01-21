@@ -21,7 +21,7 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.cloudera.impala.testutil.ImpalaJdbcClient;
+import com.cloudera.impala.util.ImpalaJdbcClient;
 
 /**
  * JdbcTest
