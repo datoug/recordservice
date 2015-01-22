@@ -193,13 +193,14 @@ public class HdfsScanNode extends ScanNode {
             long start = block.getOffset();
             long end = start + block.getLength();
 
-            if (inputSplitFilter.getOffset() + block.getLength() < start ||
-                inputSplitFilter.getOffset() > end) {
+            if (start != inputSplitFilter.getOffset() ||
+                end != inputSplitFilter.getOffset() + inputSplitFilter.getLength()) {
               // Skip it.
               continue;
             }
             LOG.info("Path: " + path.toString() + " within range : " +
-                inputSplitPath.toString());
+                inputSplitPath.toString() + " start= " + start +
+                " len=" + block.getLength());
           }
 
           // Collect the network address and volume ID of all replicas of this block.

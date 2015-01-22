@@ -327,7 +327,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     stringstream ss;
     ss << "SELECT /* +__input_split__="
        << partition_dirs[split.partition_id] << "/" << split.file_name
-       << "@" << split.offset << "@" << (split.offset + split.length)
+       << "@" << split.offset << "@" << split.length
        << " */ " << sql;
 
     recordservice::TTask task;
