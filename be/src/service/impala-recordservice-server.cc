@@ -268,7 +268,76 @@ void ImpalaServer::GetColumnarBatch(recordservice::TColumnarRowBatch& return_val
 //
 void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   const recordservice::TPlanRequestParams& req) {
-  ThrowException("Not implemented");
+  LOG(ERROR) << "RecordService::PlanRequest: " << req.sql_stmt;
+
+  if (IsOffline()) {
+    ThrowException("This Impala server is offline. Please retry your query later.");
+  }
+
+  TQueryCtx query_ctx;
+  query_ctx.request.stmt = req.sql_stmt;
+
+  // Setting num_nodes = 1 means we generate a single node plan which has
+  // a simpler structure. It also prevents Impala from analyzing multi-table
+  // queries, i.e. joins.
+  query_ctx.request.query_options.__set_num_nodes(1);
+
+  // Get the plan. This is the normal Impala plan.
+  TExecRequest result;
+  Status status = exec_env_->frontend()->GetExecRequest(query_ctx, &result);
+  if (!status.ok()) ThrowException(status.GetErrorMsg());
+
+  if (result.stmt_type != TStmtType::QUERY) ThrowException("Cannot run non-SELECT stmts");
+
+  // Walk the plan to compute the tasks. We want to find the scan nodes
+  // and distribute them.
+  // TODO: total hack. We're reverse engineering the planner output here.
+  // Update planner.
+  const TQueryExecRequest query_request = result.query_exec_request;
+
+  // Reconstruct the file paths from partitions and splits
+  DCHECK_EQ(query_request.desc_tbl.tableDescriptors.size(), 1)
+      << "single table scans should have 1 table desc set.";
+  const map<int64_t, THdfsPartition>& partitions =
+      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions;
+
+  map<int64_t, string> partition_dirs;
+  for (map<int64_t, THdfsPartition>::const_iterator it = partitions.begin();
+      it != partitions.end(); ++it) {
+    partition_dirs[it->first] = it->second.location;
+  }
+
+  DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1)
+      << "single node plan should have 1 plan node";
+  const vector<TScanRangeLocations>& ranges =
+      query_request.per_node_scan_ranges.begin()->second;
+
+
+  // Rewrite the original sql stmt with the input split hint inserted.
+  string sql = req.sql_stmt;
+  transform(sql.begin(), sql.end(), sql.begin(), ::tolower);
+  sql = sql.substr(sql.find("select") + 6);
+
+  for (int i = 0; i < ranges.size(); ++i) {
+    const THdfsFileSplit& split = ranges[i].scan_range.hdfs_file_split;
+    if (partition_dirs.find(split.partition_id) == partition_dirs.end()) {
+      DCHECK(false) << "Invalid plan request.";
+    }
+
+    stringstream ss;
+    ss << "SELECT /* +__input_split__="
+       << partition_dirs[split.partition_id] << "/" << split.file_name
+       << "@" << split.offset << "@" << (split.offset + split.length)
+       << " */ " << sql;
+
+    recordservice::TTask task;
+    task.task = ss.str();
+    for (int j = 0; j < ranges[i].locations.size(); ++j) {
+      task.hosts.push_back(
+          query_request.host_list[ranges[i].locations[j].host_idx].hostname);
+    }
+    return_val.tasks.push_back(task);
+  }
 }
 
 //
