@@ -352,4 +352,55 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
   UnregisterQuery(query_id, true);
 }
 
+void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
+      const recordservice::TUniqueId& req) {
+  TUniqueId query_id;
+  query_id.hi = req.hi;
+  query_id.lo = req.lo;
+
+  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
+  if (exec_state.get() == NULL) ThrowException("Invalid handle");
+
+  lock_guard<mutex> l(*exec_state->lock());
+  Coordinator* coord = exec_state->coord();
+  if (coord == NULL) ThrowException("Invalid handle");
+
+  // Extract counters from runtime profile. This is a hack too.
+  RuntimeProfile* server_profile = exec_state->server_profile();
+  RuntimeProfile::Counter* materialize_counter =
+      server_profile->GetCounter("RowMaterializationTimer");
+  RuntimeProfile::Counter* client_counter =
+      server_profile->GetCounter("ClientFetchWaitTimer");
+  if (materialize_counter != NULL) {
+    return_val.__set_serialize_time_ms(materialize_counter->value() / 1000000);
+  }
+  if (client_counter != NULL) {
+    return_val.__set_client_time_ms(client_counter->value() / 1000000);
+  }
+
+  RuntimeProfile* coord_profile = coord->query_profile();
+  vector<RuntimeProfile*> children;
+  coord_profile->GetAllChildren(&children);
+  for (int i = 0; i < children.size(); ++i) {
+    if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
+    RuntimeProfile* profile = children[i];
+    RuntimeProfile::Counter* bytes_assigned = profile->GetCounter("BytesAssigned");
+    RuntimeProfile::Counter* bytes_read = profile->GetCounter("BytesRead");
+    RuntimeProfile::Counter* bytes_read_local = profile->GetCounter("BytesReadLocal");
+
+    if (bytes_read != NULL) {
+      return_val.__set_bytes_read(bytes_read->value());
+      if (bytes_assigned != NULL) {
+        double percent = (double)bytes_read->value() / bytes_assigned->value();
+        // This can happen because we read past the end of ranges to finish them.
+        if (percent > 1) percent = 1;
+        return_val.__set_completion_percentage(percent * 100);
+      }
+    }
+    if (bytes_read_local != NULL) {
+      return_val.__set_bytes_read_local(bytes_read_local->value());
+    }
+  }
+}
+
 }

@@ -214,6 +214,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   virtual void Fetch(recordservice::TFetchResult& return_val,
       const recordservice::TFetchParams& req);
   virtual void CloseTask(const recordservice::TUniqueId& req);
+  virtual void GetTaskStats(recordservice::TStats& return_val,
+      const recordservice::TUniqueId& req);
 
   // ImpalaService common extensions (implemented in impala-server.cc)
   // ImpalaInternalService rpcs

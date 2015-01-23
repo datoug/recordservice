@@ -351,6 +351,7 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
   DCHECK(scan_range_params_ != NULL)
       << "Must call SetScanRanges() before calling Prepare()";
   int num_ranges_missing_volume_id = 0;
+  int64_t total_assigned_bytes = 0;
   for (int i = 0; i < scan_range_params_->size(); ++i) {
     DCHECK((*scan_range_params_)[i].scan_range.__isset.hdfs_file_split);
     const THdfsFileSplit& split = (*scan_range_params_)[i].scan_range.hdfs_file_split;
@@ -404,6 +405,9 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
             split.offset, split.partition_id, (*scan_range_params_)[i].volume_id,
             try_cache, expected_local));
   }
+
+  runtime_profile()->AddCounter("BytesAssigned", TUnit::BYTES)->Set(
+      total_assigned_bytes);
 
   // Compute the minimum bytes required to start a new thread. This is based on the
   // file format.

@@ -168,6 +168,7 @@ class ImpalaServer::QueryExecState {
   void set_result_metadata(const TResultSetMetadata& md) { result_metadata_ = md; }
   const RuntimeProfile& profile() const { return profile_; }
   const RuntimeProfile& summary_profile() const { return summary_profile_; }
+  RuntimeProfile* server_profile() { return &server_profile_; }
   const TimestampValue& start_time() const { return start_time_; }
   const TimestampValue& end_time() const { return end_time_; }
   const std::string& sql_stmt() const { return query_ctx_.request.stmt; }
