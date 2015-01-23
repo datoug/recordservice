@@ -156,9 +156,8 @@ DECLARE_bool(enable_rm);
 DECLARE_bool(compact_catalog_topic);
 
 
-DEFINE_int32(recordservice_port, 40000, "Port to run record service");
-DEFINE_int32(recordservice_planner_port, 40001, "Port to run record service planner");
-DEFINE_int32(recordservice_worker_port, 40002, "Port to run record service worker");
+DEFINE_int32(recordservice_planner_port, 40000, "Port to run record service planner");
+DEFINE_int32(recordservice_worker_port, 40100, "Port to run record service worker");
 
 namespace impala {
 
@@ -1640,8 +1639,8 @@ Status CreateServer(ExecEnv* exec_env, const shared_ptr<ImpalaServer>& handler,
 
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int be_port,
     ThriftServer** beeswax_server, ThriftServer** hs2_server, ThriftServer** be_server,
-    ThriftServer** recordservice_server, ThriftServer** recordservice_planner,
-    ThriftServer** recordservice_worker, ImpalaServer** impala_server) {
+    ThriftServer** recordservice_planner, ThriftServer** recordservice_worker,
+    ImpalaServer** impala_server) {
   DCHECK((beeswax_port == 0) == (beeswax_server == NULL));
   DCHECK((hs2_port == 0) == (hs2_server == NULL));
   DCHECK((be_port == 0) == (be_server == NULL));
@@ -1689,12 +1688,6 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
     }
 
     LOG(INFO) << "Impala HiveServer2 Service listening on " << hs2_port;
-  }
-
-  if (recordservice_server != NULL) {
-    RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceProcessor>(
-          exec_env, handler, FLAGS_recordservice_port, "record-service",
-          recordservice_server));
   }
 
   if (recordservice_planner != NULL) {

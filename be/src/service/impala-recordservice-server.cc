@@ -40,6 +40,8 @@ using namespace boost;
 using namespace strings;
 using namespace beeswax; // Converting QueryState
 
+static const int DEFAULT_FETCH_SIZE = 1024;
+
 namespace impala {
 
 // Base class for test result set serializations. The functions in here and
@@ -205,64 +207,6 @@ shared_ptr<ImpalaServer::SessionState> ImpalaServer::GetRecordServiceSession() {
   return record_service_session_;
 }
 
-void ImpalaServer::ExecRequest(recordservice::TExecRequestResult& return_val,
-    const recordservice::TExecRequestParams& req) {
-  GetRecordServiceSession();
-
-  LOG(ERROR) << "RecordService::ExecRequest: " << req.request;
-  TQueryCtx query_ctx;
-  query_ctx.request.stmt = req.request;
-
-  shared_ptr<QueryExecState> exec_state;
-  Status status = Execute(&query_ctx, record_service_session_, &exec_state);
-  if (!status.ok()) ThrowException(status.GetErrorMsg());
-
-  exec_state->UpdateQueryState(QueryState::RUNNING);
-  exec_state->WaitAsync();
-  status = SetQueryInflight(record_service_session_, exec_state);
-  if (!status.ok()) {
-    UnregisterQuery(exec_state->query_id(), false, &status);
-  }
-  return_val.handle.hi = exec_state->query_id().hi;
-  return_val.handle.lo = exec_state->query_id().lo;
-}
-
-
-template<typename T>
-bool ImpalaServer::GetInternal(const recordservice::TGetParams& req, T* results) {
-  TUniqueId query_id;
-  query_id.hi = req.handle.hi;
-  query_id.lo = req.handle.lo;
-
-  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
-  if (exec_state.get() == NULL) ThrowException("Invalid handle");
-
-  exec_state->BlockOnWait();
-  results->SetMetadata(*exec_state->result_metadata());
-
-  lock_guard<mutex> frl(*exec_state->fetch_rows_lock());
-  lock_guard<mutex> l(*exec_state->lock());
-
-  Status status = exec_state->FetchRows(1024, results);
-  if (!status.ok()) ThrowException(status.GetErrorMsg());
-  return exec_state->eos();
-}
-
-void ImpalaServer::GetCount(recordservice::TGetCountResult& return_val,
-    const recordservice::TGetParams& req) {
-  RecordServiceCountResultSet results;
-  return_val.done = GetInternal(req, &results);
-  return_val.num_rows = results.size();
-}
-
-void ImpalaServer::GetColumnarBatch(recordservice::TColumnarRowBatch& return_val,
-    const recordservice::TGetParams& req) {
-  RecordServiceColumnarResultSet results;
-  bool done = GetInternal(req, &results);
-  return_val = results.batch_;
-  return_val.done = done;
-}
-
 //
 // RecordServicePlanner
 //
@@ -345,14 +289,67 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 //
 void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     const recordservice::TExecTaskParams& req) {
-  ThrowException("Not implemented");
+  if (IsOffline()) {
+    ThrowException("This Impala server is offline. Please retry your query later.");
+  }
+
+  GetRecordServiceSession();
+
+  LOG(ERROR) << "RecordService::ExecRequest: " << req.task;
+  TQueryCtx query_ctx;
+  query_ctx.request.stmt = req.task;
+  // These are single scan queries. No need to make distributed plan with extra
+  // exchange nodes.
+  query_ctx.request.query_options.__set_num_nodes(1);
+
+  shared_ptr<QueryExecState> exec_state;
+  Status status = Execute(&query_ctx, record_service_session_, &exec_state);
+  if (!status.ok()) ThrowException(status.GetErrorMsg());
+
+  exec_state->UpdateQueryState(QueryState::RUNNING);
+  exec_state->WaitAsync();
+  status = SetQueryInflight(record_service_session_, exec_state);
+  if (!status.ok()) {
+    UnregisterQuery(exec_state->query_id(), false, &status);
+  }
+  return_val.handle.hi = exec_state->query_id().hi;
+  return_val.handle.lo = exec_state->query_id().lo;
 }
 
-void ImpalaServer::Fetch(recordservice::TColumnarRowBatch& return_val,
+void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
     const recordservice::TFetchParams& req) {
-  ThrowException("Not implemented");
+  TUniqueId query_id;
+  query_id.hi = req.handle.hi;
+  query_id.lo = req.handle.lo;
+
+  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
+  if (exec_state.get() == NULL) ThrowException("Invalid handle");
+
+  exec_state->BlockOnWait();
+  RecordServiceColumnarResultSet results;
+  results.SetMetadata(*exec_state->result_metadata());
+
+  lock_guard<mutex> frl(*exec_state->fetch_rows_lock());
+  lock_guard<mutex> l(*exec_state->lock());
+
+  int fetch_size = DEFAULT_FETCH_SIZE;
+  if (req.__isset.fetch_size) fetch_size = req.fetch_size;
+  Status status = exec_state->FetchRows(fetch_size, &results);
+  if (!status.ok()) ThrowException(status.GetErrorMsg());
+  return_val.done = exec_state->eos();
+  return_val.row_batch = results.batch_;
 }
-void ImpalaServer::CancelTask(const recordservice::TUniqueId& req) {
+
+void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
+  TUniqueId query_id;
+  query_id.hi = req.hi;
+  query_id.lo = req.lo;
+
+  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
+  if (exec_state.get() == NULL) return;
+  Status status = CancelInternal(query_id, true);
+  if (!status.ok()) return;
+  UnregisterQuery(query_id, true);
 }
 
 }

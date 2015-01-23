@@ -27,7 +27,6 @@
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaHiveServer2Service.h"
 #include "gen-cpp/ImpalaInternalService.h"
-#include "gen-cpp/RecordService.h"
 #include "gen-cpp/RecordServicePlanner.h"
 #include "gen-cpp/RecordServiceWorker.h"
 #include "gen-cpp/Frontend_types.h"
@@ -84,7 +83,6 @@ class TGetExecSummaryReq;
 // that via the statestore. This still needs to be implemented.
 class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
                      public ThriftServer::ConnectionHandlerIf,
-                     public recordservice::RecordServiceIf,
                      public recordservice::RecordServicePlannerIf,
                      public recordservice::RecordServiceWorkerIf {
  public:
@@ -206,16 +204,6 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       apache::hive::service::cli::thrift::TRenewDelegationTokenResp& return_val,
       const apache::hive::service::cli::thrift::TRenewDelegationTokenReq& req);
 
-  // Record service rpcs
-  virtual void ExecRequest(recordservice::TExecRequestResult& return_val,
-    const recordservice::TExecRequestParams& req);
-  virtual void GetCount(recordservice::TGetCountResult& return_val,
-      const recordservice::TGetParams& req);
-  virtual void GetColumnarBatch(recordservice::TColumnarRowBatch& return_val,
-      const recordservice::TGetParams& req);
-  template<typename T>
-  bool GetInternal(const recordservice::TGetParams& req, T* result);
-
   // Record service planner rpcs.
   virtual void PlanRequest(recordservice::TPlanRequestResult& return_val,
       const recordservice::TPlanRequestParams& req);
@@ -223,9 +211,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Record service worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,
       const recordservice::TExecTaskParams& req);
-  virtual void Fetch(recordservice::TColumnarRowBatch& return_val,
+  virtual void Fetch(recordservice::TFetchResult& return_val,
       const recordservice::TFetchParams& req);
-  virtual void CancelTask(const recordservice::TUniqueId& req);
+  virtual void CloseTask(const recordservice::TUniqueId& req);
 
   // ImpalaService common extensions (implemented in impala-server.cc)
   // ImpalaInternalService rpcs
@@ -1075,7 +1063,6 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
     int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
     ThriftServer** be_server,
-    ThriftServer** recordservice_server,
     ThriftServer** recordservice_planner_server,
     ThriftServer** recordservice_worker_server,
     ImpalaServer** impala_server);
