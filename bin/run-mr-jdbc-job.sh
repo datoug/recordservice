@@ -30,5 +30,5 @@ echo "Running job against db=$1,tbl=$2,cols=$3. Output to (HDFS): $OUTPUT_DIR"
 JAR_FILE=${IMPALA_HOME}/fe/target/impala-frontend-0.1-SNAPSHOT-jar-with-dependencies.jar
 
 HADOOP_CLASSPATH=$CLASSPATH:${HIVE_HOME}/lib/hive-jdbc-0.13.1-cdh5.4.0-SNAPSHOT.jar \
-    hadoop jar ${JAR_FILE} com.cloudera.recordservice.lib.RecordServiceMRExample \
+    hadoop jar ${JAR_FILE} com.cloudera.recordservice.example.RecordServiceMRExample \
     $1 $2 $3 ${OUTPUT_DIR}
