@@ -261,6 +261,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Returns true if lineage logging is enabled, false otherwise.
   bool IsLineageLoggingEnabled();
 
+  class RecordServiceTaskState;
+
  private:
   friend class ChildQuery;
 
@@ -296,6 +298,17 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
     // Returns the size of this result set in number of rows.
     virtual size_t size() = 0;
+
+    // If true, this result set supports AddRowBatch()
+    // TODO: all Impala result sets should switch to batched and AddOneRow()
+    // should be removed.
+    virtual bool supports_batch_add() const { return false; }
+
+    // Adds rows from [row_idx, row_idx + num_rows) to the result set.
+    virtual void AddRowBatch(RowBatch* batch, int row_idx, int num_rows,
+        std::vector<ExprContext*>* ctxs) {
+      DCHECK(false) << "Not supported";
+    }
   };
 
   // Result set implementations for Beeswax and HS2
@@ -303,8 +316,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   class HS2RowOrientedResultSet;
   class HS2ColumnarResultSet;
   class BaseResultSet;
-  class RecordServiceCountResultSet;
   class RecordServiceColumnarResultSet;
+  class RecordServiceParquetResultSet;
 
   struct SessionState;
 

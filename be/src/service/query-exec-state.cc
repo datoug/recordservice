@@ -699,12 +699,20 @@ Status ImpalaServer::QueryExecState::FetchRowsInternal(const int32_t max_rows,
     int fetched_count = available;
     // max_coord_rows <= 0 means no limit
     if (max_coord_rows > 0 && max_coord_rows < available) fetched_count = max_coord_rows;
-    for (int i = 0; i < fetched_count; ++i) {
-      TupleRow* row = current_batch_->GetRow(current_batch_row_);
-      RETURN_IF_ERROR(GetRowValue(row, &result_row, &scales));
-      RETURN_IF_ERROR(fetched_rows->AddOneRow(result_row, scales));
-      ++num_rows_fetched_;
-      ++current_batch_row_;
+    if (fetched_rows->supports_batch_add()) {
+      fetched_rows->AddRowBatch(current_batch_, current_batch_row_, fetched_count,
+          &output_expr_ctxs_);
+      num_rows_fetched_ += fetched_count;
+      current_batch_row_ += fetched_count;
+
+    } else {
+      for (int i = 0; i < fetched_count; ++i) {
+        TupleRow* row = current_batch_->GetRow(current_batch_row_);
+        RETURN_IF_ERROR(GetRowValue(row, &result_row, &scales));
+        RETURN_IF_ERROR(fetched_rows->AddOneRow(result_row, scales));
+        ++num_rows_fetched_;
+        ++current_batch_row_;
+      }
     }
   }
   ExprContext::FreeLocalAllocations(output_expr_ctxs_);

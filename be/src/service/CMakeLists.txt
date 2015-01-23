@@ -54,7 +54,11 @@ target_link_libraries(impalad
 )
 
 add_executable(record-service-client record-service-client.cc)
-target_link_libraries(record-service-client ImpalaThrift thriftstatic -lboost_date_time)
+target_link_libraries(record-service-client 
+  ImpalaThrift 
+  thriftstatic 
+  -lboost_date_time
+  -lrt)
 
 ADD_BE_TEST(session-expiry-test session-expiry-test.cc)
 ADD_BE_TEST(hs2-util-test hs2-util-test.cc)

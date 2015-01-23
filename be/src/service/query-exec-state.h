@@ -194,6 +194,14 @@ class ImpalaServer::QueryExecState {
   RuntimeProfile::EventSequence* query_events() const { return query_events_; }
   RuntimeProfile* summary_profile() { return &summary_profile_; }
 
+  void SetRecordServiceTaskState(
+      const boost::shared_ptr<ImpalaServer::RecordServiceTaskState>& state) {
+    record_service_task_state_ = state;
+  }
+  ImpalaServer::RecordServiceTaskState* record_service_task_state() {
+    return record_service_task_state_.get();
+  }
+
  private:
   const TQueryCtx query_ctx_;
 
@@ -242,6 +250,8 @@ class ImpalaServer::QueryExecState {
   // then clients cannot restart fetching because some results have been lost since the
   // last fetch. Only set if result_cache_max_size_ > 0.
   boost::scoped_ptr<QueryResultSet> result_cache_;
+
+  boost::shared_ptr<ImpalaServer::RecordServiceTaskState> record_service_task_state_;
 
   // Max size of the result_cache_ in number of rows. A value <= 0 means no caching.
   int64_t result_cache_max_size_;
