@@ -15,24 +15,23 @@
 package com.cloudera.recordservice.lib;
 
 import java.io.IOException;
-import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.mapreduce.InputSplit;
-import org.apache.hadoop.mapreduce.JobContext;
-import org.apache.hadoop.mapreduce.RecordReader;
-import org.apache.hadoop.mapreduce.TaskAttemptContext;
-import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapred.FileInputFormat;
+import org.apache.hadoop.mapred.InputSplit;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.RecordReader;
+import org.apache.hadoop.mapred.Reporter;
 
 /**
  * An InputFormat that reads one or more columns from the RecordService.
  */
-public class RecordServiceInputFormat extends FileInputFormat<Void, Text> {
-  public static final Log LOG =
-      LogFactory.getLog(RecordServiceInputFormat.class);
+public class RecordServiceInputFormat extends FileInputFormat<LongWritable, Text> {
+  public static final Log LOG = LogFactory.getLog(RecordServiceInputFormat.class);
 
   public final static String DB_NAME_CONF = "db.name";
   public final static String TBL_NAME_CONF = "table.name";
@@ -43,8 +42,8 @@ public class RecordServiceInputFormat extends FileInputFormat<Void, Text> {
   private String colNames_;
 
   @Override
-  public List<InputSplit> getSplits(JobContext context) throws IOException {
-    return super.getSplits(context);
+  public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
+    return super.getSplits(jobConf, numSplits);
   }
 
   private void initialize(Configuration jobConf) {
@@ -68,13 +67,11 @@ public class RecordServiceInputFormat extends FileInputFormat<Void, Text> {
    * are returned as a tab-delimited string (Text).
    */
   @Override
-  public RecordReader<Void, Text> createRecordReader(
-      org.apache.hadoop.mapreduce.InputSplit split, TaskAttemptContext context)
-      throws IOException, InterruptedException {
-    initialize(context.getConfiguration());
-    JdbcRecordReader reader = new JdbcRecordReader(dbName_,
-        tblName_, colNames_);
-    reader.initialize(split,  context);
-    return (RecordReader<Void, Text>) reader;
+  public RecordReader<LongWritable, Text> getRecordReader(InputSplit split,
+      JobConf job, Reporter reporter) throws IOException {
+    initialize(job);
+    JdbcRecordReader reader = new JdbcRecordReader(dbName_, tblName_, colNames_);
+    reader.initialize(split);
+    return (RecordReader<LongWritable, Text>) reader;
   }
 }

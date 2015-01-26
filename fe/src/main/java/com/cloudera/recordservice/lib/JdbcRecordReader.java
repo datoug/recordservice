@@ -22,11 +22,11 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.mapreduce.InputSplit;
-import org.apache.hadoop.mapreduce.RecordReader;
-import org.apache.hadoop.mapreduce.TaskAttemptContext;
-import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+import org.apache.hadoop.mapred.FileSplit;
+import org.apache.hadoop.mapred.InputSplit;
+import org.apache.hadoop.mapred.RecordReader;
 
 import com.cloudera.impala.util.ImpalaJdbcClient;
 import com.google.common.base.Joiner;
@@ -38,27 +38,40 @@ import com.google.common.collect.Lists;
  * as a tab-delimited string.
  * Applies a query hint to filter results to only the specified input split.
  */
-public class JdbcRecordReader extends RecordReader<Void, Text> {
-  public static final Log LOG =
-      LogFactory.getLog(JdbcRecordReader.class);
+public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
+  public static final Log LOG = LogFactory.getLog(JdbcRecordReader.class);
 
   private Connection con_;
-  private ImpalaJdbcClient client;
+  private ImpalaJdbcClient client_;
   private ResultSet resultSet_;
   private int columnCount_ = 0;
   List<String> colVals_;
-  private Text value_;
 
   private final String dbName_;
   private final String tblName_;
   private final String colNames_;
   private FileSplit fileSplit_;
+  private long rowPos_;
 
-  public JdbcRecordReader(String dbName, String tblName,
-      String colNames) {
+  public JdbcRecordReader(String dbName, String tblName, String colNames) {
     dbName_ = dbName;
     tblName_ = tblName;
     colNames_ = colNames;
+    colVals_ = Lists.newArrayList();
+    rowPos_ = 0;
+  }
+
+  public void initialize(InputSplit split) throws IOException {
+    Preconditions.checkState(split instanceof FileSplit);
+    fileSplit_ = (FileSplit) split;
+    client_ = ImpalaJdbcClient.createClientUsingHiveJdbcDriver();
+    rowPos_ = fileSplit_.getStart();
+    try {
+      client_.connect();
+      con_ = client_.getConnection();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @Override
@@ -70,25 +83,38 @@ public class JdbcRecordReader extends RecordReader<Void, Text> {
     }
   }
 
-  public boolean next() throws IOException {
-    // Only execute the query the first time the job runs.
-    if (resultSet_ == null) {
-      String query = null;
-      try {
-        // Apply the input split filter.
-        StringBuilder sb = new StringBuilder("SELECT  /* +__input_split__=");
-        sb.append(String.format("%s@%d@%d */", fileSplit_.getPath().toString(),
-            fileSplit_.getStart(),
-            fileSplit_.getLength()));
-        sb.append(String.format(" %s FROM %s.%s", colNames_, dbName_, tblName_));
-        query = sb.toString();
-        resultSet_ = client.execQuery(query);
-        columnCount_ = resultSet_.getMetaData().getColumnCount();
-        colVals_ = Lists.newArrayListWithCapacity(columnCount_);
-      } catch (SQLException e) {
-        throw new RuntimeException("Error issuing query: '" + query + "': ", e);
-      }
+  private void execQuery() {
+    Preconditions.checkNotNull(fileSplit_);
+    // Build query and apply the input split filter.
+    StringBuilder sb = new StringBuilder("SELECT  /* +__input_split__=");
+    sb.append(String.format("%s@%d@%d */", fileSplit_.getPath().toString(),
+        fileSplit_.getStart(),
+        fileSplit_.getLength()));
+    sb.append(String.format(" %s FROM %s.%s", colNames_, dbName_, tblName_));
+    String query = sb.toString();
+
+    try {
+      resultSet_ = client_.execQuery(query);
+      columnCount_ = resultSet_.getMetaData().getColumnCount();
+    } catch (SQLException e) {
+      throw new RuntimeException("Error issuing query: '" + query + "': ", e);
     }
+  }
+
+  /**
+   * Gets the next row value and stores it in 'value'. Currently, row is returned as a
+   * string with column values tab-separated.
+   * Returns true if more results are available, false otherwise.
+   * TODO: Return results in a more structured format (eg HCatRecord). Results should
+   * also be returned as a batch or rows, rather than a single row at a time.
+   */
+  @Override
+  public boolean next(LongWritable key, Text value) throws IOException {
+    Preconditions.checkNotNull(value);
+
+    // Only execute the query the first time the job runs.
+    if (resultSet_ == null) execQuery();
+    Preconditions.checkNotNull(resultSet_);
 
     try {
       // All done.
@@ -98,9 +124,7 @@ public class JdbcRecordReader extends RecordReader<Void, Text> {
           dbName_ + "." + tblName_, e);
     }
 
-    Preconditions.checkNotNull(colVals_);
     colVals_.clear();
-
     try {
       // Column indexing starts at 1.
       for (int i = 1; i <= columnCount_; ++i) {
@@ -109,48 +133,30 @@ public class JdbcRecordReader extends RecordReader<Void, Text> {
     } catch (SQLException e) {
       throw new RuntimeException("Error getting column: ", e);
     }
-    value_.set(Joiner.on("\t").join(colVals_));
+
+    value.set(Joiner.on("\t").join(colVals_));
+    ++rowPos_;
     return true;
   }
 
   @Override
-  public void initialize(InputSplit split, TaskAttemptContext context)
-      throws IOException, InterruptedException {
-    client = ImpalaJdbcClient.createClientUsingHiveJdbcDriver();
-    try {
-      client.connect();
-      con_ = client.getConnection();
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
-    Preconditions.checkState(split instanceof FileSplit);
-    fileSplit_ = (FileSplit) split;
-  }
-
-  @Override
-  public boolean nextKeyValue() throws IOException, InterruptedException {
-    if (value_ == null) value_ = new Text();
-    return next();
-  }
-
-  @Override
-  public Void getCurrentKey() throws IOException, InterruptedException {
-    return null;
-  }
-
-  /**
-   * Gets the current row. Returns results as a string, with columns separated
-   * by tabs.
-   * TODO: Return something that is more structured (ex.  Avro).
-   */
-  @Override
-  public Text getCurrentValue() throws IOException, InterruptedException {
-    return value_;
-  }
-
-  @Override
-  public float getProgress() throws IOException, InterruptedException {
+  public float getProgress() throws IOException {
     // TODO: What to put here?
     return 0;
+  }
+
+  @Override
+  public LongWritable createKey() {
+    return new LongWritable();
+  }
+
+  @Override
+  public Text createValue() {
+    return new Text();
+  }
+
+  @Override
+  public long getPos() throws IOException {
+    return rowPos_;
   }
 }
