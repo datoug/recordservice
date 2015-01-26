@@ -36,6 +36,7 @@
 #include "exec/select-node.h"
 #include "exec/partitioned-aggregation-node.h"
 #include "exec/partitioned-hash-join-node.h"
+#include "exec/record-service-scan-node.h"
 #include "exec/sort-node.h"
 #include "exec/topn-node.h"
 #include "exec/union-node.h"
@@ -189,14 +190,14 @@ void ExecNode::AddRuntimeExecOption(const string& str) {
   runtime_profile()->AddInfoString("ExecOption", runtime_exec_options_);
 }
 
-Status ExecNode::CreateTree(ObjectPool* pool, const TPlan& plan,
+Status ExecNode::CreateTree(RuntimeState* state, const TPlan& plan,
                             const DescriptorTbl& descs, ExecNode** root) {
   if (plan.nodes.size() == 0) {
     *root = NULL;
     return Status::OK;
   }
   int node_idx = 0;
-  Status status = CreateTreeHelper(pool, plan.nodes, descs, NULL, &node_idx, root);
+  Status status = CreateTreeHelper(state, plan.nodes, descs, NULL, &node_idx, root);
   if (status.ok() && node_idx + 1 != plan.nodes.size()) {
     status = Status(
         "Plan tree only partially reconstructed. Not all thrift nodes were used.");
@@ -209,7 +210,7 @@ Status ExecNode::CreateTree(ObjectPool* pool, const TPlan& plan,
 }
 
 Status ExecNode::CreateTreeHelper(
-    ObjectPool* pool,
+    RuntimeState* state,
     const vector<TPlanNode>& tnodes,
     const DescriptorTbl& descs,
     ExecNode* parent,
@@ -221,7 +222,7 @@ Status ExecNode::CreateTreeHelper(
   }
   int num_children = tnodes[*node_idx].num_children;
   ExecNode* node = NULL;
-  RETURN_IF_ERROR(CreateNode(pool, tnodes[*node_idx], descs, &node));
+  RETURN_IF_ERROR(CreateNode(state, tnodes[*node_idx], descs, &node));
   // assert(parent != NULL || (node_idx == 0 && root_expr != NULL));
   if (parent != NULL) {
     parent->children_.push_back(node);
@@ -230,7 +231,7 @@ Status ExecNode::CreateTreeHelper(
   }
   for (int i = 0; i < num_children; ++i) {
     ++*node_idx;
-    RETURN_IF_ERROR(CreateTreeHelper(pool, tnodes, descs, node, node_idx, NULL));
+    RETURN_IF_ERROR(CreateTreeHelper(state, tnodes, descs, node, node_idx, NULL));
     // we are expecting a child, but have used all nodes
     // this means we have been given a bad tree and must fail
     if (*node_idx >= tnodes.size()) {
@@ -250,12 +251,17 @@ Status ExecNode::CreateTreeHelper(
   return Status::OK;
 }
 
-Status ExecNode::CreateNode(ObjectPool* pool, const TPlanNode& tnode,
+Status ExecNode::CreateNode(RuntimeState* state, const TPlanNode& tnode,
                             const DescriptorTbl& descs, ExecNode** node) {
+  ObjectPool* pool = state->obj_pool();
   stringstream error_msg;
   switch (tnode.node_type) {
     case TPlanNodeType::HDFS_SCAN_NODE:
-      *node = pool->Add(new HdfsScanNode(pool, tnode, descs));
+      if (state->query_options().use_record_service) {
+        *node = pool->Add(new RecordServiceScanNode(pool, tnode, descs));
+      } else {
+        *node = pool->Add(new HdfsScanNode(pool, tnode, descs));
+      }
       break;
     case TPlanNodeType::HBASE_SCAN_NODE:
       *node = pool->Add(new HBaseScanNode(pool, tnode, descs));

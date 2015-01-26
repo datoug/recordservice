@@ -165,6 +165,9 @@ enum TImpalaQueryOptions {
   // If the number of rows that are processed for a single query is below the
   // threshold, it will be executed on the coordinator only with codegen disabled
   EXEC_SINGLE_NODE_ROWS_THRESHOLD
+
+  // If true, scanners should use the record service instead.
+  USE_RECORD_SERVICE
 }
 
 // The summary of an insert.

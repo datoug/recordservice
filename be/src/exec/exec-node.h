@@ -104,7 +104,7 @@ class ExecNode {
   // Creates exec node tree from list of nodes contained in plan via depth-first
   // traversal. All nodes are placed in pool.
   // Returns error if 'plan' is corrupted, otherwise success.
-  static Status CreateTree(ObjectPool* pool, const TPlan& plan,
+  static Status CreateTree(RuntimeState* state, const TPlan& plan,
                            const DescriptorTbl& descs, ExecNode** root);
 
   // Set debug action for node with given id in 'tree'
@@ -232,11 +232,12 @@ class ExecNode {
   bool is_closed() { return is_closed_; }
 
   // Create a single exec node derived from thrift node; place exec node in 'pool'.
-  static Status CreateNode(ObjectPool* pool, const TPlanNode& tnode,
+  static Status CreateNode(RuntimeState* state, const TPlanNode& tnode,
                            const DescriptorTbl& descs, ExecNode** node);
 
-  static Status CreateTreeHelper(ObjectPool* pool, const std::vector<TPlanNode>& tnodes,
-      const DescriptorTbl& descs, ExecNode* parent, int* node_idx, ExecNode** root);
+  static Status CreateTreeHelper(RuntimeState* state,
+      const std::vector<TPlanNode>& tnodes, const DescriptorTbl& descs,
+      ExecNode* parent, int* node_idx, ExecNode** root);
 
   virtual bool IsScanNode() const { return false; }
 
