@@ -26,6 +26,7 @@ import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.FileSplit;
 import org.apache.hadoop.mapred.InputSplit;
+import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 
 import com.cloudera.impala.util.ImpalaJdbcClient;
@@ -35,11 +36,15 @@ import com.google.common.collect.Lists;
 
 /**
  * Reads one or more columns from a table via JDBC and returns results as
- * as a tab-delimited string.
+ * as a string, with fields delimited by 'recordservice.field.delim'.
  * Applies a query hint to filter results to only the specified input split.
  */
 public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
   public static final Log LOG = LogFactory.getLog(JdbcRecordReader.class);
+
+  // The delimiter for separating fields.
+  public final static String RS_FIELD_DELIM = "recordservice.jdbc.field.delim";
+  public final static String RS_FIELD_DELIM_DEFAULT_VALUE = ",";
 
   private Connection con_;
   private ImpalaJdbcClient client_;
@@ -50,14 +55,17 @@ public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
   private final String dbName_;
   private final String tblName_;
   private final String colNames_;
+  private final String fieldDelim_;
   private FileSplit fileSplit_;
   private long rowPos_;
 
-  public JdbcRecordReader(String dbName, String tblName, String colNames) {
+  public JdbcRecordReader(JobConf jobConf, String dbName, String tblName,
+      String colNames) {
     dbName_ = dbName;
     tblName_ = tblName;
     colNames_ = colNames;
     colVals_ = Lists.newArrayList();
+    fieldDelim_ = jobConf.get(RS_FIELD_DELIM, RS_FIELD_DELIM_DEFAULT_VALUE);
     rowPos_ = 0;
   }
 
@@ -66,6 +74,7 @@ public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
     fileSplit_ = (FileSplit) split;
     client_ = ImpalaJdbcClient.createClientUsingHiveJdbcDriver();
     rowPos_ = fileSplit_.getStart();
+
     try {
       client_.connect();
       con_ = client_.getConnection();
@@ -103,7 +112,7 @@ public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
 
   /**
    * Gets the next row value and stores it in 'value'. Currently, row is returned as a
-   * string with column values tab-separated.
+   * string with fields separated with 'recordservice.field.delim'.
    * Returns true if more results are available, false otherwise.
    * TODO: Return results in a more structured format (eg HCatRecord). Results should
    * also be returned as a batch or rows, rather than a single row at a time.
@@ -134,7 +143,7 @@ public class JdbcRecordReader implements RecordReader<LongWritable, Text> {
       throw new RuntimeException("Error getting column: ", e);
     }
 
-    value.set(Joiner.on("\t").join(colVals_));
+    value.set(Joiner.on(fieldDelim_).join(colVals_));
     ++rowPos_;
     return true;
   }

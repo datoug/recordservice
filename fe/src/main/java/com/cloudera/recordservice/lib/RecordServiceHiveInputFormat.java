@@ -92,7 +92,7 @@ public class RecordServiceHiveInputFormat<K extends WritableComparable,
 
     // Create a RecordServiceRecordReader and wrap it with a HiveRecordReader
     // to read the data.
-    JdbcRecordReader rsRr = new JdbcRecordReader(dbName_, tblName_, colNames_);
+    JdbcRecordReader rsRr = new JdbcRecordReader(job, dbName_, tblName_, colNames_);
     rsRr.initialize(hsplit);
 
     // Pass the RecordService as the target InputFormat (this will override

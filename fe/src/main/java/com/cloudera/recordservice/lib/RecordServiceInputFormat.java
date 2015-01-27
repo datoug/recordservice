@@ -33,9 +33,9 @@ import org.apache.hadoop.mapred.Reporter;
 public class RecordServiceInputFormat extends FileInputFormat<LongWritable, Text> {
   public static final Log LOG = LogFactory.getLog(RecordServiceInputFormat.class);
 
-  public final static String DB_NAME_CONF = "db.name";
-  public final static String TBL_NAME_CONF = "table.name";
-  public final static String COL_NAMES_CONF = "col.names";
+  public final static String DB_NAME_CONF = "recordservice.db.name";
+  public final static String TBL_NAME_CONF = "recordservice.table.name";
+  public final static String COL_NAMES_CONF = "recordservice.col.names";
 
   private String dbName_;
   private String tblName_;
@@ -70,7 +70,7 @@ public class RecordServiceInputFormat extends FileInputFormat<LongWritable, Text
   public RecordReader<LongWritable, Text> getRecordReader(InputSplit split,
       JobConf job, Reporter reporter) throws IOException {
     initialize(job);
-    JdbcRecordReader reader = new JdbcRecordReader(dbName_, tblName_, colNames_);
+    JdbcRecordReader reader = new JdbcRecordReader(job, dbName_, tblName_, colNames_);
     reader.initialize(split);
     return (RecordReader<LongWritable, Text>) reader;
   }
