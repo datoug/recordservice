@@ -75,12 +75,11 @@ public class SelectList {
   public void analyzePlanHints(Analyzer analyzer) throws AnalysisException {
     if (planHints_ == null) return;
     for (String hint: planHints_) {
-      hint = hint.toLowerCase();
-
       // Hint to only consider data files within the specified input split.
-      if (hint.startsWith("__input_split__=")) {
+
+      if (hint.toLowerCase().startsWith("__input_split__=")) {
         InputSplitFilter filter = new InputSplitFilter(
-            hint.replace("__input_split__=", ""));
+            hint.toLowerCase().replace("__input_split__=", ""));
         filter.analyze(analyzer);
         analyzer.setInputSplitFilter(filter);
         continue;
