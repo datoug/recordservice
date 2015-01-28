@@ -304,6 +304,47 @@ shared_ptr<ImpalaServer::SessionState> ImpalaServer::GetRecordServiceSession() {
   return record_service_session_;
 }
 
+recordservice::TType ToRecordServiceType(const ColumnType& t) {
+  recordservice::TType result;
+  switch (t.type) {
+    case TYPE_BOOLEAN:
+      result.type_id = recordservice::TTypeId::BOOLEAN;
+      break;
+    case TYPE_TINYINT:
+      result.type_id = recordservice::TTypeId::TINYINT;
+      break;
+    case TYPE_SMALLINT:
+      result.type_id = recordservice::TTypeId::SMALLINT;
+      break;
+    case TYPE_INT:
+      result.type_id = recordservice::TTypeId::INT;
+      break;
+    case TYPE_BIGINT:
+      result.type_id = recordservice::TTypeId::BIGINT;
+      break;
+    case TYPE_FLOAT:
+      result.type_id = recordservice::TTypeId::FLOAT;
+      break;
+    case TYPE_DOUBLE:
+      result.type_id = recordservice::TTypeId::DOUBLE;
+      break;
+    case TYPE_STRING:
+      result.type_id = recordservice::TTypeId::STRING;
+      break;
+    case TYPE_TIMESTAMP:
+      result.type_id = recordservice::TTypeId::TIMESTAMP;
+      break;
+    case TYPE_DECIMAL:
+      result.type_id = recordservice::TTypeId::DECIMAL;
+      result.__set_precision(t.precision);
+      result.__set_scale(t.scale);
+      break;
+    default:
+      ThrowException("Not supported type.");
+  }
+    return result;
+}
+
 //
 // RecordServicePlanner
 //
@@ -330,6 +371,15 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
   if (result.stmt_type != TStmtType::QUERY) ThrowException("Cannot run non-SELECT stmts");
 
+  // Extract the types of the result.
+  DCHECK(result.__isset.result_set_metadata);
+  const TResultSetMetadata& metadata = result.result_set_metadata;
+  //return_val.schema.cols.size(metadata.columns.size());
+  for (int i = 0; i < metadata.columns.size(); ++i) {
+    ColumnType type(metadata.columns[i].columnType);
+    return_val.schema.cols.push_back(ToRecordServiceType(type));
+  }
+
   // Walk the plan to compute the tasks. We want to find the scan nodes
   // and distribute them.
   // TODO: total hack. We're reverse engineering the planner output here.
@@ -352,7 +402,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       << "single node plan should have 1 plan node";
   const vector<TScanRangeLocations>& ranges =
       query_request.per_node_scan_ranges.begin()->second;
-
 
   // Rewrite the original sql stmt with the input split hint inserted.
   string sql = req.sql_stmt;
