@@ -523,6 +523,20 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
   UnregisterQuery(query_id, true);
 }
 
+// Macros to convert from runtime profile counters to metrics object.
+// Also does unit conversion (i.e. STAT_MS converts to millis).
+#define SET_STAT_FROM_PROFILE(profile, counter_name, stats, stat_name)\
+  do {\
+    RuntimeProfile::Counter* c = profile->GetCounter(counter_name);\
+    if (c != NULL) stats.__set_##stat_name(c->value());\
+  } while(false)
+
+#define SET_STAT_MS_FROM_PROFILE(profile, counter_name, stats, stat_name)\
+  do {\
+    RuntimeProfile::Counter* c = profile->GetCounter(counter_name);\
+    if (c != NULL) stats.__set_##stat_name(c->value() / 1000000);\
+  } while(false)
+
 void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
       const recordservice::TUniqueId& req) {
   TUniqueId query_id;
@@ -538,16 +552,10 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
 
   // Extract counters from runtime profile. This is a hack too.
   RuntimeProfile* server_profile = exec_state->server_profile();
-  RuntimeProfile::Counter* materialize_counter =
-      server_profile->GetCounter("RowMaterializationTimer");
-  RuntimeProfile::Counter* client_counter =
-      server_profile->GetCounter("ClientFetchWaitTimer");
-  if (materialize_counter != NULL) {
-    return_val.__set_serialize_time_ms(materialize_counter->value() / 1000000);
-  }
-  if (client_counter != NULL) {
-    return_val.__set_client_time_ms(client_counter->value() / 1000000);
-  }
+  SET_STAT_MS_FROM_PROFILE(server_profile, "RowMaterializationTimer",
+      return_val, serialize_time_ms);
+  SET_STAT_MS_FROM_PROFILE(server_profile, "ClientFetchWaitTimer",
+      return_val, client_time_ms);
 
   RuntimeProfile* coord_profile = coord->query_profile();
   vector<RuntimeProfile*> children;
@@ -555,10 +563,9 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   for (int i = 0; i < children.size(); ++i) {
     if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
     RuntimeProfile* profile = children[i];
+
     RuntimeProfile::Counter* bytes_assigned = profile->GetCounter("BytesAssigned");
     RuntimeProfile::Counter* bytes_read = profile->GetCounter("BytesRead");
-    RuntimeProfile::Counter* bytes_read_local = profile->GetCounter("BytesReadLocal");
-
     if (bytes_read != NULL) {
       return_val.__set_bytes_read(bytes_read->value());
       if (bytes_assigned != NULL) {
@@ -568,9 +575,15 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
         return_val.__set_completion_percentage(percent * 100);
       }
     }
-    if (bytes_read_local != NULL) {
-      return_val.__set_bytes_read_local(bytes_read_local->value());
-    }
+
+    SET_STAT_FROM_PROFILE(profile, "BytesReadLocal", return_val, bytes_read_local);
+    SET_STAT_FROM_PROFILE(profile, "RowsRead", return_val, num_rows_read);
+    SET_STAT_FROM_PROFILE(profile, "RowsReturned", return_val, num_rows_returned);
+    SET_STAT_MS_FROM_PROFILE(profile, "DecompressionTime", return_val,
+        decompress_time_ms);
+    // TODO: we can't get all stats until we call close on the fragment. Impala
+    // should close when all rows are returned.
+    // implement hdfs throughput when that works.
   }
 }
 
