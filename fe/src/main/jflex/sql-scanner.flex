@@ -166,6 +166,7 @@ import com.cloudera.impala.analysis.SqlParserSymbols;
     keywordMap.put("rcfile", new Integer(SqlParserSymbols.KW_RCFILE));
     keywordMap.put("real", new Integer(SqlParserSymbols.KW_DOUBLE));
     keywordMap.put("recordservice", new Integer(SqlParserSymbols.KW_RECORDSERVICE));
+    keywordMap.put("recover", new Integer(SqlParserSymbols.KW_RECOVER));
     keywordMap.put("refresh", new Integer(SqlParserSymbols.KW_REFRESH));
     keywordMap.put("regexp", new Integer(SqlParserSymbols.KW_REGEXP));
     keywordMap.put("rename", new Integer(SqlParserSymbols.KW_RENAME));
