@@ -581,9 +581,8 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
     SET_STAT_FROM_PROFILE(profile, "RowsReturned", return_val, num_rows_returned);
     SET_STAT_MS_FROM_PROFILE(profile, "DecompressionTime", return_val,
         decompress_time_ms);
-    // TODO: we can't get all stats until we call close on the fragment. Impala
-    // should close when all rows are returned.
-    // implement hdfs throughput when that works.
+    SET_STAT_FROM_PROFILE(profile, "PerReadThreadRawHdfsThroughput", return_val,
+        hdfs_throughput);
   }
 }
 
