@@ -374,10 +374,11 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   // Extract the types of the result.
   DCHECK(result.__isset.result_set_metadata);
   const TResultSetMetadata& metadata = result.result_set_metadata;
-  //return_val.schema.cols.size(metadata.columns.size());
+  return_val.schema.cols.resize(metadata.columns.size());
   for (int i = 0; i < metadata.columns.size(); ++i) {
     ColumnType type(metadata.columns[i].columnType);
-    return_val.schema.cols.push_back(ToRecordServiceType(type));
+    return_val.schema.cols[i].type = ToRecordServiceType(type);
+    return_val.schema.cols[i].name = metadata.columns[i].columnName;
   }
 
   // Walk the plan to compute the tasks. We want to find the scan nodes
