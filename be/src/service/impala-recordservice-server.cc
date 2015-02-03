@@ -45,10 +45,28 @@ static const int DEFAULT_FETCH_SIZE = 5000;
 
 namespace impala {
 
-inline void ThrowException(const string& msg) {
-  recordservice::RecordServiceException ex;
+inline void ThrowException(const recordservice::TErrorCode::type& code,
+    const string& msg) {
+  recordservice::TRecordServiceException ex;
+  ex.code = code;
   ex.message = msg;
   throw ex;
+}
+
+inline void ThrowFetchException(const Status& status) {
+  DCHECK(!status.ok());
+  recordservice::TRecordServiceException ex;
+  if (status.IsCancelled()) {
+    ex.code = recordservice::TErrorCode::CANCELLED;
+    ex.message = "Task failed because it was cancelled.";
+  } else if (status.IsMemLimitExceeded()) {
+    ex.code = recordservice::TErrorCode::OUT_OF_MEMORY;
+    ex.message = "Task failed because it ran out of memory.";
+  } else {
+    ex.code = recordservice::TErrorCode::INTERNAL_ERROR;
+    ex.message = "Task failed due to an internal error.";
+  }
+  ex.__set_detail(status.GetErrorMsg());
 }
 
 // Base class for test result set serializations. The functions in here and
@@ -340,7 +358,8 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
       result.__set_scale(t.scale);
       break;
     default:
-      ThrowException("Not supported type.");
+      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+          "Not supported type.");
   }
     return result;
 }
@@ -353,7 +372,9 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   LOG(ERROR) << "RecordService::PlanRequest: " << req.sql_stmt;
 
   if (IsOffline()) {
-    ThrowException("This Impala server is offline. Please retry your query later.");
+    ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
+        "This RecordServicePlanner is not ready to accept requests."
+        " Retry your request later.");
   }
 
   TQueryCtx query_ctx;
@@ -367,9 +388,15 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   // Get the plan. This is the normal Impala plan.
   TExecRequest result;
   Status status = exec_env_->frontend()->GetExecRequest(query_ctx, &result);
-  if (!status.ok()) ThrowException(status.GetErrorMsg());
+  if (!status.ok()) {
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        status.GetErrorMsg());
+  }
 
-  if (result.stmt_type != TStmtType::QUERY) ThrowException("Cannot run non-SELECT stmts");
+  if (result.stmt_type != TStmtType::QUERY) {
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        "Cannot run non-SELECT statements");
+  }
 
   // Extract the types of the result.
   DCHECK(result.__isset.result_set_metadata);
@@ -437,7 +464,9 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     const recordservice::TExecTaskParams& req) {
   if (IsOffline()) {
-    ThrowException("This Impala server is offline. Please retry your query later.");
+    ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
+        "This RecordServicePlanner is not ready to accept request."
+        " Retry your request later.");
   }
 
   GetRecordServiceSession();
@@ -454,7 +483,9 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
 
   shared_ptr<QueryExecState> exec_state;
   Status status = Execute(&query_ctx, record_service_session_, &exec_state);
-  if (!status.ok()) ThrowException(status.GetErrorMsg());
+  if (!status.ok()) {
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+  }
 
   shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
   exec_state->SetRecordServiceTaskState(task_state);
@@ -472,7 +503,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       task_state->results.reset(new RecordServiceParquetResultSet());
       break;
     default:
-      ThrowException("Service does not support this row batch format.");
+      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+          "Service does not support this row batch format.");
   }
   task_state->results->Init(*exec_state->result_metadata(), task_state->fetch_size);
 
@@ -493,7 +525,9 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
   query_id.lo = req.handle.lo;
 
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
-  if (exec_state.get() == NULL) ThrowException("Invalid handle");
+  if (exec_state.get() == NULL) {
+    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+  }
 
   RecordServiceTaskState* task_state = exec_state->record_service_task_state();
   exec_state->BlockOnWait();
@@ -505,7 +539,8 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
 
   Status status = exec_state->FetchRows(
       task_state->fetch_size, task_state->results.get());
-  if (!status.ok()) ThrowException(status.GetErrorMsg());
+  if (!status.ok()) ThrowFetchException(status);
+
   return_val.done = exec_state->eos();
   return_val.row_batch_format = task_state->format;
 
@@ -544,12 +579,17 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   query_id.hi = req.hi;
   query_id.lo = req.lo;
 
+  // TODO: should this grab the lock in GetQueryExecState()?
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
-  if (exec_state.get() == NULL) ThrowException("Invalid handle");
+  if (exec_state.get() == NULL) {
+    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+  }
 
   lock_guard<mutex> l(*exec_state->lock());
   Coordinator* coord = exec_state->coord();
-  if (coord == NULL) ThrowException("Invalid handle");
+  if (coord == NULL) {
+    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+  }
 
   // Extract counters from runtime profile. This is a hack too.
   RuntimeProfile* server_profile = exec_state->server_profile();

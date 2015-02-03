@@ -119,7 +119,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
 
     try {
       rsw_client_->iface()->ExecTask(result, params);
-    } catch (const recordservice::RecordServiceException& e) {
+    } catch (const recordservice::TRecordServiceException& e) {
       return Status(e.message.c_str());
     } catch (const std::exception& e) {
       return Status(e.what());
@@ -220,7 +220,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
       rsw_client_->iface()->CloseTask(tasks_[task_id_].handle);
       ++task_id_;
     }
-  } catch (const recordservice::RecordServiceException& e) {
+  } catch (const recordservice::TRecordServiceException& e) {
     return Status(e.message.c_str());
   } catch (const std::exception& e) {
     return Status(e.what());
@@ -236,7 +236,7 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
       try {
         rsw_client_->iface()->CloseTask(tasks_[i].handle);
         tasks_[i].connected = false;
-      } catch (const recordservice::RecordServiceException& e) {
+      } catch (const recordservice::TRecordServiceException& e) {
         state->LogError(e.message);
       } catch (const std::exception& e) {
         state->LogError(e.what());
