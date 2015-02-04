@@ -59,6 +59,7 @@ add_library(Util
   pprof-path-handlers.cc
 # TODO: not supported on RHEL 5
 #  perf-counters.cc
+  process-state-info.cc
   progress-updater.cc
   recordservice-metrics.cc
   redactor.cc
@@ -125,4 +126,4 @@ ADD_BE_TEST(redactor-test)
 ADD_BE_TEST(redactor-unconfigured-test)
 ADD_BE_TEST(error-util-test)
 target_link_libraries(error-util-test Util)
-ADD_BE_TEST(mem-info-test)
+ADD_BE_TEST(proc-info-test)
