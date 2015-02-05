@@ -207,6 +207,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Record service planner rpcs.
   virtual void PlanRequest(recordservice::TPlanRequestResult& return_val,
       const recordservice::TPlanRequestParams& req);
+  virtual recordservice::TProtocolVersion::type GetProtocolVersion();
 
   // Record service worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,

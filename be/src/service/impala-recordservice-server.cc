@@ -627,4 +627,8 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   }
 }
 
+recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
+  return recordservice::TProtocolVersion::V1;
+}
+
 }
