@@ -522,8 +522,12 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   //}
   result.access_events.clear();
 
-  // TODO : Send analysis warning as part of TPlanRequestResult.
-  //req.__set_analysis_warnings(result.analysis_warnings);
+  // Send analysis warning as part of TPlanRequestResult.
+  for (int i = 0; i < result.analysis_warnings.size(); ++i) {
+    recordservice::TLogMessage msg;
+    msg.message = result.analysis_warnings[i];
+    return_val.warnings.push_back(msg);
+  }
   result.analysis_warnings.clear();
 
   // Empty scan, just return. No tasks to generate.
@@ -539,7 +543,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   //  2. Modify it so it contains just enough information for the scan range it is for.
   //  3. Reserialize and compress it.
   // TODO : we would need to encrypt the TExecRequest object for security. The client
-  // cannot tampler with the task object.
+  // cannot tamper with the task object.
   int buffer_size = 100 * 1024;  // start out with 100KB
   ThriftSerializer serializer(true, buffer_size);
 
@@ -771,12 +775,14 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
 // Macros to convert from runtime profile counters to metrics object.
 // Also does unit conversion (i.e. STAT_MS converts to millis).
 #define SET_STAT_MS_FROM_COUNTER(counter, stat_name)\
-  if (counter != NULL) return_val.__set_##stat_name(counter->value() / 1000000)
+  if (counter != NULL) return_val.stats.__set_##stat_name(counter->value() / 1000000)
 
 #define SET_STAT_FROM_COUNTER(counter, stat_name)\
-  if (counter != NULL) return_val.__set_##stat_name(counter->value())
+  if (counter != NULL) return_val.stats.__set_##stat_name(counter->value())
 
-void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
+// TODO: send back warnings from the runtime state. Impala doesn't generate them
+// in the most useful way right now. Fix that.
+void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
       const recordservice::TUniqueId& req) {
   TUniqueId query_id;
   query_id.hi = req.hi;
@@ -797,7 +803,7 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   }
 
   // Populate the results from the counters.
-  return_val.__set_completion_percentage(ComputeCompletionPercentage(
+  return_val.stats.__set_completion_percentage(ComputeCompletionPercentage(
       task_state->bytes_read_counter, task_state->bytes_assigned_counter));
   SET_STAT_MS_FROM_COUNTER(task_state->serialize_timer, serialize_time_ms);
   SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
