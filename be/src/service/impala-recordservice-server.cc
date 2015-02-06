@@ -134,9 +134,26 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
 // to separate from Impala code.
 class ImpalaServer::RecordServiceTaskState {
  public:
+  RecordServiceTaskState() : counters_initialized(false) {}
+
   int fetch_size;
+
   recordservice::TRowBatchFormat::type format;
   scoped_ptr<ImpalaServer::BaseResultSet> results;
+
+  // Populated on first call to Fetch(). At that point the query has for sure
+  // made enough progress that the counters are initialized.
+  bool counters_initialized;
+  RuntimeProfile::Counter* serialize_timer;
+  RuntimeProfile::Counter* client_timer;
+
+  RuntimeProfile::Counter* bytes_assigned_counter;
+  RuntimeProfile::Counter* bytes_read_counter;
+  RuntimeProfile::Counter* bytes_read_local_counter;
+  RuntimeProfile::Counter* rows_read_counter;
+  RuntimeProfile::Counter* rows_returned_counter;
+  RuntimeProfile::Counter* decompression_timer;
+  RuntimeProfile::Counter* hdfs_throughput_counter;
 };
 
 class ImpalaServer::RecordServiceColumnarResultSet : public ImpalaServer::BaseResultSet {
@@ -518,6 +535,15 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   return_val.handle.lo = exec_state->query_id().lo;
 }
 
+// Computes the percent of num/denom
+static double ComputeCompletionPercentage(RuntimeProfile::Counter* num,
+    RuntimeProfile::Counter* denom) {
+  if (num == NULL || denom == NULL || denom->value() == 0) return 0;
+  double result = (double)num->value() / (double)denom->value();
+  if (result > 1) result = 1;
+  return result * 100;
+}
+
 void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
     const recordservice::TFetchParams& req) {
   TUniqueId query_id;
@@ -541,7 +567,34 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
       task_state->fetch_size, task_state->results.get());
   if (!status.ok()) ThrowFetchException(status);
 
+  if (!task_state->counters_initialized) {
+    // First time the client called fetch. Extract the counters.
+    RuntimeProfile* server_profile = exec_state->server_profile();
+
+    task_state->serialize_timer = server_profile->GetCounter("RowMaterializationTimer");
+    task_state->client_timer = server_profile->GetCounter("ClientFetchWaitTimer");
+
+    RuntimeProfile* coord_profile = exec_state->coord()->query_profile();
+    vector<RuntimeProfile*> children;
+    coord_profile->GetAllChildren(&children);
+    for (int i = 0; i < children.size(); ++i) {
+      if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
+      RuntimeProfile* profile = children[i];
+      task_state->bytes_assigned_counter = profile->GetCounter("BytesAssigned");
+      task_state->bytes_read_counter = profile->GetCounter("BytesRead");
+      task_state->bytes_read_local_counter = profile->GetCounter("BytesReadLocal");
+      task_state->rows_read_counter = profile->GetCounter("RowsRead");
+      task_state->rows_returned_counter = profile->GetCounter("RowsReturned");
+      task_state->decompression_timer = profile->GetCounter("DecompressionTime");
+      task_state->hdfs_throughput_counter =
+        profile->GetCounter("PerReadThreadRawHdfsThroughput");
+    }
+    task_state->counters_initialized = true;
+  }
+
   return_val.done = exec_state->eos();
+  return_val.task_completion_percentage = ComputeCompletionPercentage(
+      task_state->bytes_read_counter, task_state->bytes_assigned_counter);
   return_val.row_batch_format = task_state->format;
 
   task_state->results->FinalizeResult();
@@ -561,17 +614,11 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
 
 // Macros to convert from runtime profile counters to metrics object.
 // Also does unit conversion (i.e. STAT_MS converts to millis).
-#define SET_STAT_FROM_PROFILE(profile, counter_name, stats, stat_name)\
-  do {\
-    RuntimeProfile::Counter* c = profile->GetCounter(counter_name);\
-    if (c != NULL) stats.__set_##stat_name(c->value());\
-  } while(false)
+#define SET_STAT_MS_FROM_COUNTER(counter, stat_name)\
+  if (counter != NULL) return_val.__set_##stat_name(counter->value() / 1000000)
 
-#define SET_STAT_MS_FROM_PROFILE(profile, counter_name, stats, stat_name)\
-  do {\
-    RuntimeProfile::Counter* c = profile->GetCounter(counter_name);\
-    if (c != NULL) stats.__set_##stat_name(c->value() / 1000000);\
-  } while(false)
+#define SET_STAT_FROM_COUNTER(counter, stat_name)\
+  if (counter != NULL) return_val.__set_##stat_name(counter->value())
 
 void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
       const recordservice::TUniqueId& req) {
@@ -586,45 +633,24 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   }
 
   lock_guard<mutex> l(*exec_state->lock());
-  Coordinator* coord = exec_state->coord();
-  if (coord == NULL) {
-    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+
+  RecordServiceTaskState* task_state = exec_state->record_service_task_state();
+  if (!task_state->counters_initialized) {
+    // Task hasn't started enough to have counters.
+    return;
   }
 
-  // Extract counters from runtime profile. This is a hack too.
-  RuntimeProfile* server_profile = exec_state->server_profile();
-  SET_STAT_MS_FROM_PROFILE(server_profile, "RowMaterializationTimer",
-      return_val, serialize_time_ms);
-  SET_STAT_MS_FROM_PROFILE(server_profile, "ClientFetchWaitTimer",
-      return_val, client_time_ms);
-
-  RuntimeProfile* coord_profile = coord->query_profile();
-  vector<RuntimeProfile*> children;
-  coord_profile->GetAllChildren(&children);
-  for (int i = 0; i < children.size(); ++i) {
-    if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
-    RuntimeProfile* profile = children[i];
-
-    RuntimeProfile::Counter* bytes_assigned = profile->GetCounter("BytesAssigned");
-    RuntimeProfile::Counter* bytes_read = profile->GetCounter("BytesRead");
-    if (bytes_read != NULL) {
-      return_val.__set_bytes_read(bytes_read->value());
-      if (bytes_assigned != NULL) {
-        double percent = (double)bytes_read->value() / bytes_assigned->value();
-        // This can happen because we read past the end of ranges to finish them.
-        if (percent > 1) percent = 1;
-        return_val.__set_completion_percentage(percent * 100);
-      }
-    }
-
-    SET_STAT_FROM_PROFILE(profile, "BytesReadLocal", return_val, bytes_read_local);
-    SET_STAT_FROM_PROFILE(profile, "RowsRead", return_val, num_rows_read);
-    SET_STAT_FROM_PROFILE(profile, "RowsReturned", return_val, num_rows_returned);
-    SET_STAT_MS_FROM_PROFILE(profile, "DecompressionTime", return_val,
-        decompress_time_ms);
-    SET_STAT_FROM_PROFILE(profile, "PerReadThreadRawHdfsThroughput", return_val,
-        hdfs_throughput);
-  }
+  // Populate the results from the counters.
+  return_val.__set_completion_percentage(ComputeCompletionPercentage(
+      task_state->bytes_read_counter, task_state->bytes_assigned_counter));
+  SET_STAT_MS_FROM_COUNTER(task_state->serialize_timer, serialize_time_ms);
+  SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
+  SET_STAT_FROM_COUNTER(task_state->bytes_read_counter, bytes_read);
+  SET_STAT_FROM_COUNTER(task_state->bytes_read_local_counter, bytes_read_local);
+  SET_STAT_FROM_COUNTER(task_state->rows_read_counter, num_rows_read);
+  SET_STAT_FROM_COUNTER(task_state->rows_returned_counter, num_rows_returned);
+  SET_STAT_MS_FROM_COUNTER(task_state->decompression_timer, decompress_time_ms);
+  SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
 }
 
 recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
