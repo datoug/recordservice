@@ -36,7 +36,12 @@ DECLARE_int32(recordservice_worker_port);
 RecordServiceScanNode::RecordServiceScanNode(
     ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
   : ScanNode(pool, tnode, descs),
-    tuple_id_(tnode.hdfs_scan_node.tuple_id) {
+    tuple_id_(tnode.hdfs_scan_node.tuple_id),
+    done_(false),
+    // TODO: this needs to be more complex to stop scanner threads when this
+    // queue is full.
+    materialized_row_batches_(new RowBatchQueue(10)),
+    num_active_scanners_(0) {
 }
 
 RecordServiceScanNode::~RecordServiceScanNode() {
@@ -45,6 +50,7 @@ RecordServiceScanNode::~RecordServiceScanNode() {
 Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   RETURN_IF_ERROR(ScanNode::Prepare(state));
+  state_ = state;
 
   tuple_desc_ = state->desc_tbl().GetTupleDescriptor(tuple_id_);
   DCHECK(tuple_desc_ != NULL);
@@ -97,59 +103,175 @@ Status RecordServiceScanNode::Open(RuntimeState* state) {
       new ThriftClient<recordservice::RecordServiceWorkerClient>("localhost",
           FLAGS_recordservice_worker_port));
   RETURN_IF_ERROR(rsw_client_->Open());
+
+ num_scanner_threads_started_counter_ =
+      ADD_COUNTER(runtime_profile(), NUM_SCANNER_THREADS_STARTED, TUnit::UNIT);
+
+  // Reserve one thread token.
+  state->resource_pool()->ReserveOptionalTokens(1);
+  if (state->query_options().num_scanner_threads > 0) {
+    state->resource_pool()->set_max_quota(
+        state->query_options().num_scanner_threads);
+  }
+
+  state->resource_pool()->SetThreadAvailableCb(
+      bind<void>(mem_fn(&RecordServiceScanNode::ThreadTokenAvailableCb), this, _1));
+  ThreadTokenAvailableCb(state->resource_pool());
   return Status::OK;
 }
 
-// TODO: Parallelize this at the task level.
 Status RecordServiceScanNode::GetNext(RuntimeState* state,
     RowBatch* row_batch, bool* eos) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
-  if (task_id_ >= tasks_.size() || ReachedLimit()) {
+
+ if (ReachedLimit()) {
     *eos = true;
     return Status::OK;
   }
+
   *eos = false;
+  RowBatch* materialized_batch = materialized_row_batches_->GetBatch();
+  if (materialized_batch != NULL) {
+    row_batch->AcquireState(materialized_batch);
+    num_rows_returned_ += row_batch->num_rows();
+    COUNTER_SET(rows_returned_counter_, num_rows_returned_);
 
-  if (!tasks_[task_id_].connected) {
-    // Starting a new task
-    recordservice::TExecTaskParams params;
-    params.task = tasks_[task_id_].stmt;
-    params.__set_row_batch_format(recordservice::TRowBatchFormat::Parquet);
-    recordservice::TExecTaskResult result;
+    if (ReachedLimit()) {
+      int num_rows_over = num_rows_returned_ - limit_;
+      row_batch->set_num_rows(row_batch->num_rows() - num_rows_over);
+      num_rows_returned_ -= num_rows_over;
+      COUNTER_SET(rows_returned_counter_, num_rows_returned_);
+      *eos = true;
+      done_ = true;
+    }
+    delete materialized_batch;
+  } else {
+    *eos = true;
+  }
 
+  unique_lock<mutex> l(lock_);
+  return status_;
+}
+
+void RecordServiceScanNode::ThreadTokenAvailableCb(
+    ThreadResourceMgr::ResourcePool* pool) {
+  while (true) {
+    unique_lock<mutex> lock(lock_);
+    if (done_ || task_id_ >= tasks_.size()) {
+      // We're either done or all tasks have been assigned a thread
+      break;
+    }
+
+    // Check if we can get a token.
+    bool is_reserved_dummy = false;
+    if (!pool->TryAcquireThreadToken(&is_reserved_dummy)) break;
+
+    ++num_active_scanners_;
+    COUNTER_ADD(num_scanner_threads_started_counter_, 1);
+
+    stringstream ss;
+    ss << "scanner-thread(" << num_scanner_threads_started_counter_->value() << ")";
+    scanner_threads_.AddThread(
+        new Thread("record-service-scan-node", ss.str(),
+            &RecordServiceScanNode::ScannerThread, this, task_id_++));
+  }
+}
+
+void RecordServiceScanNode::ScannerThread(int task_id) {
+  DCHECK_LT(task_id, tasks_.size());
+
+  // Connect to the local record service worker. Thrift clients are not thread safe.
+  // TODO: pool these.
+  ThriftClient<recordservice::RecordServiceWorkerClient> client("localhost",
+      FLAGS_recordservice_worker_port);
+
+  while (true) {
+    Status status = client.Open();
+    if (status.ok()) status = ProcessTask(&client, task_id);
+
+    // Check status, and grab the next task id.
+    unique_lock<mutex> l(lock_);
+    // Check for errors.
+    if (UNLIKELY(!status.ok())) {
+      if (status_.ok()) {
+        status_ = status;
+        done_ = true;
+      }
+      goto done;
+    }
+    DCHECK_GE(num_active_scanners_, 1);
+
+    // Check if we are done.
+    if (task_id_ >= tasks_.size()) {
+      if (num_active_scanners_ == 1) done_ = true;
+      goto done;
+    }
+
+    // Check if we still have thread token.
+    if (state_->resource_pool()->optional_exceeded()) goto done;
+
+    task_id = task_id_++;
+    continue;
+
+done:
+    // Lock is still taken
+    --num_active_scanners_;
+    if (done_) materialized_row_batches_->Shutdown();
+    break;
+  }
+}
+
+Status RecordServiceScanNode::ProcessTask(
+    ThriftClient<recordservice::RecordServiceWorkerClient>* client, int task_id) {
+  DCHECK(!tasks_[task_id].connected);
+
+  recordservice::TExecTaskParams params;
+  params.task = tasks_[task_id].stmt;
+  params.__set_row_batch_format(recordservice::TRowBatchFormat::Parquet);
+  recordservice::TExecTaskResult result;
+
+  try {
+    client->iface()->ExecTask(result, params);
+  } catch (const recordservice::TRecordServiceException& e) {
+    return Status(e.message.c_str());
+  } catch (const std::exception& e) {
+    return Status(e.what());
+  }
+
+  tasks_[task_id].handle = result.handle;
+  tasks_[task_id].connected = true;
+
+  recordservice::TFetchResult fetch_result;
+  recordservice::TFetchParams fetch_params;
+  fetch_params.handle = tasks_[task_id].handle;
+
+  // keep fetching batches
+  while (!done_) {
     try {
-      rsw_client_->iface()->ExecTask(result, params);
+      client->iface()->Fetch(fetch_result, fetch_params);
+      if (!fetch_result.__isset.parquet_row_batch) {
+        return Status("Expecting record service to return parquet row batches.");
+      }
     } catch (const recordservice::TRecordServiceException& e) {
       return Status(e.message.c_str());
     } catch (const std::exception& e) {
       return Status(e.what());
     }
 
-    tasks_[task_id_].handle = result.handle;
-    tasks_[task_id_].connected = true;
-  }
-
-  // Fetch the next batch from the current task.
-  recordservice::TFetchResult fetch_result;
-  recordservice::TFetchParams fetch_params;
-  fetch_params.handle = tasks_[task_id_].handle;
-  try {
-    rsw_client_->iface()->Fetch(fetch_result, fetch_params);
-    if (!fetch_result.__isset.parquet_row_batch) {
-      return Status("Expecting record service to return parquet row batches.");
-    }
-
-    // Convert into row_batch here.
+    // Convert into row batch.
     const recordservice::TParquetRowBatch& input_batch = fetch_result.parquet_row_batch;
 
     // TODO: validate schema.
     if (input_batch.cols.size() != materialized_slots_.size()) {
       stringstream ss;
       ss << "Invalid row batch from record service. Expecting "
-         << materialized_slots_.size()
-         << " cols. Record service returned " << input_batch.cols.size() << " cols.";
+        << materialized_slots_.size()
+        << " cols. Record service returned " << input_batch.cols.size() << " cols.";
       return Status(ss.str());
     }
+
+    auto_ptr<RowBatch> row_batch(
+        new RowBatch(row_desc(), fetch_result.num_rows, mem_tracker()));
 
     Tuple* tuple = Tuple::Create(row_batch->MaxTupleBufferSize(),
         row_batch->tuple_data_pool());
@@ -215,22 +337,30 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
       }
     }
 
-    if (fetch_result.done) {
-      // Move onto next task
-      rsw_client_->iface()->CloseTask(tasks_[task_id_].handle);
-      ++task_id_;
+    if (row_batch->num_rows() != 0) {
+      materialized_row_batches_->AddBatch(row_batch.release());
     }
-  } catch (const recordservice::TRecordServiceException& e) {
-    return Status(e.message.c_str());
-  } catch (const std::exception& e) {
-    return Status(e.what());
+
+    if (fetch_result.done) break;
   }
+
+  client->iface()->CloseTask(tasks_[task_id].handle);
+  tasks_[task_id].connected = false;
 
   return Status::OK;
 }
 
 void RecordServiceScanNode::Close(RuntimeState* state) {
   if (is_closed()) return;
+  if (!done_) {
+    unique_lock<mutex> l(lock_);
+    done_ = true;
+    materialized_row_batches_->Shutdown();
+  }
+
+  scanner_threads_.JoinAll();
+  DCHECK_EQ(num_active_scanners_, 0);
+
   for (int i = 0; i < tasks_.size(); ++i) {
     if (tasks_[i].connected) {
       try {

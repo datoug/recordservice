@@ -30,6 +30,7 @@
 #include "exec/scan-node.h"
 #include "rpc/thrift-client.h"
 #include "runtime/descriptors.h"
+#include "runtime/thread-resource-mgr.h"
 #include "util/progress-updater.h"
 #include "util/spinlock.h"
 #include "util/thread.h"
@@ -74,6 +75,9 @@ class RecordServiceScanNode : public ScanNode {
   // Set in Prepare, owned by RuntimeState
   const HdfsTableDescriptor* hdfs_table_;
 
+  // Unowned.
+  RuntimeState* state_;
+
   std::vector<SlotDescriptor*> materialized_slots_;
   std::vector<std::string> materialized_col_names_;
 
@@ -87,16 +91,48 @@ class RecordServiceScanNode : public ScanNode {
     TaskState() : connected(false) {}
   };
 
+  // Threads that have been started. Each task is picked up by a different thread.
+  ThreadGroup scanner_threads_;
+
+  // Protects the fields below
+  boost::mutex lock_;
+
+  // Status of the scan, set asychronously in the scanner threads.
+  Status status_;
+
+  // Set to true when we need to tear down.
+  bool done_;
+
+  // Outgoing row batches queue. Row batches are produced asynchronously by the scanner
+  // threads and consumed by the main thread.
+  boost::scoped_ptr<RowBatchQueue> materialized_row_batches_;
+
   // All the tasks (aka splits)
   std::vector<TaskState> tasks_;
 
   // current task we're on (starts at 0)
   int task_id_;
 
+  // The number of active scanner threads
+  int num_active_scanners_;
+
   inline Tuple* next_tuple(Tuple* t) const {
     uint8_t* mem = reinterpret_cast<uint8_t*>(t);
     return reinterpret_cast<Tuple*>(mem + tuple_byte_size_);
   }
+
+  // Called when scanner threads are available for this scan node. This will
+  // try to spin up as many scanner threads as the quota allows.
+  void ThreadTokenAvailableCb(ThreadResourceMgr::ResourcePool* pool);
+
+  // Main thread of scanner threads. The first task this thread should process
+  // is initial_task_id.
+  void ScannerThread(int initial_task_id);
+
+  // Run in the scanner thread to process task_[task_id]. Returns on error or
+  // when the entire task is complete.
+  Status ProcessTask(ThriftClient<recordservice::RecordServiceWorkerClient>*,
+      int task_id);
 };
 
 }
