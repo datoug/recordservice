@@ -381,6 +381,16 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
     return result;
 }
 
+static void PopulateResultSchema(const TResultSetMetadata& metadata,
+    recordservice::TSchema* schema) {
+  schema->cols.resize(metadata.columns.size());
+  for (int i = 0; i < metadata.columns.size(); ++i) {
+    ColumnType type(metadata.columns[i].columnType);
+    schema->cols[i].type = ToRecordServiceType(type);
+    schema->cols[i].name = metadata.columns[i].columnName;
+  }
+}
+
 //
 // RecordServicePlanner
 //
@@ -417,13 +427,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
   // Extract the types of the result.
   DCHECK(result.__isset.result_set_metadata);
-  const TResultSetMetadata& metadata = result.result_set_metadata;
-  return_val.schema.cols.resize(metadata.columns.size());
-  for (int i = 0; i < metadata.columns.size(); ++i) {
-    ColumnType type(metadata.columns[i].columnType);
-    return_val.schema.cols[i].type = ToRecordServiceType(type);
-    return_val.schema.cols[i].name = metadata.columns[i].columnName;
-  }
+  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
 
   // Walk the plan to compute the tasks. We want to find the scan nodes
   // and distribute them.
@@ -503,6 +507,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
   }
+
+  PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);
 
   shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
   exec_state->SetRecordServiceTaskState(task_state);
