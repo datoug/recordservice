@@ -153,6 +153,7 @@ class ImpalaServer::QueryExecState {
   const TResultSetMetadata* result_metadata() { return &result_metadata_; }
   const TUniqueId& query_id() const { return query_ctx_.query_id; }
   const TExecRequest& exec_request() const { return exec_request_; }
+  const std::vector<ExprContext*>& output_exprs() const { return output_expr_ctxs_; }
   TStmtType::type stmt_type() const { return exec_request_.stmt_type; }
   TCatalogOpType::type catalog_op_type() const {
     return exec_request_.catalog_op_request.op_type;

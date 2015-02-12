@@ -28,6 +28,7 @@
 #include "common/version.h"
 #include "exprs/expr.h"
 #include "exprs/expr-context.h"
+#include "exprs/slot-ref.h"
 #include "runtime/raw-value.h"
 #include "service/query-exec-state.h"
 #include "service/query-options.h"
@@ -41,6 +42,9 @@ using namespace boost;
 using namespace strings;
 using namespace beeswax; // Converting QueryState
 
+// This value has a big impact on performance. For simple queries (1 bigint col),
+// 5000 is a 2x improvement over a fetch size of 1024.
+// TODO: investigate more
 static const int DEFAULT_FETCH_SIZE = 5000;
 
 namespace impala {
@@ -274,6 +278,18 @@ class ImpalaServer::RecordServiceColumnarResultSet : public ImpalaServer::BaseRe
 // of the value to the end of the buffer.
 class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseResultSet {
  public:
+  RecordServiceParquetResultSet(bool all_slot_refs,
+      const vector<ExprContext*>& output_exprs) : all_slot_refs_(all_slot_refs) {
+    if (all_slot_refs) {
+      slot_descs_.resize(output_exprs.size());
+      for (int i = 0; i < output_exprs.size(); ++i) {
+        SlotRef* slot_ref = reinterpret_cast<SlotRef*>(output_exprs[i]->root());
+        slot_descs_[i].byte_offset = slot_ref->slot_offset();
+        slot_descs_[i].null_offset = slot_ref->null_indicator();
+      }
+    }
+  }
+
   virtual void SetReturnBuffer(recordservice::TFetchResult* result) {
     result_ = result;
     result_->__isset.parquet_row_batch = true;
@@ -287,43 +303,126 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
     DCHECK(result_->__isset.parquet_row_batch);
     recordservice::TParquetRowBatch& batch = result_->parquet_row_batch;
 
-    // Reserve the size of the output where possible.
-    for (int c = 0; c < ctxs->size(); ++c) {
-      batch.cols[c].is_null.reserve(batch.cols[c].data.size() + num_rows);
-      if (type_sizes_[c] != 0) {
-        batch.cols[c].data.reserve(batch.cols[c].data.size() + num_rows * type_sizes_[c]);
+    if (all_slot_refs_) {
+      // In this case, all the output exprs are slot refs and we want to serialize them
+      // to the record service format. To do this we:
+      // 1. Reserve the outgoing buffer to the max size (for fixed length types).
+      // 2. Append the current value to the outgoing buffer.
+      // 3. Resize the outgoing buffer when we are done with the row batch (which
+      // can be sparse due to NULLs).
+      DCHECK_EQ(ctxs->size(), slot_descs_.size());
+      const int num_cols = slot_descs_.size();
+
+      // Reserve the size of the output where possible.
+      for (int c = 0; c < num_cols; ++c) {
+        DCHECK_EQ(batch.cols[c].is_null.size(), 0);
+        DCHECK_EQ(batch.cols[c].data.size(), 0);
+
+        batch.cols[c].is_null.resize(num_rows);
+        if (type_sizes_[c] != 0) {
+          batch.cols[c].data.resize(num_rows * type_sizes_[c]);
+        }
       }
-    }
 
-    for (int i = 0; i < num_rows; ++i) {
-      TupleRow* row = input->GetRow(row_idx++);
+      // Only used for fixed length types. data[c] is the ptr that the next value
+      // should be appended at.
+      char* data[num_cols];
+      for (int c = 0; c < num_cols; ++c) {
+        data[c] = (char*)batch.cols[c].data.data();
+      }
 
+      // This loop is extremely perf sensitive.
+      for (int i = 0; i < num_rows; ++i) {
+        Tuple* tuple = input->GetRow(row_idx++)->GetTuple(0);
+        for (int c = 0; c < num_cols; ++c) {
+          bool is_null = tuple->IsNull(slot_descs_[c].null_offset);
+          batch.cols[c].is_null[i] = is_null;
+          if (is_null) continue;
+
+          const int type_size = type_sizes_[c];
+          if (type_size == 0) {
+            // TODO: this resizing can't be good. The rowbatch should keep track of
+            // how long the string data is.
+            string& dst = batch.cols[c].data;
+            int offset = dst.size();
+            const StringValue* sv = tuple->GetStringSlot(slot_descs_[c].byte_offset);
+            int len = sv->len + sizeof(int32_t);
+            dst.resize(offset + len);
+            memcpy((char*)dst.data() + offset, &sv->len, sizeof(int32_t));
+            memcpy((char*)dst.data() + offset + sizeof(int32_t), sv->ptr, sv->len);
+          } else {
+            memcpy(data[c], tuple->GetSlot(slot_descs_[c].byte_offset), type_size);
+            data[c] += type_size;
+          }
+        }
+      }
+
+      // For fixed-length columns, shrink the size if necessary. In the case of NULLs,
+      // we could have resized the buffer bigger than necessary.
+      for (int c = 0; c < num_cols; ++c) {
+        if (type_sizes_[c] == 0) continue;
+        int size = data[c] - batch.cols[c].data.data();
+        if (batch.cols[c].data.size() != size) {
+          batch.cols[c].data.resize(size);
+        }
+      }
+    } else {
+      // Reserve the size of the output where possible.
       for (int c = 0; c < ctxs->size(); ++c) {
-        const void* v = (*ctxs)[c]->GetValue(row);
-        batch.cols[c].is_null.push_back(v == NULL);
-        if (v == NULL) continue;
+        DCHECK_EQ(batch.cols[c].is_null.size(), 0);
+        DCHECK_EQ(batch.cols[c].data.size(), 0);
 
-        string& data = batch.cols[c].data;
-        int offset = data.size();
+        batch.cols[c].is_null.reserve(num_rows);
+        if (type_sizes_[c] != 0) {
+          batch.cols[c].data.reserve(num_rows * type_sizes_[c]);
+        }
+      }
+      for (int i = 0; i < num_rows; ++i) {
+        TupleRow* row = input->GetRow(row_idx++);
 
-        // Encode the values here. For non-string types, just write the value as
-        // little endian. For strings, it is the length(little endian) followed
-        // by the string.
-        const int type_size = type_sizes_[c];
-        if (type_size == 0) {
-          const StringValue* sv = reinterpret_cast<const StringValue*>(v);
-          int len = sv->len + sizeof(int32_t);
-          data.resize(offset + len);
-          memcpy((char*)data.data() + offset, &sv->len, sizeof(int32_t));
-          memcpy((char*)data.data() + offset + sizeof(int32_t), sv->ptr, sv->len);
-        } else {
-          data.resize(offset + type_size);
-          memcpy((char*)data.data() + offset, v, type_size);
+        for (int c = 0; c < ctxs->size(); ++c) {
+          const void* v = (*ctxs)[c]->GetValue(row);
+          batch.cols[c].is_null.push_back(v == NULL);
+          if (v == NULL) continue;
+
+          string& data = batch.cols[c].data;
+          int offset = data.size();
+
+          // Encode the values here. For non-string types, just write the value as
+          // little endian. For strings, it is the length(little endian) followed
+          // by the string.
+          const int type_size = type_sizes_[c];
+          if (type_size == 0) {
+            const StringValue* sv = reinterpret_cast<const StringValue*>(v);
+            int len = sv->len + sizeof(int32_t);
+            data.resize(offset + len);
+            memcpy((char*)data.data() + offset, &sv->len, sizeof(int32_t));
+            memcpy((char*)data.data() + offset + sizeof(int32_t), sv->ptr, sv->len);
+          } else {
+            data.resize(offset + type_size);
+            memcpy((char*)data.data() + offset, v, type_size);
+          }
         }
       }
     }
     result_->num_rows += num_rows;
   }
+
+ private:
+  struct SlotDesc {
+    // Byte offset in tuple
+    int byte_offset;
+    NullIndicatorOffset null_offset;
+
+    SlotDesc() : null_offset(0, 0) {}
+  };
+
+  // If true, all the output exprs are slot refs.
+  bool all_slot_refs_;
+
+  // Cache of the slot desc. Only set if all_slot_refs_ is true. We'll use this
+  // intead of the exprs (for performance).
+  vector<SlotDesc> slot_descs_;
 };
 
 shared_ptr<ImpalaServer::SessionState> ImpalaServer::GetRecordServiceSession() {
@@ -493,14 +592,16 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   GetRecordServiceSession();
 
   LOG(ERROR) << "RecordService::ExecRequest: " << req.task;
+  shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
+
   TQueryCtx query_ctx;
   query_ctx.request.stmt = req.task;
   // These are single scan queries. No need to make distributed plan with extra
   // exchange nodes.
+  task_state->fetch_size = DEFAULT_FETCH_SIZE;
   query_ctx.request.query_options.__set_num_nodes(1);
-  if (req.__isset.fetch_size) {
-    query_ctx.request.query_options.__set_batch_size(req.fetch_size);
-  }
+  if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
+  query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
 
   shared_ptr<QueryExecState> exec_state;
   Status status = Execute(&query_ctx, record_service_session_, &exec_state);
@@ -509,12 +610,22 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   }
 
   PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);
-
-  shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
   exec_state->SetRecordServiceTaskState(task_state);
 
-  task_state->fetch_size = DEFAULT_FETCH_SIZE;
-  if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
+  // Optimization if the result exprs are all just "simple" slot refs. This means
+  // that they contain a single non-nullable tuple row. This is the common case and
+  // we can simplify the row serialization logic.
+  // TODO: this should be replaced by codegen to handle all the cases.
+  bool all_slot_refs = true;
+  const vector<ExprContext*>& output_exprs = exec_state->output_exprs();
+  for (int i = 0; i < output_exprs.size(); ++i) {
+    if (output_exprs[i]->root()->is_slotref()) {
+      SlotRef* slot_ref = reinterpret_cast<SlotRef*>(output_exprs[i]->root());
+      if (!slot_ref->tuple_is_nullable() && slot_ref->tuple_idx() == 0) continue;
+    }
+    all_slot_refs = false;
+    break;
+  }
 
   task_state->format = recordservice::TRowBatchFormat::ColumnarThrift;
   if (req.__isset.row_batch_format) task_state->format = req.row_batch_format;
@@ -523,7 +634,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       task_state->results.reset(new RecordServiceColumnarResultSet());
       break;
     case recordservice::TRowBatchFormat::Parquet:
-      task_state->results.reset(new RecordServiceParquetResultSet());
+      task_state->results.reset(new RecordServiceParquetResultSet(
+          all_slot_refs, output_exprs));
       break;
     default:
       ThrowException(recordservice::TErrorCode::INVALID_REQUEST,

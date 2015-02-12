@@ -39,6 +39,11 @@ class SlotRef : public Expr {
   virtual int GetSlotIds(std::vector<SlotId>* slot_ids) const;
   const SlotId& slot_id() const { return slot_id_; }
 
+  bool tuple_is_nullable() const { return tuple_is_nullable_; }
+  int tuple_idx() const { return tuple_idx_; }
+  int slot_offset() const { return slot_offset_; }
+  const NullIndicatorOffset& null_indicator() const { return null_indicator_offset_; }
+
   virtual Status GetCodegendComputeFn(RuntimeState* state, llvm::Function** fn);
 
   virtual impala_udf::BooleanVal GetBooleanVal(ExprContext* context, TupleRow*);
