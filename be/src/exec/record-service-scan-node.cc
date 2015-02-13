@@ -178,6 +178,8 @@ void RecordServiceScanNode::ThreadTokenAvailableCb(
 }
 
 void RecordServiceScanNode::ScannerThread(int task_id) {
+  SCOPED_THREAD_COUNTER_MEASUREMENT(scanner_thread_counters());
+  SCOPED_TIMER(state_->total_cpu_timer());
   DCHECK_LT(task_id, tasks_.size());
 
   // Connect to the local record service worker. Thrift clients are not thread safe.
@@ -280,8 +282,12 @@ Status RecordServiceScanNode::ProcessTask(
     vector<const char*> data_values;
     for (int i = 0; i < input_batch.cols.size(); ++i) {
       data_values.push_back(input_batch.cols[i].data.data());
+      COUNTER_ADD(bytes_read_counter_, input_batch.cols[i].data.size());
+      COUNTER_ADD(bytes_read_counter_, input_batch.cols[i].is_null.size());
     }
 
+    COUNTER_ADD(rows_read_counter_, fetch_result.num_rows);
+    SCOPED_TIMER(materialize_tuple_timer_);
     for (int i = 0; i < fetch_result.num_rows; ++i) {
       TupleRow* row = row_batch->GetRow(row_batch->AddRow());
       row->SetTuple(0, tuple);
@@ -331,8 +337,6 @@ Status RecordServiceScanNode::ProcessTask(
       if (EvalConjuncts(&conjunct_ctxs_[0], conjunct_ctxs_.size(), row)) {
         row_batch->CommitLastRow();
         tuple = next_tuple(tuple);
-        ++num_rows_returned_;
-        COUNTER_SET(rows_returned_counter_, num_rows_returned_);
         if (ReachedLimit()) break;
       }
     }
