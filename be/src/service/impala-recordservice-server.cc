@@ -160,120 +160,6 @@ class ImpalaServer::RecordServiceTaskState {
   RuntimeProfile::Counter* hdfs_throughput_counter;
 };
 
-class ImpalaServer::RecordServiceColumnarResultSet : public ImpalaServer::BaseResultSet {
- public:
-  RecordServiceColumnarResultSet() {}
-
-  virtual void SetReturnBuffer(recordservice::TFetchResult* result) {
-    result_ = result;
-    result_->__isset.row_batch = true;
-
-    recordservice::TColumnarRowBatch& batch = result_->row_batch;
-    batch.cols.resize(types_.size());
-
-    for (int i = 0; i < types_.size(); ++i) {
-      switch (types_[i].type) {
-        case TYPE_BOOLEAN:
-          batch.cols[i].__isset.bool_vals = true;
-          break;
-        case TYPE_TINYINT:
-          batch.cols[i].__isset.byte_vals = true;
-          break;
-        case TYPE_SMALLINT:
-          batch.cols[i].__isset.short_vals = true;
-          break;
-        case TYPE_INT:
-          batch.cols[i].__isset.int_vals = true;
-          break;
-        case TYPE_BIGINT:
-          batch.cols[i].__isset.long_vals = true;
-          break;
-        case TYPE_FLOAT:
-        case TYPE_DOUBLE:
-          batch.cols[i].__isset.double_vals = true;
-          break;
-        case TYPE_VARCHAR:
-        case TYPE_STRING:
-          batch.cols[i].__isset.string_vals = true;
-          break;
-        case TYPE_TIMESTAMP:
-        case TYPE_DECIMAL:
-          batch.cols[i].__isset.binary_vals = true;
-          break;
-        default:
-          CHECK(false) << "not implemented";
-      }
-    }
-  }
-
-  virtual Status AddOneRow(const vector<void*>& col_values, const vector<int>& scales) {
-    DCHECK_EQ(col_values.size(), types_.size());
-    for (int i = 0; i < col_values.size(); ++i) {
-      AppendValue(i, col_values[i]);
-    }
-    ++result_->num_rows;
-    return Status::OK;
-  }
-
-  virtual void AddRowBatch(RowBatch* batch, int row_idx, int num_rows,
-      vector<ExprContext*>* ctxs) {
-    for (int i = 0; i < num_rows; ++i) {
-      TupleRow* row = batch->GetRow(row_idx++);
-      for (int c = 0; c < ctxs->size(); ++c) {
-        AppendValue(c, (*ctxs)[c]->GetValue(row));
-      }
-    }
-    result_->num_rows += num_rows;
-  }
-
-  inline void AppendValue(int col_idx, const void* v) {
-    DCHECK(result_->__isset.row_batch);
-    recordservice::TColumnarRowBatch& batch = result_->row_batch;
-
-    batch.cols[col_idx].is_null.push_back(v == NULL);
-    if (v == NULL) return;
-
-    switch (types_[col_idx].type) {
-      case TYPE_BOOLEAN:
-        batch.cols[col_idx].bool_vals.push_back(*reinterpret_cast<const bool*>(v));
-        break;
-      case TYPE_TINYINT:
-        batch.cols[col_idx].byte_vals.push_back(*reinterpret_cast<const uint8_t*>(v));
-        break;
-      case TYPE_SMALLINT:
-        batch.cols[col_idx].short_vals.push_back(*reinterpret_cast<const int16_t*>(v));
-        break;
-      case TYPE_INT:
-        batch.cols[col_idx].int_vals.push_back(*reinterpret_cast<const int32_t*>(v));
-        break;
-      case TYPE_BIGINT:
-        batch.cols[col_idx].long_vals.push_back(*reinterpret_cast<const int64_t*>(v));
-        break;
-      case TYPE_FLOAT:
-        batch.cols[col_idx].double_vals.push_back(*reinterpret_cast<const float*>(v));
-        break;
-      case TYPE_DOUBLE:
-        batch.cols[col_idx].double_vals.push_back(*reinterpret_cast<const double*>(v));
-        break;
-      case TYPE_VARCHAR:
-      case TYPE_STRING: {
-        const StringValue* sv = reinterpret_cast<const StringValue*>(v);
-        batch.cols[col_idx].string_vals.push_back(sv->DebugString());
-        break;
-      }
-      case TYPE_TIMESTAMP:
-        batch.cols[col_idx].binary_vals.push_back(string((const char*)v, 16));
-        break;
-      case TYPE_DECIMAL:
-        batch.cols[col_idx].binary_vals.push_back(
-            string((const char*)v, types_[col_idx].GetByteSize()));
-        break;
-      default:
-        CHECK(false) << "not implemented";
-    }
-  }
-};
-
 // This is the parquet plain encoding, meaning we append the little endian version
 // of the value to the end of the buffer.
 class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseResultSet {
@@ -292,16 +178,14 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
 
   virtual void SetReturnBuffer(recordservice::TFetchResult* result) {
     result_ = result;
-    result_->__isset.parquet_row_batch = true;
-
-    recordservice::TParquetRowBatch& batch = result_->parquet_row_batch;
-    batch.cols.resize(types_.size());
+    result_->__isset.columnar_row_batch = true;
+    result_->columnar_row_batch.cols.resize(types_.size());
   }
 
   virtual void AddRowBatch(RowBatch* input, int row_idx, int num_rows,
       vector<ExprContext*>* ctxs) {
-    DCHECK(result_->__isset.parquet_row_batch);
-    recordservice::TParquetRowBatch& batch = result_->parquet_row_batch;
+    DCHECK(result_->__isset.columnar_row_batch);
+    recordservice::TColumnarRowBatch& batch = result_->columnar_row_batch;
 
     if (all_slot_refs_) {
       // In this case, all the output exprs are slot refs and we want to serialize them
@@ -627,13 +511,10 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     break;
   }
 
-  task_state->format = recordservice::TRowBatchFormat::ColumnarThrift;
+  task_state->format = recordservice::TRowBatchFormat::Columnar;
   if (req.__isset.row_batch_format) task_state->format = req.row_batch_format;
   switch (task_state->format) {
-    case recordservice::TRowBatchFormat::ColumnarThrift:
-      task_state->results.reset(new RecordServiceColumnarResultSet());
-      break;
-    case recordservice::TRowBatchFormat::Parquet:
+    case recordservice::TRowBatchFormat::Columnar:
       task_state->results.reset(new RecordServiceParquetResultSet(
           all_slot_refs, output_exprs));
       break;

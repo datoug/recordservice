@@ -229,7 +229,6 @@ Status RecordServiceScanNode::ProcessTask(
 
   recordservice::TExecTaskParams params;
   params.task = tasks_[task_id].stmt;
-  params.__set_row_batch_format(recordservice::TRowBatchFormat::Parquet);
   recordservice::TExecTaskResult result;
 
   try {
@@ -251,8 +250,8 @@ Status RecordServiceScanNode::ProcessTask(
   while (!done_) {
     try {
       client->iface()->Fetch(fetch_result, fetch_params);
-      if (!fetch_result.__isset.parquet_row_batch) {
-        return Status("Expecting record service to return parquet row batches.");
+      if (!fetch_result.__isset.columnar_row_batch) {
+        return Status("Expecting record service to return columnar row batches.");
       }
     } catch (const recordservice::TRecordServiceException& e) {
       return Status(e.message.c_str());
@@ -261,7 +260,7 @@ Status RecordServiceScanNode::ProcessTask(
     }
 
     // Convert into row batch.
-    const recordservice::TParquetRowBatch& input_batch = fetch_result.parquet_row_batch;
+    const recordservice::TColumnarRowBatch& input_batch = fetch_result.columnar_row_batch;
 
     // TODO: validate schema.
     if (input_batch.cols.size() != materialized_slots_.size()) {
@@ -293,7 +292,7 @@ Status RecordServiceScanNode::ProcessTask(
       row->SetTuple(0, tuple);
 
       for (int c = 0; c < materialized_slots_.size(); ++c) {
-        const recordservice::TParquetColumnData& data = input_batch.cols[c];
+        const recordservice::TColumnData& data = input_batch.cols[c];
         if (data.is_null[i]) {
           tuple->SetNull(materialized_slots_[c]->null_indicator_offset());
           continue;
