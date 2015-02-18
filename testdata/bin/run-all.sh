@@ -44,9 +44,9 @@ echo " --> Starting mini-DFS cluster"
 $IMPALA_HOME/testdata/bin/run-mini-dfs.sh ${HDFS_FORMAT_CLUSTER-} 2>&1 | \
     tee ${IMPALA_TEST_CLUSTER_LOG_DIR}/run-mini-dfs.log
 
-echo " --> Starting HBase"
-$IMPALA_HOME/testdata/bin/run-hbase.sh 2>&1 | \
-    tee ${IMPALA_TEST_CLUSTER_LOG_DIR}/run-hbase.log
+#echo " --> Starting HBase"
+#$IMPALA_HOME/testdata/bin/run-hbase.sh 2>&1 | \
+#    tee ${IMPALA_TEST_CLUSTER_LOG_DIR}/run-hbase.log
 
 echo " --> Starting Hive Server and Metastore Service"
 $IMPALA_HOME/testdata/bin/run-hive-server.sh 2>&1 | \
