@@ -674,10 +674,30 @@ Status ImpalaServer::Execute(TQueryCtx* query_ctx,
   return status;
 }
 
-Status ImpalaServer::ExecuteInternal(
+Status ImpalaServer::ExecuteRecordServiceRequest(TQueryCtx* query_ctx,
+    TExecRequest* request,
+    shared_ptr<SessionState> session_state,
+    shared_ptr<QueryExecState>* exec_state) {
+  PrepareQueryContext(query_ctx);
+  bool registered_exec_state;
+  ImpaladMetrics::IMPALA_SERVER_NUM_QUERIES->Increment(1L);
+  Status status = PreExecute(request, *query_ctx, session_state,
+      &registered_exec_state, false, exec_state);
+  if (status.ok()) {
+    status = ExecuteInternal(request, exec_state);
+    if (!status.ok() && registered_exec_state) {
+      UnregisterQuery((*exec_state)->query_id(), false, &status);
+    }
+  }
+  return status;
+}
+
+Status ImpalaServer::PreExecute(
+    TExecRequest* result,
     const TQueryCtx& query_ctx,
     shared_ptr<SessionState> session_state,
     bool* registered_exec_state,
+    bool do_planning,
     shared_ptr<QueryExecState>* exec_state) {
   DCHECK(session_state != NULL);
   *registered_exec_state = false;
@@ -689,7 +709,6 @@ Status ImpalaServer::ExecuteInternal(
 
   (*exec_state)->query_events()->MarkEvent("Start execution");
 
-  TExecRequest result;
   {
     // Keep a lock on exec_state so that registration and setting
     // result_metadata are atomic.
@@ -719,11 +738,20 @@ Status ImpalaServer::ExecuteInternal(
       (*exec_state)->set_result_metadata(result.result_set_metadata);
     }
   }
-  VLOG(2) << "Execution request: " << ThriftDebugString(result);
+  return Status::OK;
+}
+
+Status ImpalaServer::ExecuteInternal(
+    TExecRequest* request,
+    shared_ptr<QueryExecState>* exec_state) {
+  VLOG(2) << "Execution request: " << ThriftDebugString(*(request));
+  if (IsAuditEventLoggingEnabled()) {
+    LogAuditRecord(*(exec_state->get()), *(request));
+  }
 
   // start execution of query; also starts fragment status reports
-  RETURN_IF_ERROR((*exec_state)->Exec(&result));
-  if (result.stmt_type == TStmtType::DDL) {
+  RETURN_IF_ERROR((*exec_state)->Exec(request));
+  if (request->stmt_type == TStmtType::DDL) {
     Status status = UpdateCatalogMetrics();
     if (!status.ok()) {
       VLOG_QUERY << "Couldn't update catalog metrics: " << status.GetDetail();

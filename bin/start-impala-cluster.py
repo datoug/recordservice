@@ -70,6 +70,7 @@ MINI_IMPALA_CLUSTER_PATH = IMPALAD_PATH + " -in-process"
 IMPALA_SHELL = os.path.join(IMPALA_HOME, 'bin/impala-shell.sh')
 IMPALAD_PORTS = ("-beeswax_port=%d -hs2_port=%d  -be_port=%d "
                  "-state_store_subscriber_port=%d -webserver_port=%d "
+                 "-recordservice_planner_port=%d -recordservice_worker_port=%d "
                  "-llama_callback_port=%d")
 JVM_ARGS = "-jvm_debug_port=%s -jvm_args=%s"
 BE_LOGGING_ARGS = "-log_filename=%s -log_dir=%s -v=%s -logbufsecs=5"
@@ -126,10 +127,14 @@ def build_impalad_port_args(instance_num):
   BASE_STATE_STORE_SUBSCRIBER_PORT = 23000
   BASE_WEBSERVER_PORT = 25000
   BASE_LLAMA_CALLBACK_PORT = 28000
+  BASE_RS_PLANNER_PORT = 40000
+  BASE_RS_WORKER_PORT = 40100
   return IMPALAD_PORTS % (BASE_BEESWAX_PORT + instance_num, BASE_HS2_PORT + instance_num,
                           BASE_BE_PORT + instance_num,
                           BASE_STATE_STORE_SUBSCRIBER_PORT + instance_num,
                           BASE_WEBSERVER_PORT + instance_num,
+                          BASE_RS_PLANNER_PORT + instance_num,
+                          BASE_RS_WORKER_PORT + instance_num,
                           BASE_LLAMA_CALLBACK_PORT + instance_num)
 
 def build_impalad_logging_args(instance_num, service_name):

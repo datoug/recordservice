@@ -55,6 +55,7 @@ Frontend::Frontend() {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
         "Ljava/lang/String;II)V", &fe_ctor_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
+    {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
     {"getExplainPlan", "([B)Ljava/lang/String;", &get_explain_plan_id_},
     {"getHadoopConfig", "([B)[B", &get_hadoop_config_id_},
     {"getAllHadoopConfigs", "()[B", &get_hadoop_configs_id_},
@@ -167,6 +168,11 @@ Status Frontend::ShowRoles(const TShowRolesParams& params, TShowRolesResult* res
 Status Frontend::GetCatalogObject(const TCatalogObject& req,
     TCatalogObject* resp) {
   return JniUtil::CallJniMethod(fe_, get_catalog_object_id_, req, resp);
+}
+
+Status Frontend::GetRecordServiceExecRequest(
+    const TQueryCtx& query_ctx, TRecordServiceExecRequest* result) {
+  return JniUtil::CallJniMethod(fe_, create_rs_exec_request_id_, query_ctx, result);
 }
 
 Status Frontend::GetExecRequest(

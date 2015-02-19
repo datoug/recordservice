@@ -364,10 +364,22 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
                  boost::shared_ptr<SessionState> session_state,
                  boost::shared_ptr<QueryExecState>* exec_state);
 
-  // Implements Execute() logic, but doesn't unregister query on error.
-  Status ExecuteInternal(const TQueryCtx& query_ctx,
+  // Similar to the Execute method. Called by RecordServiceWorker and invoked
+  // with a pre-created query execution plan (contained in the TExecRequest).
+  Status ExecuteRecordServiceRequest(TQueryCtx* query_ctx,
+      TExecRequest* request,
+      boost::shared_ptr<SessionState> session_state,
+      boost::shared_ptr<QueryExecState>* exec_state);
+
+  // Called before ExecuteInternal by the Execute Method. Used by the
+  // RecordServiceWorker to bypass planning stage
+  Status PreExecute(TExecRequest* request, const TQueryCtx& query_ctx,
                          boost::shared_ptr<SessionState> session_state,
-                         bool* registered_exec_state,
+                         bool* registered_exec_state, bool do_planning,
+                         boost::shared_ptr<QueryExecState>* exec_state);
+
+  // Implements Execute() logic, but doesn't unregister query on error.
+  Status ExecuteInternal(TExecRequest* request,
                          boost::shared_ptr<QueryExecState>* exec_state);
 
   // Registers the query exec state with query_exec_state_map_ using the globally

@@ -77,6 +77,7 @@ import com.cloudera.impala.thrift.TLoadDataResp;
 import com.cloudera.impala.thrift.TLogLevel;
 import com.cloudera.impala.thrift.TMetadataOpRequest;
 import com.cloudera.impala.thrift.TQueryCtx;
+import com.cloudera.impala.thrift.TRecordServiceExecRequest;
 import com.cloudera.impala.thrift.TResultSet;
 import com.cloudera.impala.thrift.TShowFilesParams;
 import com.cloudera.impala.thrift.TShowGrantRoleParams;
@@ -144,6 +145,29 @@ public class JniFrontend {
 
     StringBuilder explainString = new StringBuilder();
     TExecRequest result = frontend_.createExecRequest(queryCtx, explainString);
+    if (explainString.length() > 0) LOG.debug(explainString.toString());
+
+    // TODO: avoid creating serializer for each query?
+    TSerializer serializer = new TSerializer(protocolFactory_);
+    try {
+      return serializer.serialize(result);
+    } catch (TException e) {
+      throw new InternalException(e.getMessage());
+    }
+  }
+
+  /**
+   * Jni wrapper for Frontend.createRecordServiceExecRequest(). Accepts a serialized
+   * TQueryCtx; returns a serialized TRecordServiceExecRequest.
+   */
+  public byte[] createRecordServiceExecRequest(byte[] thriftQueryContext)
+      throws ImpalaException {
+    TQueryCtx queryCtx = new TQueryCtx();
+    JniUtil.deserializeThrift(protocolFactory_, queryCtx, thriftQueryContext);
+
+    StringBuilder explainString = new StringBuilder();
+    TRecordServiceExecRequest result =
+        frontend_.createRecordServiceExecRequest(queryCtx, explainString);
     if (explainString.length() > 0) LOG.debug(explainString.toString());
 
     // TODO: avoid creating serializer for each query?

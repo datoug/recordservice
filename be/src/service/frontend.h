@@ -44,6 +44,10 @@ class Frontend {
   // Call FE to get explain plan
   Status GetExplainPlan(const TQueryCtx& query_ctx, std::string* explain_string);
 
+  // Call FE and get specialized RecordServiceExecRequest
+  Status GetRecordServiceExecRequest(const TQueryCtx& query_ctx,
+         TRecordServiceExecRequest* result);
+
   // Call FE to get TExecRequest.
   Status GetExecRequest(const TQueryCtx& query_ctx, TExecRequest* result);
 
@@ -158,6 +162,7 @@ class Frontend {
 
   jobject fe_;  // instance of com.cloudera.impala.service.JniFrontend
   jmethodID create_exec_request_id_;  // JniFrontend.createExecRequest()
+  jmethodID create_rs_exec_request_id_;  // JniFrontend.createRecordServiceExecRequest()
   jmethodID get_explain_plan_id_;  // JniFrontend.getExplainPlan()
   jmethodID get_hadoop_config_id_;  // JniFrontend.getHadoopConfig(byte[])
   jmethodID get_hadoop_configs_id_;  // JniFrontend.getAllHadoopConfigs()

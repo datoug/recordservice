@@ -389,15 +389,14 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
   TQueryCtx query_ctx;
   query_ctx.request.stmt = req.sql_stmt;
-
   // Setting num_nodes = 1 means we generate a single node plan which has
   // a simpler structure. It also prevents Impala from analyzing multi-table
   // queries, i.e. joins.
   query_ctx.request.query_options.__set_num_nodes(1);
 
   // Get the plan. This is the normal Impala plan.
-  TExecRequest result;
-  Status status = exec_env_->frontend()->GetExecRequest(query_ctx, &result);
+  TRecordServiceExecRequest result;
+  Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
         status.GetErrorMsg());
@@ -414,49 +413,53 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
   // Walk the plan to compute the tasks. We want to find the scan nodes
   // and distribute them.
-  // TODO: total hack. We're reverse engineering the planner output here.
-  // Update planner.
-  const TQueryExecRequest query_request = result.query_exec_request;
+  const vector<TQueryExecRequest>& query_requests = result.query_exec_request;
 
-  // Reconstruct the file paths from partitions and splits
-  DCHECK_EQ(query_request.desc_tbl.tableDescriptors.size(), 1)
-      << "single table scans should have 1 table desc set.";
-  const map<int64_t, THdfsPartition>& partitions =
-      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions;
-
-  map<int64_t, string> partition_dirs;
-  for (map<int64_t, THdfsPartition>::const_iterator it = partitions.begin();
-      it != partitions.end(); ++it) {
-    partition_dirs[it->first] = it->second.location;
-  }
-
-  DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1)
-      << "single node plan should have 1 plan node";
-  const vector<TScanRangeLocations>& ranges =
-      query_request.per_node_scan_ranges.begin()->second;
-
-  // Rewrite the original sql stmt with the input split hint inserted.
-  string sql = req.sql_stmt;
-  transform(sql.begin(), sql.end(), sql.begin(), ::tolower);
-  sql = sql.substr(sql.find("select") + 6);
-
-  for (int i = 0; i < ranges.size(); ++i) {
-    const THdfsFileSplit& split = ranges[i].scan_range.hdfs_file_split;
-    if (partition_dirs.find(split.partition_id) == partition_dirs.end()) {
-      DCHECK(false) << "Invalid plan request.";
-    }
-
-    stringstream ss;
-    ss << "SELECT /* +__input_split__="
-       << partition_dirs[split.partition_id] << "/" << split.file_name
-       << "@" << split.offset << "@" << split.length
-       << " */ " << sql;
+  // The TRecordServiceExecRequest will contain a bunch of TQueryRequest
+  // objects.. each corresponding to a PlanFragment. This is then reconstituted
+  // into a list of TExecRequests (again one for each PlanFragment). Each
+  // TExecRequest is then serialized and set as the "task" field of the
+  // TTask object.
+  // TODO : we would need to encrypt the TExecRequest object for security
+  for (int i = 0; i < query_requests.size(); ++i) {
 
     recordservice::TTask task;
-    task.task = ss.str();
-    for (int j = 0; j < ranges[i].locations.size(); ++j) {
-      task.hosts.push_back(
-          query_request.host_list[ranges[i].locations[j].host_idx].hostname);
+    // Fill with newly constructed TExecPlan
+    int buffer_size = 100 * 1024;  // start out with 100KB
+    ThriftSerializer serializer(false, buffer_size);
+
+    uint8_t* buffer = NULL;
+    uint32_t size = 0;
+    TExecRequest req;
+    req.__set_stmt_type(result.stmt_type);
+    req.__set_access_events(result.access_events);
+    // TODO : Analysis warnings and explain reseults should not be
+    // sent back to the worker.. move this out in such a way that
+    // only the planner client gets this.
+    req.__set_analysis_warnings(result.analysis_warnings);
+    req.__set_explain_result(result.explain_result);
+    req.__set_query_exec_request(query_requests[i]);
+    req.__set_query_options(result.query_options);
+    req.__set_result_set_metadata(result.result_set_metadata);
+    req.__set_set_query_option_request(result.set_query_option_request);
+
+    serializer.Serialize<TExecRequest>(&req, &task.task);
+
+    pair<TPlanNodeId, vector<TScanRangeLocations> > entry;
+    TScanRangeLocations locs;
+    TScanRangeLocation loc;
+    BOOST_FOREACH(entry, query_requests[i].per_node_scan_ranges) {
+      // Assuming for most cases, only 1 plan node (scan node)
+      // will be present per fragment..
+      // If the assumption is not true, it will not generally be
+      // too much of a problem, only that some reads will become
+      // non-local
+      BOOST_FOREACH(locs, entry.second) {
+        BOOST_FOREACH(loc, locs.locations) {
+          task.hosts.push_back(
+            query_requests[i].host_list[loc.host_idx].hostname);
+        }
+      }
     }
     return_val.tasks.push_back(task);
   }
@@ -475,20 +478,28 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
 
   GetRecordServiceSession();
 
-  LOG(ERROR) << "RecordService::ExecRequest: " << req.task;
   shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
-
-  TQueryCtx query_ctx;
-  query_ctx.request.stmt = req.task;
-  // These are single scan queries. No need to make distributed plan with extra
-  // exchange nodes.
   task_state->fetch_size = DEFAULT_FETCH_SIZE;
-  query_ctx.request.query_options.__set_num_nodes(1);
-  if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
-  query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
+  TExecRequest exec_req;
+  uint32_t size;
+  size = req.task.size();
+  Status status = DeserializeThriftMsg(reinterpret_cast<const uint8_t*>(&req.task[0]),
+      &size, false, &exec_req);
+  if (!status.ok()) {
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+  }
+  LOG(ERROR) << "RecordService::ExecRequest: query plan " <<
+          exec_req.query_exec_request.query_plan;
+
+  if (req.__isset.fetch_size) {
+    exec_req.query_exec_request.
+      query_ctx.request.query_options.__set_batch_size(req.fetch_size);
+  }
 
   shared_ptr<QueryExecState> exec_state;
-  Status status = Execute(&query_ctx, record_service_session_, &exec_state);
+  status = ExecuteRecordServiceRequest(
+          &exec_req.query_exec_request.query_ctx,
+          &exec_req, record_service_session_, &exec_state);
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
   }

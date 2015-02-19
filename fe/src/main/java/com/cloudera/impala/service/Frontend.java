@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -110,8 +111,11 @@ import com.cloudera.impala.thrift.TLoadDataReq;
 import com.cloudera.impala.thrift.TLoadDataResp;
 import com.cloudera.impala.thrift.TMetadataOpRequest;
 import com.cloudera.impala.thrift.TPlanFragment;
+import com.cloudera.impala.thrift.TPlanNode;
+import com.cloudera.impala.thrift.TPlanNodeType;
 import com.cloudera.impala.thrift.TQueryCtx;
 import com.cloudera.impala.thrift.TQueryExecRequest;
+import com.cloudera.impala.thrift.TRecordServiceExecRequest;
 import com.cloudera.impala.thrift.TResetMetadataRequest;
 import com.cloudera.impala.thrift.TResultRow;
 import com.cloudera.impala.thrift.TResultSet;
@@ -795,6 +799,84 @@ public class Frontend {
     }
   }
 
+  /**
+   * Create a populated TRecordServiceExecRequest corresponding to the supplied
+   * TQueryCtx. This method first calls the usual createExecRequest and then
+   * decomposes the Plan Fragment tree into individual TQueryExecRequests. There
+   * TQueryExecRequests are then packed into a container
+   * TRecordServiceExecRequest object which is sent as a response.
+   */
+  public TRecordServiceExecRequest createRecordServiceExecRequest(TQueryCtx queryCtx,
+      StringBuilder explainString) throws ImpalaException {
+    TExecRequest origExecRequest = createExecRequest(queryCtx, explainString);
+    TRecordServiceExecRequest result = new TRecordServiceExecRequest();
+
+    result.setStmt_type(origExecRequest.getStmt_type());
+    result.setAccess_events(origExecRequest.getAccess_events());
+    result.setAnalysis_warnings(origExecRequest.getAnalysis_warnings());
+    result.setExplain_result(origExecRequest.getExplain_result());
+    result.setQuery_options(origExecRequest.getQuery_options());
+    result.setResult_set_metadata(origExecRequest.getResult_set_metadata());
+    result.setSet_query_option_request(
+        origExecRequest.getSet_query_option_request());
+
+    TQueryExecRequest origQueryExecRequest =
+        origExecRequest.getQuery_exec_request();
+    List<TPlanFragment> fragments = origQueryExecRequest.getFragments();
+
+    // Ensure only 1 fragment is returned..
+    Preconditions.checkArgument(fragments.size() == 1,
+        "Only single Fragment should be returned !!");
+    // Remove fragments that do not have scan nodes
+    Map<Integer, List<TScanRangeLocations>> origScanRanges =
+        origQueryExecRequest.getPer_node_scan_ranges();
+    List<TPlanNode> nodes = fragments.get(0).getPlan().getNodes();
+    List<TScanRangeLocations> scanRanges =
+        new ArrayList<TScanRangeLocations>();
+    TPlanNode node = null;
+    for (TPlanNode pNode : nodes) {
+      if (TPlanNodeType.HDFS_SCAN_NODE == pNode.getNode_type()) {
+        // Currenty support only single scan node
+        if (node != null) {
+          throw new AnalysisException(
+              "Multiple scan nodes per fragment not currently supported..");
+        }
+        node = pNode;
+        scanRanges.addAll(origScanRanges.get(pNode.getNode_id()));
+      }
+    }
+    if (node != null) {
+      for (TScanRangeLocations scanRangeLoc : scanRanges) {
+        TQueryExecRequest tQueryExecRequest = new TQueryExecRequest();
+        tQueryExecRequest.setDesc_tbl(origQueryExecRequest.getDesc_tbl());
+        tQueryExecRequest.setDest_fragment_idx(new ArrayList<Integer>());
+        tQueryExecRequest.setFinalize_params(
+            origQueryExecRequest.getFinalize_params());
+        tQueryExecRequest.setFragments(Lists.newArrayList(fragments.get(0)));
+        tQueryExecRequest.setHost_list(origQueryExecRequest.getHost_list());
+        tQueryExecRequest.setPer_host_mem_req(
+            origQueryExecRequest.getPer_host_mem_req());
+        tQueryExecRequest.setPer_host_vcores(
+            origQueryExecRequest.getPer_host_vcores());
+        Map<Integer, List<TScanRangeLocations>> perNodeScanRanges =
+            new HashMap<Integer, List<TScanRangeLocations>>();
+        perNodeScanRanges.put(
+            node.getNode_id(), Lists.newArrayList(scanRangeLoc));
+        tQueryExecRequest.setPer_node_scan_ranges(perNodeScanRanges);
+        tQueryExecRequest.setQuery_ctx(origQueryExecRequest.getQuery_ctx());
+        tQueryExecRequest.setQuery_plan(origQueryExecRequest.getQuery_plan());
+        tQueryExecRequest.setResult_set_metadata(
+            origQueryExecRequest.getResult_set_metadata());
+        tQueryExecRequest.setStmt_type(origQueryExecRequest.getStmt_type());
+        result.addToQuery_exec_request(tQueryExecRequest);
+      }
+    }
+    if ((result.getQuery_exec_request() == null)
+        ||(result.getQuery_exec_request().size() == 0)) {
+      throw new AnalysisException("No scan ranges found for this query !!");
+    }
+    return result;
+  }
   /**
    * Create a populated TExecRequest corresponding to the supplied TQueryCtx.
    */
