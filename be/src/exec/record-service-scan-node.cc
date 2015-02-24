@@ -25,13 +25,27 @@
 #include "runtime/tuple.h"
 #include "runtime/tuple-row.h"
 
+#include "rpc/thrift-util.h"
+
 using namespace boost;
 using namespace impala;
 using namespace llvm;
 using namespace std;
 using namespace strings;
 
+DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
+
+namespace impala {
+  // Minimal implementation of < for set lookup.
+  bool THdfsFileSplit::operator<(const THdfsFileSplit& o) const {
+    if (file_name < o.file_name) return true;
+    if (file_name > o.file_name) return false;
+    if (offset < o.offset) return true;
+    if (offset > o.offset) return false;
+    return false;
+  }
+}
 
 RecordServiceScanNode::RecordServiceScanNode(
     ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
@@ -52,6 +66,9 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   RETURN_IF_ERROR(ScanNode::Prepare(state));
   state_ = state;
 
+  DCHECK(scan_range_params_ != NULL)
+      << "Must call SetScanRanges() before calling Prepare()";
+
   tuple_desc_ = state->desc_tbl().GetTupleDescriptor(tuple_id_);
   DCHECK(tuple_desc_ != NULL);
   tuple_byte_size_ = tuple_desc_->byte_size();
@@ -60,6 +77,7 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   hdfs_table_ = static_cast<const HdfsTableDescriptor*>(tuple_desc_->table_desc());
   const vector<SlotDescriptor*>& slots = tuple_desc_->slots();
   stringstream stmt;
+  stmt << "SELECT ";
   // TODO: handle count(*)
   for (size_t i = 0; i < slots.size(); ++i) {
     if (!slots[i]->is_materialized()) continue;
@@ -72,25 +90,51 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
       stmt << ", " << materialized_col_names_[i];
     }
   }
+
   stmt << " FROM " << hdfs_table_->database() << "." << hdfs_table_->name();
 
-  DCHECK(scan_range_params_ != NULL)
-      << "Must call SetScanRanges() before calling Prepare()";
-  tasks_.resize(scan_range_params_->size());
+  ThriftClient<recordservice::RecordServicePlannerClient>
+      planner("localhost", FLAGS_recordservice_planner_port);
+  RETURN_IF_ERROR(planner.Open());
+
+  // Call the RecordServicePlanner to plan the request and the filter out the
+  // tasks that were not assigned.
+  // TODO: Ideally, the Impala planner would know how to do this.
+  recordservice::TPlanRequestParams params;
+  params.sql_stmt = stmt.str();
+  recordservice::TPlanRequestResult result;
+
+  try {
+    planner.iface()->PlanRequest(result, params);
+  } catch (const recordservice::TRecordServiceException& e) {
+    return Status(e.message.c_str());
+  } catch (const std::exception& e) {
+    return Status(e.what());
+  }
+
+  set<THdfsFileSplit> assigned_splits;
   for (int i = 0; i < scan_range_params_->size(); ++i) {
     DCHECK((*scan_range_params_)[i].scan_range.__isset.hdfs_file_split);
     const THdfsFileSplit& split = (*scan_range_params_)[i].scan_range.hdfs_file_split;
-    HdfsPartitionDescriptor* partition_desc =
-        hdfs_table_->GetPartition(split.partition_id);
-    filesystem::path file_path(partition_desc->location());
-    file_path.append(split.file_name, filesystem::path::codecvt());
-    const string& native_file_path = file_path.native();
-
-    stringstream ss;
-    ss << "SELECT /* +__input_split__=" << native_file_path << "@"
-       << split.offset << "@" << split.length << " */ " << stmt.str();
-    tasks_[i].stmt = ss.str();
+    assigned_splits.insert(split);
   }
+
+  // Walk through all the tasks (which includes the splits for the entire table) and
+  // filter out the ones that aren't assigned to this node.
+  for (int i = 0; i < result.tasks.size(); ++i) {
+    TExecRequest exec_req;
+    uint32_t size;
+    size = result.tasks[i].task.size();
+    RETURN_IF_ERROR(DeserializeThriftMsg(
+        reinterpret_cast<const uint8_t*>(&result.tasks[i].task[0]),
+        &size, false, &exec_req));
+    const THdfsFileSplit& split = exec_req.query_exec_request.per_node_scan_ranges.
+        begin()->second[0].scan_range.hdfs_file_split;
+    if (assigned_splits.find(split) != assigned_splits.end()) {
+      tasks_.push_back(result.tasks[i].task);
+    }
+  }
+
   task_id_ = 0;
 
   return Status::OK;
@@ -104,7 +148,7 @@ Status RecordServiceScanNode::Open(RuntimeState* state) {
           FLAGS_recordservice_worker_port));
   RETURN_IF_ERROR(rsw_client_->Open());
 
- num_scanner_threads_started_counter_ =
+  num_scanner_threads_started_counter_ =
       ADD_COUNTER(runtime_profile(), NUM_SCANNER_THREADS_STARTED, TUnit::UNIT);
 
   // Reserve one thread token.
@@ -228,7 +272,7 @@ Status RecordServiceScanNode::ProcessTask(
   DCHECK(!tasks_[task_id].connected);
 
   recordservice::TExecTaskParams params;
-  params.task = tasks_[task_id].stmt;
+  params.task = tasks_[task_id].task;
   recordservice::TExecTaskResult result;
 
   try {

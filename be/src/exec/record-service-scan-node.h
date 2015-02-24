@@ -36,6 +36,7 @@
 #include "util/thread.h"
 
 #include "gen-cpp/PlanNodes_types.h"
+#include "gen-cpp/RecordServicePlanner.h"
 #include "gen-cpp/RecordServiceWorker.h"
 
 namespace impala {
@@ -84,11 +85,12 @@ class RecordServiceScanNode : public ScanNode {
   boost::scoped_ptr<ThriftClient<recordservice::RecordServiceWorkerClient> > rsw_client_;
 
   struct TaskState {
-    std::string stmt;
+    std::string task;
     recordservice::TUniqueId handle;
     bool connected;
 
     TaskState() : connected(false) {}
+    TaskState(const std::string& task) : task(task), connected(false) {}
   };
 
   // Threads that have been started. Each task is picked up by a different thread.
