@@ -428,8 +428,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     int buffer_size = 100 * 1024;  // start out with 100KB
     ThriftSerializer serializer(false, buffer_size);
 
-    uint8_t* buffer = NULL;
-    uint32_t size = 0;
     TExecRequest req;
     req.__set_stmt_type(result.stmt_type);
     req.__set_access_events(result.access_events);
@@ -479,7 +477,6 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   GetRecordServiceSession();
 
   shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
-  task_state->fetch_size = DEFAULT_FETCH_SIZE;
   TExecRequest exec_req;
   uint32_t size;
   size = req.task.size();
@@ -491,10 +488,10 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   LOG(ERROR) << "RecordService::ExecRequest: query plan " <<
           exec_req.query_exec_request.query_plan;
 
-  if (req.__isset.fetch_size) {
-    exec_req.query_exec_request.
-      query_ctx.request.query_options.__set_batch_size(req.fetch_size);
-  }
+  task_state->fetch_size = DEFAULT_FETCH_SIZE;
+  if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
+  exec_req.query_exec_request.
+      query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
 
   shared_ptr<QueryExecState> exec_state;
   status = ExecuteRecordServiceRequest(
