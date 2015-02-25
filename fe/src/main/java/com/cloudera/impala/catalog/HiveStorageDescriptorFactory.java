@@ -39,6 +39,7 @@ public class HiveStorageDescriptorFactory {
       case SEQUENCE_FILE: sd = createSequenceFileSd(); break;
       case TEXT: sd = createTextSd(); break;
       case AVRO: sd = createAvroSd(); break;
+      case RECORDSERVICE: sd = createRecordServiceSd(); break;
       default: throw new UnsupportedOperationException(
           "Unsupported file format: " + fileFormat);
     }
@@ -106,6 +107,16 @@ public class HiveStorageDescriptorFactory {
     // Writing compressed Avro tables is done using a session level configuration
     // setting, it is not specified as part of the table metadata. The compression
     // property of the StorageDescriptor has a different purpose.
+    return sd;
+  }
+
+  private static StorageDescriptor createRecordServiceSd() {
+    StorageDescriptor sd = createGenericSd();
+    sd.setInputFormat("com.cloudera.recordservice.mapred.RecordServiceInputFormat");
+    sd.setOutputFormat(
+        org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat.class.getName());
+    sd.getSerdeInfo().setSerializationLib(
+        "com.cloudera.recordservice.hive.RecordServiceSerDe");
     return sd;
   }
 

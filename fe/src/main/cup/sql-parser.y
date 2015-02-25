@@ -245,7 +245,8 @@ terminal
   KW_LOAD, KW_LOCATION, KW_MAP, KW_MERGE_FN, KW_METADATA, KW_NOT, KW_NULL, KW_NULLS,
   KW_OFFSET, KW_ON, KW_OR, KW_ORDER, KW_OUTER, KW_OVER, KW_OVERWRITE, KW_PARQUET,
   KW_PARQUETFILE, KW_PARTITION, KW_PARTITIONED, KW_PARTITIONS, KW_PRECEDING,
-  KW_PREPARE_FN, KW_PRODUCED, KW_RANGE, KW_RCFILE, KW_REFRESH, KW_REGEXP, KW_RENAME,
+  KW_PREPARE_FN, KW_PRODUCED, KW_RANGE, KW_RCFILE, KW_RECORDSERVICE, KW_REFRESH,
+  KW_REGEXP, KW_RENAME,
   KW_REPLACE, KW_REPLICATION, KW_RETURNS, KW_REVOKE, KW_RIGHT, KW_RLIKE, KW_ROLE,
   KW_ROLES, KW_ROW, KW_ROWS, KW_SCHEMA, KW_SCHEMAS, KW_SELECT, KW_SEMI, KW_SEQUENCEFILE,
   KW_SERDEPROPERTIES, KW_SERIALIZE_FN, KW_SET, KW_SHOW, KW_SMALLINT, KW_STORED,
@@ -822,6 +823,14 @@ create_tbl_like_stmt ::=
     RESULT = new CreateTableLikeStmt(table, other_table, external, comment,
         null, location, if_not_exists);
   :}
+  | KW_CREATE external_val:external KW_TABLE if_not_exists_val:if_not_exists
+  table_name:table KW_LIKE table_name:other_table comment_val:comment
+  KW_STORED KW_BY KW_RECORDSERVICE location_val:location
+  {:
+    RESULT = new CreateTableLikeStmt(table, other_table, external, comment,
+        THdfsFileFormat.RECORDSERVICE, location, if_not_exists);
+  :}
+
   ;
 
 create_tbl_like_file_stmt ::=
@@ -1034,6 +1043,11 @@ terminator_val ::=
 file_format_create_table_val ::=
   KW_STORED KW_AS file_format_val:file_format
   {: RESULT = file_format; :}
+  | KW_STORED KW_BY KW_RECORDSERVICE
+  /* TODO: Record Service isn't an HDFS File format. Impala needs to updated to
+   * support specifying custom InputFormats/SerDes.
+   */
+  {: RESULT = THdfsFileFormat.RECORDSERVICE; :}
   | /* empty - default to TEXT */
   {: RESULT = THdfsFileFormat.TEXT; :}
   ;

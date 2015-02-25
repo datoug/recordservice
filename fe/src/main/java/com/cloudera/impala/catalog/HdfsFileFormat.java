@@ -28,7 +28,8 @@ public enum HdfsFileFormat {
   TEXT,
   SEQUENCE_FILE,
   AVRO,
-  PARQUET;
+  PARQUET,
+  RECORDSERVICE;
 
   // Input format class for RCFile tables read by Hive.
   private static final String RCFILE_INPUT_FORMAT =
@@ -49,6 +50,11 @@ public enum HdfsFileFormat {
   // Input format class for Sequence file tables read by Hive.
   private static final String SEQUENCE_INPUT_FORMAT =
       "org.apache.hadoop.mapred.SequenceFileInputFormat";
+
+  // Input format class for RecordService backed tables (this will go away
+  // in the future).
+  private static final String RECORDSERVICE_INPUT_FORMAT =
+      "com.cloudera.recordservice.mapred.RecordServiceInputFormat";
 
   // Input format class for Parquet tables read by Hive.
   // The location (i.e. java class path) for the SerDe has
@@ -76,6 +82,7 @@ public enum HdfsFileFormat {
           .put(PARQUET_INPUT_FORMATS[1], PARQUET)
           .put(PARQUET_INPUT_FORMATS[2], PARQUET)
           .put(PARQUET_INPUT_FORMATS[3], PARQUET)
+          .put(RECORDSERVICE_INPUT_FORMAT, RECORDSERVICE)
           .build();
   /**
    * Returns true if the string describes an input format class that we support.
@@ -120,6 +127,7 @@ public enum HdfsFileFormat {
       case SEQUENCE_FILE: return HdfsFileFormat.SEQUENCE_FILE;
       case AVRO: return HdfsFileFormat.AVRO;
       case PARQUET: return HdfsFileFormat.PARQUET;
+      case RECORDSERVICE: return HdfsFileFormat.RECORDSERVICE;
       default:
         throw new RuntimeException("Unknown THdfsFileFormat: "
             + thriftFormat + " - should never happen!");
@@ -133,6 +141,7 @@ public enum HdfsFileFormat {
       case SEQUENCE_FILE: return THdfsFileFormat.SEQUENCE_FILE;
       case AVRO: return THdfsFileFormat.AVRO;
       case PARQUET: return THdfsFileFormat.PARQUET;
+      case RECORDSERVICE: return THdfsFileFormat.RECORDSERVICE;
       default:
         throw new RuntimeException("Unknown HdfsFormat: "
             + this + " - should never happen!");
@@ -156,6 +165,7 @@ public enum HdfsFileFormat {
       case SEQUENCE_FILE: return "SEQUENCEFILE";
       case AVRO: return "AVRO";
       case PARQUET: return "PARQUET";
+      case RECORDSERVICE: return "RECORDSERVICE";
       default:
         throw new RuntimeException("Unknown HdfsFormat: "
             + this + " - should never happen!");

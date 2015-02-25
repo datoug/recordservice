@@ -50,7 +50,10 @@ enum THdfsFileFormat {
   RC_FILE,
   SEQUENCE_FILE,
   AVRO,
-  PARQUET
+  PARQUET,
+  // TODO: Record Service is not an HDFS file format. This needs to be removed
+  // and Impala needs to be updated to properly support custom InputFormat/Serdes.
+  RECORDSERVICE,
 }
 
 enum THdfsCompression {
