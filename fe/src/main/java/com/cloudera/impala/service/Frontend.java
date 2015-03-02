@@ -827,7 +827,7 @@ public class Frontend {
     // Ensure only 1 fragment is returned..
     Preconditions.checkArgument(fragments.size() == 1,
         "Only single Fragment should be returned !!");
-    // Remove fragments that do not have scan nodes
+
     Map<Integer, List<TScanRangeLocations>> origScanRanges =
         origQueryExecRequest.getPer_node_scan_ranges();
     List<TPlanNode> nodes = fragments.get(0).getPlan().getNodes();
@@ -836,7 +836,7 @@ public class Frontend {
     TPlanNode node = null;
     for (TPlanNode pNode : nodes) {
       if (TPlanNodeType.HDFS_SCAN_NODE == pNode.getNode_type()) {
-        // Currenty support only single scan node
+        // Currently support only single scan node
         if (node != null) {
           throw new AnalysisException(
               "Multiple scan nodes per fragment not currently supported..");
@@ -846,6 +846,7 @@ public class Frontend {
       }
     }
     if (node != null) {
+      // Scan ranges can be empty for an empty table.
       for (TScanRangeLocations scanRangeLoc : scanRanges) {
         TQueryExecRequest tQueryExecRequest = new TQueryExecRequest();
         tQueryExecRequest.setDesc_tbl(origQueryExecRequest.getDesc_tbl());
@@ -870,10 +871,11 @@ public class Frontend {
         tQueryExecRequest.setStmt_type(origQueryExecRequest.getStmt_type());
         result.addToQuery_exec_request(tQueryExecRequest);
       }
-    }
-    if ((result.getQuery_exec_request() == null)
-        ||(result.getQuery_exec_request().size() == 0)) {
-      throw new AnalysisException("No scan ranges found for this query !!");
+    } else {
+      // No scans in this query. This is a select constant query.
+      // TODO: support this. It's all possible the planner replaces scan with
+      // empty node if it is known to be empty.
+      throw new AnalysisException("No scan nodes found for this query !!");
     }
     return result;
   }
