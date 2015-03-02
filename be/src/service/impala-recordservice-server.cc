@@ -42,6 +42,8 @@ using namespace boost;
 using namespace strings;
 using namespace beeswax; // Converting QueryState
 
+DECLARE_int32(recordservice_worker_port);
+
 // This value has a big impact on performance. For simple queries (1 bigint col),
 // 5000 is a 2x improvement over a fetch size of 1024.
 // TODO: investigate more
@@ -427,7 +429,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   // TTask object.
   // TODO : we would need to encrypt the TExecRequest object for security
   for (int i = 0; i < query_requests.size(); ++i) {
-
     recordservice::TTask task;
     // Fill with newly constructed TExecPlan
     int buffer_size = 100 * 1024;  // start out with 100KB
@@ -459,13 +460,23 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       // non-local
       BOOST_FOREACH(locs, entry.second) {
         BOOST_FOREACH(loc, locs.locations) {
-          task.hosts.push_back(
-            query_requests[i].host_list[loc.host_idx].hostname);
+          recordservice::TNetworkAddress host;
+          host.hostname = query_requests[i].host_list[loc.host_idx].hostname;
+          // TODO: this port should come from the membership information.
+          host.port = FLAGS_recordservice_worker_port;
+          task.local_hosts.push_back(host);
         }
       }
     }
     return_val.tasks.push_back(task);
   }
+
+  // TODO: this port should come from the membership information and return all hosts
+  // the workers are running on.
+  recordservice::TNetworkAddress default_host;
+  default_host.hostname = "localhost";
+  default_host.port = FLAGS_recordservice_worker_port;
+  return_val.hosts.push_back(default_host);
 }
 
 //
