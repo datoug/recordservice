@@ -394,6 +394,11 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   // queries, i.e. joins.
   query_ctx.request.query_options.__set_num_nodes(1);
 
+  // Disable codegen. Codegen works well for Impala because each fragment processes
+  // multiple blocks, so the cost of codegen is amortized.
+  // TODO: implement codegen caching.
+  query_ctx.request.query_options.__set_disable_codegen(true);
+
   // Get the plan. This is the normal Impala plan.
   TRecordServiceExecRequest result;
   Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
