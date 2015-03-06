@@ -317,7 +317,6 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   class HS2RowOrientedResultSet;
   class HS2ColumnarResultSet;
   class BaseResultSet;
-  class RecordServiceColumnarResultSet;
   class RecordServiceParquetResultSet;
 
   struct SessionState;
@@ -763,6 +762,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Set is_offline_ to the argument's value.
   void SetOffline(bool offline);
 
+  // Creates a temp table for 'path', returning the fully qualified name.
+  Status CreateTmpTable(const recordservice::TPathRequest& path,
+      std::string* table_name);
+
   // Creates/returns singleton record service session.
   boost::shared_ptr<SessionState> GetRecordServiceSession();
 
@@ -936,6 +939,12 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // TODO: temp single session for all record service clients
   boost::shared_ptr<SessionState> record_service_session_;
+
+  // Lock to prevent multiple concurrent requests using the same tmp table. A hack
+  // for now (otherwise, we'd have to generate unique table names and maintain them).
+  // The lock is held from when the temp table is created to after planning (not
+  // during execution).
+  boost::mutex tmp_tbl_lock_;
 
   // Map from a connection ID to the associated list of sessions so that all can be closed
   // when the connection ends. HS2 allows for multiplexing several sessions across a

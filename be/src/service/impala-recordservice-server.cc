@@ -29,12 +29,14 @@
 #include "exprs/expr.h"
 #include "exprs/expr-context.h"
 #include "exprs/slot-ref.h"
+#include "runtime/hdfs-fs-cache.h"
 #include "runtime/raw-value.h"
 #include "service/query-exec-state.h"
 #include "service/query-options.h"
-#include "util/debug-util.h"
 #include "rpc/thrift-util.h"
+#include "util/debug-util.h"
 #include "util/impalad-metrics.h"
+#include "util/hdfs-util.h"
 #include "service/hs2-util.h"
 
 using namespace std;
@@ -48,6 +50,11 @@ DECLARE_int32(recordservice_worker_port);
 // 5000 is a 2x improvement over a fetch size of 1024.
 // TODO: investigate more
 static const int DEFAULT_FETCH_SIZE = 5000;
+
+// Names of temporary tables used to service path based requests.
+// TODO: everything about temp tables is a hack.
+static const char* TEMP_DB = "rs_tmp_db";
+static const char* TEMP_TBL = "tmp_tbl";
 
 namespace impala {
 
@@ -376,13 +383,15 @@ static void PopulateResultSchema(const TResultSetMetadata& metadata,
   }
 }
 
+recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
+  return recordservice::TProtocolVersion::V1;
+}
+
 //
 // RecordServicePlanner
 //
 void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   const recordservice::TPlanRequestParams& req) {
-  LOG(ERROR) << "RecordService::PlanRequest: " << req.sql_stmt;
-
   if (IsOffline()) {
     ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
         "This RecordServicePlanner is not ready to accept requests."
@@ -390,7 +399,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   }
 
   TQueryCtx query_ctx;
-  query_ctx.request.stmt = req.sql_stmt;
   // Setting num_nodes = 1 means we generate a single node plan which has
   // a simpler structure. It also prevents Impala from analyzing multi-table
   // queries, i.e. joins.
@@ -401,9 +409,68 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   // TODO: implement codegen caching.
   query_ctx.request.query_options.__set_disable_codegen(true);
 
-  // Get the plan. This is the normal Impala plan.
+  unique_lock<mutex> tmp_tbl_lock;
+
+  switch (req.request_type) {
+    case recordservice::TRequestType::Sql:
+      query_ctx.request.stmt = req.sql_stmt;
+      break;
+    case recordservice::TRequestType::Path: {
+      hdfsFS fs;
+      Status status = HdfsFsCache::instance()->GetConnection("default", &fs);
+      if (!status.ok()) {
+        // TODO: more error detail
+        ThrowException(recordservice::TErrorCode::INTERNAL_ERROR,
+            "Could not connect to HDFS");
+      }
+      bool is_directory = false;
+      status = IsDirectory(fs, req.path.path.c_str(), &is_directory);
+      if (!status.ok()) {
+        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+            "No such file or directory: " + req.path.path);
+      }
+
+      if (!is_directory) {
+        // TODO: Impala should support LOCATIONs that are not directories.
+        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+            "Path must be a directory: " + req.path.path);
+      }
+
+      // TODO: improve tmp table management or get impala to do it properly.
+      unique_lock<mutex> l(tmp_tbl_lock_);
+      tmp_tbl_lock.swap(l);
+
+      string tmp_table;
+      status = CreateTmpTable(req.path, &tmp_table);
+      if (!status.ok()) {
+        ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+      }
+      if (req.path.__isset.query) {
+        string query = req.path.query;
+        size_t p = req.path.query.find("__PATH__");
+        if (p == string::npos) {
+          ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+              "Query request must contain __PATH__: " + query);
+        }
+        query.replace(p, 8, tmp_table);
+        query_ctx.request.stmt = query;
+      } else {
+        query_ctx.request.stmt = "SELECT * FROM " + tmp_table;
+      }
+      break;
+    }
+    default:
+      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+          "Unsupported request types. Supported request types are: SQL");
+  }
+
+  LOG(ERROR) << "RecordService::PlanRequest: " << query_ctx.request.stmt;
+
+  // Plan the request.
   TRecordServiceExecRequest result;
   Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
+  if (tmp_tbl_lock.owns_lock()) tmp_tbl_lock.unlock();
+
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
         status.GetErrorMsg());
@@ -437,7 +504,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     TExecRequest req;
     req.__set_stmt_type(result.stmt_type);
     req.__set_access_events(result.access_events);
-    // TODO : Analysis warnings and explain reseults should not be
+    // TODO : Analysis warnings and explain results should not be
     // sent back to the worker.. move this out in such a way that
     // only the planner client gets this.
     req.__set_analysis_warnings(result.analysis_warnings);
@@ -676,8 +743,49 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
 }
 
-recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
-  return recordservice::TProtocolVersion::V1;
+Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& path,
+    string* table_name) {
+  GetRecordServiceSession();
+  stringstream tbl_name;
+  tbl_name << TEMP_DB << "." << TEMP_TBL;
+  *table_name = tbl_name.str();
+
+  // For now, we'll just always use one temp table.
+  string commands[] = {
+    "DROP TABLE IF EXISTS " + *table_name,
+    "CREATE DATABASE IF NOT EXISTS " + string(TEMP_DB),
+    // TODO: assume text for now. How do we best handle this?
+    "CREATE EXTERNAL TABLE " + *table_name +
+        "(record STRING) LOCATION \"" + path.path + "\"",
+  };
+
+  int num_commands = sizeof(commands) / sizeof(commands[0]);
+  for (int i = 0; i < num_commands; ++i) {
+    TQueryCtx query_ctx;
+    query_ctx.request.stmt = commands[i];
+
+    shared_ptr<QueryExecState> exec_state;
+    RETURN_IF_ERROR(Execute(&query_ctx, record_service_session_, &exec_state));
+    exec_state->UpdateQueryState(QueryState::RUNNING);
+
+    Status status = SetQueryInflight(record_service_session_, exec_state);
+    if (!status.ok()) {
+      UnregisterQuery(exec_state->query_id(), false, &status);
+      return status;
+    }
+
+    // block until results are ready
+    exec_state->Wait();
+    status = exec_state->query_status();
+    if (!status.ok()) {
+      UnregisterQuery(exec_state->query_id(), false, &status);
+      return status;
+    }
+    exec_state->UpdateQueryState(QueryState::FINISHED);
+    UnregisterQuery(exec_state->query_id(), true);
+  }
+
+  return Status::OK;
 }
 
 }

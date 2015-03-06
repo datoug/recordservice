@@ -35,6 +35,9 @@ Status GetFileSize(const hdfsFS& connection, const char* filename, int64_t* file
 Status GetLastModificationTime(const hdfsFS& connection, const char* filename,
                                time_t* last_mod_time);
 
+// Returns true if the path is a directory.
+Status IsDirectory(const hdfsFS& connection, const char* path, bool* is_directory);
+
 bool IsHiddenFile(const std::string& filename);
 
 // Copy the file at 'src_path' from 'src_conn' to 'dst_path' in 'dst_conn'.

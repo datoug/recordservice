@@ -39,6 +39,14 @@ Status GetFileSize(const hdfsFS& connection, const char* filename, int64_t* file
   return Status::OK;
 }
 
+Status IsDirectory(const hdfsFS& connection, const char* path, bool* is_directory) {
+  hdfsFileInfo* info = hdfsGetPathInfo(connection, path);
+  if (info == NULL) return Status(GetHdfsErrorMsg("Failed to get file info ", path));
+  *is_directory = info->mKind == kObjectKindDirectory;
+  hdfsFreeFileInfo(info, 1);
+  return Status::OK;
+}
+
 Status GetLastModificationTime(const hdfsFS& connection, const char* filename,
                                time_t* last_mod_time) {
   hdfsFileInfo* info = hdfsGetPathInfo(connection, filename);
