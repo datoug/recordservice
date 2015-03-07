@@ -101,7 +101,8 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   // tasks that were not assigned.
   // TODO: Ideally, the Impala planner would know how to do this.
   recordservice::TPlanRequestParams params;
-  params.sql_stmt = stmt.str();
+  params.request_type = recordservice::TRequestType::Sql;
+  params.__set_sql_stmt(stmt.str());
   recordservice::TPlanRequestResult result;
 
   try {
