@@ -416,32 +416,12 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       query_ctx.request.stmt = req.sql_stmt;
       break;
     case recordservice::TRequestType::Path: {
-      hdfsFS fs;
-      Status status = HdfsFsCache::instance()->GetConnection("default", &fs);
-      if (!status.ok()) {
-        // TODO: more error detail
-        ThrowException(recordservice::TErrorCode::INTERNAL_ERROR,
-            "Could not connect to HDFS");
-      }
-      bool is_directory = false;
-      status = IsDirectory(fs, req.path.path.c_str(), &is_directory);
-      if (!status.ok()) {
-        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-            "No such file or directory: " + req.path.path);
-      }
-
-      if (!is_directory) {
-        // TODO: Impala should support LOCATIONs that are not directories.
-        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-            "Path must be a directory: " + req.path.path);
-      }
-
       // TODO: improve tmp table management or get impala to do it properly.
       unique_lock<mutex> l(tmp_tbl_lock_);
       tmp_tbl_lock.swap(l);
 
       string tmp_table;
-      status = CreateTmpTable(req.path, &tmp_table);
+      Status status = CreateTmpTable(req.path, &tmp_table);
       if (!status.ok()) {
         ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
       }
@@ -743,8 +723,36 @@ void ImpalaServer::GetTaskStats(recordservice::TStats& return_val,
   SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
 }
 
-Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& path,
+Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
     string* table_name) {
+
+  hdfsFS fs;
+  Status status = HdfsFsCache::instance()->GetConnection("default", &fs);
+  if (!status.ok()) {
+    // TODO: more error detail
+    ThrowException(recordservice::TErrorCode::INTERNAL_ERROR,
+        "Could not connect to HDFS");
+  }
+
+  // TODO: this should do better globbing.
+  string path = request.path;
+  if (path[path.size() - 1] == '*') {
+    path = path.substr(0, path.size() - 1);
+  }
+
+  bool is_directory = false;
+  status = IsDirectory(fs, path.c_str(), &is_directory);
+  if (!status.ok()) {
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        "No such file or directory: " + path);
+  }
+
+  if (!is_directory) {
+    // TODO: Impala should support LOCATIONs that are not directories.
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        "Path must be a directory: " + path);
+  }
+
   GetRecordServiceSession();
   stringstream tbl_name;
   tbl_name << TEMP_DB << "." << TEMP_TBL;
@@ -756,7 +764,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& path,
     "CREATE DATABASE IF NOT EXISTS " + string(TEMP_DB),
     // TODO: assume text for now. How do we best handle this?
     "CREATE EXTERNAL TABLE " + *table_name +
-        "(record STRING) LOCATION \"" + path.path + "\"",
+        "(record STRING) LOCATION \"" + path + "\"",
   };
 
   int num_commands = sizeof(commands) / sizeof(commands[0]);
