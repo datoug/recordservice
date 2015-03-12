@@ -358,6 +358,14 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
     case TYPE_STRING:
       result.type_id = recordservice::TTypeId::STRING;
       break;
+    case TYPE_VARCHAR:
+      result.type_id = recordservice::TTypeId::VARCHAR;
+      result.__set_len(t.len);
+      break;
+    case TYPE_CHAR:
+      result.type_id = recordservice::TTypeId::CHAR;
+      result.__set_len(t.len);
+      break;
     case TYPE_TIMESTAMP:
       result.type_id = recordservice::TTypeId::TIMESTAMP;
       break;

@@ -360,6 +360,7 @@ Status RecordServiceScanNode::ProcessTask(
           case TYPE_DOUBLE:
           case TYPE_TIMESTAMP:
           case TYPE_DECIMAL:
+          case TYPE_CHAR:
             memcpy(slot, data_values[c], materialized_slots_[c]->type().GetByteSize());
             data_values[c] += materialized_slots_[c]->type().GetByteSize();
             break;
