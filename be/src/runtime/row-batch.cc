@@ -272,8 +272,6 @@ int RowBatch::GetBatchSize(const TRowBatch& batch) {
 void RowBatch::AcquireState(RowBatch* src) {
   DCHECK(row_desc_.Equals(src->row_desc_));
   DCHECK_EQ(num_tuples_per_row_, src->num_tuples_per_row_);
-  DCHECK_EQ(tuple_ptrs_size_, src->tuple_ptrs_size_);
-  DCHECK_EQ(capacity_, src->capacity_);
   DCHECK_EQ(auxiliary_mem_usage_, 0);
 
   // The destination row batch should be empty.

@@ -316,6 +316,11 @@ Status RecordServiceScanNode::ProcessTask(
       return Status(ss.str());
     }
 
+    if (fetch_result.num_rows == 0) {
+      DCHECK(fetch_result.done);
+      break;
+    }
+
     auto_ptr<RowBatch> row_batch(
         new RowBatch(row_desc(), fetch_result.num_rows, mem_tracker()));
 
