@@ -121,7 +121,11 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
   virtual void Init(const TResultSetMetadata& md, int fetch_size) {
     for (int i = 0; i < md.columns.size(); ++i) {
       types_.push_back(md.columns[i].columnType);
-      type_sizes_.push_back(types_[i].GetByteSize());
+      if (types_[i] == TYPE_TIMESTAMP) {
+        type_sizes_.push_back(12);
+      } else {
+        type_sizes_.push_back(types_[i].GetByteSize());
+      }
     }
   }
 
@@ -244,7 +248,18 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
             memcpy((char*)dst.data() + offset, &sv->len, sizeof(int32_t));
             memcpy((char*)dst.data() + offset + sizeof(int32_t), sv->ptr, sv->len);
           } else {
-            memcpy(data[c], tuple->GetSlot(slot_descs_[c].byte_offset), type_size);
+            const void* slot = tuple->GetSlot(slot_descs_[c].byte_offset);
+            if (types_[c] == TYPE_TIMESTAMP) {
+              DCHECK_EQ(type_size, 12);
+              const TimestampValue* ts = reinterpret_cast<const TimestampValue*>(slot);
+              int64_t millis;
+              int32_t nanos;
+              ts->ToMillisAndNanos(&millis, &nanos);
+              memcpy(data[c], &millis, sizeof(int64_t));
+              memcpy(data[c] + sizeof(int64_t), &nanos, sizeof(int32_t));
+            } else {
+              memcpy(data[c], slot, type_size);
+            }
             data[c] += type_size;
           }
         }
@@ -367,7 +382,7 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
       result.__set_len(t.len);
       break;
     case TYPE_TIMESTAMP:
-      result.type_id = recordservice::TTypeId::TIMESTAMP;
+      result.type_id = recordservice::TTypeId::TIMESTAMP_NANOS;
       break;
     case TYPE_DECIMAL:
       result.type_id = recordservice::TTypeId::DECIMAL;
@@ -556,7 +571,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
   }
-  LOG(ERROR) << "RecordService::ExecRequest: query plan " <<
+  LOG(INFO) << "RecordService::ExecRequest: query plan " <<
           exec_req.query_exec_request.query_plan;
 
   task_state->fetch_size = DEFAULT_FETCH_SIZE;

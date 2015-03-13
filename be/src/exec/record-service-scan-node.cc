@@ -358,12 +358,20 @@ Status RecordServiceScanNode::ProcessTask(
           case TYPE_BIGINT:
           case TYPE_FLOAT:
           case TYPE_DOUBLE:
-          case TYPE_TIMESTAMP:
           case TYPE_DECIMAL:
           case TYPE_CHAR:
             memcpy(slot, data_values[c], materialized_slots_[c]->type().GetByteSize());
             data_values[c] += materialized_slots_[c]->type().GetByteSize();
             break;
+
+          case TYPE_TIMESTAMP: {
+            int64_t millis = *reinterpret_cast<const int64_t*>(data_values[c]);
+            data_values[c] += sizeof(int64_t);
+            int32_t nanos = *reinterpret_cast<const int32_t*>(data_values[c]);
+            data_values[c] += sizeof(int32_t);
+            reinterpret_cast<TimestampValue*>(slot)->FromMillisAndNanos(millis, nanos);
+            break;
+          }
 
           case TYPE_STRING:
           case TYPE_VARCHAR: {

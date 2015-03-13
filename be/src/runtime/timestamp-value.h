@@ -220,6 +220,12 @@ class TimestampValue {
     return sizeof(boost::posix_time::time_duration) + sizeof(boost::gregorian::date);
   }
 
+  // Returns the mills since epoch and nanos.
+  void ToMillisAndNanos(int64_t* millis, int32_t* nanos) const;
+
+  // Sets the time from millis and nanos (from epoch).
+  void FromMillisAndNanos(int64_t millis, int32_t nanos);
+
   inline uint32_t Hash(int seed = 0) const {
     uint32_t hash = HashUtil::Hash(&time_, sizeof(time_), seed);
     return HashUtil::Hash(&date_, sizeof(date_), hash);

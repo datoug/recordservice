@@ -27,7 +27,38 @@ DEFINE_bool(use_local_tz_for_unix_timestamp_conversions, false,
 namespace impala {
 
 const char* TimestampValue::LLVM_CLASS_NAME = "class.impala::TimestampValue";
-const double TimestampValue::ONE_BILLIONTH = 0.000000001;
+const double TimestampValue::FRACTIONAL = 0.000000001;
+
+static const ptime EPOCH(boost::gregorian::date(1970, 1, 1));
+static const int32_t MILLIS_PER_HOUR = 60 * 60 * 1000;
+
+time_t to_time_t(ptime t) {
+  if (t == not_a_date_time) return 0;
+  time_duration::sec_type x = (t - EPOCH).total_seconds();
+  return time_t(x);
+}
+
+void TimestampValue::ToMillisAndNanos(int64_t* millis, int32_t* nanos) const {
+  *millis = 0;
+  *nanos = 0;
+
+  ptime t(date_, time_of_day_);
+  time_duration diff = t - EPOCH;
+  *millis = diff.total_milliseconds();
+  // TODO: how to populate nanos?
+}
+
+void TimestampValue::FromMillisAndNanos(int64_t millis, int32_t nanos) {
+  // We can't just use milliseconds(millis) because it seems to overflow
+  // and generate negatives. These values can't overflow int64_t but can
+  // int32_ts which it seems to be using. To overcome this, we'll reduce
+  // the values by splitting out the hours first. This works until year
+  // 200,000+.
+  // TODO: this seems like a boost bug or flag issue.
+  int32_t h = millis / MILLIS_PER_HOUR;
+  millis %= MILLIS_PER_HOUR;
+  *this = TimestampValue(EPOCH + hours(h) + milliseconds(millis));
+}
 
 TimestampValue::TimestampValue(const char* str, int len) {
   TimestampParser::Parse(str, len, &date_, &time_);
