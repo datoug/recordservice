@@ -163,23 +163,25 @@ Status PlanFragmentExecutor::Prepare(const TExecPlanFragmentParams& request) {
   RETURN_IF_ERROR(runtime_state_->CreateBlockMgr());
 
   // Reserve one main thread from the pool
-  runtime_state_->resource_pool()->AcquireThreadToken();
-  if (runtime_state_->query_resource_mgr() != NULL) {
-    runtime_state_->query_resource_mgr()->NotifyThreadUsageChange(1);
-  }
-  has_thread_token_ = true;
+  if (!runtime_state_->is_record_service_request()) {
+    runtime_state_->resource_pool()->AcquireThreadToken();
+    if (runtime_state_->query_resource_mgr() != NULL) {
+      runtime_state_->query_resource_mgr()->NotifyThreadUsageChange(1);
+    }
+    has_thread_token_ = true;
 
-  average_thread_tokens_ = profile()->AddSamplingCounter("AverageThreadTokens",
-      bind<int64_t>(mem_fn(&ThreadResourceMgr::ResourcePool::num_threads),
-          runtime_state_->resource_pool()));
-  mem_usage_sampled_counter_ = profile()->AddTimeSeriesCounter("MemoryUsage",
-      TUnit::BYTES,
-      bind<int64_t>(mem_fn(&MemTracker::consumption),
-          runtime_state_->instance_mem_tracker()));
-  thread_usage_sampled_counter_ = profile()->AddTimeSeriesCounter("ThreadUsage",
-      TUnit::UNIT,
-      bind<int64_t>(mem_fn(&ThreadResourceMgr::ResourcePool::num_threads),
-          runtime_state_->resource_pool()));
+    average_thread_tokens_ = profile()->AddSamplingCounter("AverageThreadTokens",
+        bind<int64_t>(mem_fn(&ThreadResourceMgr::ResourcePool::num_threads),
+            runtime_state_->resource_pool()));
+    mem_usage_sampled_counter_ = profile()->AddTimeSeriesCounter("MemoryUsage",
+        TUnit::BYTES,
+        bind<int64_t>(mem_fn(&MemTracker::consumption),
+            runtime_state_->instance_mem_tracker()));
+    thread_usage_sampled_counter_ = profile()->AddTimeSeriesCounter("ThreadUsage",
+        TUnit::UNIT,
+        bind<int64_t>(mem_fn(&ThreadResourceMgr::ResourcePool::num_threads),
+            runtime_state_->resource_pool()));
+  }
 
   // set up desc tbl
   DescriptorTbl* desc_tbl = NULL;
@@ -573,7 +575,9 @@ void PlanFragmentExecutor::Close() {
         *runtime_state_->reader_contexts()) {
       runtime_state_->io_mgr()->UnregisterContext(context);
     }
-    exec_env_->thread_mgr()->UnregisterPool(runtime_state_->resource_pool());
+    if (!runtime_state_->is_record_service_request()) {
+      exec_env_->thread_mgr()->UnregisterPool(runtime_state_->resource_pool());
+    }
   }
   if (mem_usage_sampled_counter_ != NULL) {
     PeriodicCounterUpdater::StopTimeSeriesCounter(mem_usage_sampled_counter_);

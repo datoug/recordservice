@@ -103,6 +103,7 @@ class RuntimeState {
     return query_ctx().request.query_options.abort_on_default_limit_exceeded;
   }
   int max_errors() const { return query_options().max_errors; }
+  bool is_record_service_request() const { return query_ctx().is_record_service_request; }
   const TQueryCtx& query_ctx() const { return fragment_instance_ctx_.query_ctx; }
   const TPlanFragmentInstanceCtx& fragment_ctx() const { return fragment_instance_ctx_; }
   const std::string& effective_user() const {

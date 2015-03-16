@@ -422,6 +422,8 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   }
 
   TQueryCtx query_ctx;
+  query_ctx.__set_is_record_service_request(true);
+
   // Setting num_nodes = 1 means we generate a single node plan which has
   // a simpler structure. It also prevents Impala from analyzing multi-table
   // queries, i.e. joins.
@@ -556,7 +558,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     const recordservice::TExecTaskParams& req) {
   if (IsOffline()) {
     ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
-        "This RecordServicePlanner is not ready to accept request."
+        "This RecordServicePlanner is not ready to accept requests."
         " Retry your request later.");
   }
 

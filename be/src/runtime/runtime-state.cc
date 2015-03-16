@@ -138,7 +138,7 @@ Status RuntimeState::Init(ExecEnv* exec_env) {
   }
 
   // Register with the thread mgr
-  if (exec_env != NULL) {
+  if (exec_env != NULL && !is_record_service_request()) {
     resource_pool_ = exec_env->thread_mgr()->RegisterPool();
     DCHECK(resource_pool_ != NULL);
   }

@@ -127,6 +127,16 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
     RETURN_IF_ERROR(HdfsParquetScanner::IssueInitialRanges(this,
         per_type_files_[THdfsFileFormat::PARQUET]));
     if (progress_.done()) SetDone();
+
+    // For the record service, we always start up a single scanner thread. This bypasses
+    // the more complex thread token mgr.
+    if (state->is_record_service_request()) {
+      COUNTER_ADD(&active_scanner_thread_counter_, 1);
+      stringstream ss;
+      ss << "scanner-thread(" << num_scanner_threads_started_counter_->value() << ")";
+      scanner_threads_.AddThread(
+          new Thread("hdfs-scan-node", ss.str(), &HdfsScanNode::ScannerThread, this));
+    }
   }
 
   Status status = GetNextInternal(state, row_batch, eos);
@@ -512,21 +522,23 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
 Status HdfsScanNode::Open(RuntimeState* state) {
   RETURN_IF_ERROR(ExecNode::Open(state));
 
-  // We need at least one scanner thread to make progress. We need to make this
-  // reservation before any ranges are issued.
-  runtime_state_->resource_pool()->ReserveOptionalTokens(1);
-  if (runtime_state_->query_options().num_scanner_threads > 0) {
-    runtime_state_->resource_pool()->set_max_quota(
-        runtime_state_->query_options().num_scanner_threads);
-  }
+  if (!runtime_state_->is_record_service_request()) {
+    // We need at least one scanner thread to make progress. We need to make this
+    // reservation before any ranges are issued.
+    runtime_state_->resource_pool()->ReserveOptionalTokens(1);
+    if (runtime_state_->query_options().num_scanner_threads > 0) {
+      runtime_state_->resource_pool()->set_max_quota(
+          runtime_state_->query_options().num_scanner_threads);
+    }
 
-  runtime_state_->resource_pool()->SetThreadAvailableCb(
-      bind<void>(mem_fn(&HdfsScanNode::ThreadTokenAvailableCb), this, _1));
+    runtime_state_->resource_pool()->SetThreadAvailableCb(
+        bind<void>(mem_fn(&HdfsScanNode::ThreadTokenAvailableCb), this, _1));
 
-  if (runtime_state_->query_resource_mgr() != NULL) {
-    rm_callback_id_ = runtime_state_->query_resource_mgr()->AddVcoreAvailableCb(
-        bind<void>(mem_fn(&HdfsScanNode::ThreadTokenAvailableCb), this,
-            runtime_state_->resource_pool()));
+    if (runtime_state_->query_resource_mgr() != NULL) {
+      rm_callback_id_ = runtime_state_->query_resource_mgr()->AddVcoreAvailableCb(
+          bind<void>(mem_fn(&HdfsScanNode::ThreadTokenAvailableCb), this,
+              runtime_state_->resource_pool()));
+    }
   }
 
   if (file_descs_.empty()) {
@@ -619,9 +631,11 @@ void HdfsScanNode::Close(RuntimeState* state) {
   if (is_closed()) return;
   SetDone();
 
-  state->resource_pool()->SetThreadAvailableCb(NULL);
-  if (state->query_resource_mgr() != NULL && rm_callback_id_ != -1) {
-    state->query_resource_mgr()->RemoveVcoreAvailableCb(rm_callback_id_);
+  if (!state->is_record_service_request()) {
+    state->resource_pool()->SetThreadAvailableCb(NULL);
+    if (state->query_resource_mgr() != NULL && rm_callback_id_ != -1) {
+      state->query_resource_mgr()->RemoveVcoreAvailableCb(rm_callback_id_);
+    }
   }
 
   scanner_threads_.JoinAll();
@@ -663,7 +677,9 @@ void HdfsScanNode::Close(RuntimeState* state) {
 Status HdfsScanNode::AddDiskIoRanges(const vector<DiskIoMgr::ScanRange*>& ranges) {
   RETURN_IF_ERROR(
       runtime_state_->io_mgr()->AddScanRanges(reader_context_, ranges));
-  ThreadTokenAvailableCb(runtime_state_->resource_pool());
+  if (!runtime_state_->is_record_service_request()) {
+    ThreadTokenAvailableCb(runtime_state_->resource_pool());
+  }
   return Status::OK;
 }
 
@@ -672,7 +688,9 @@ Status HdfsScanNode::AddDiskIoRanges(const HdfsFileDesc* desc) {
   RETURN_IF_ERROR(
       runtime_state_->io_mgr()->AddScanRanges(reader_context_, ranges));
   MarkFileDescIssued(desc);
-  ThreadTokenAvailableCb(runtime_state_->resource_pool());
+  if (!runtime_state_->is_record_service_request()) {
+    ThreadTokenAvailableCb(runtime_state_->resource_pool());
+  }
   return Status::OK;
 }
 
@@ -795,7 +813,7 @@ void HdfsScanNode::ScannerThread() {
   SCOPED_TIMER(runtime_state_->total_cpu_timer());
 
   while (!done_) {
-    {
+    if (!runtime_state_->is_record_service_request()) {
       // Check if we have enough resources (thread token and memory) to keep using
       // this thread.
       unique_lock<mutex> l(lock_);
@@ -911,10 +929,12 @@ void HdfsScanNode::ScannerThread() {
   }
 
   COUNTER_ADD(&active_scanner_thread_counter_, -1);
-  if (runtime_state_->query_resource_mgr() != NULL) {
-    runtime_state_->query_resource_mgr()->NotifyThreadUsageChange(-1);
+  if (!runtime_state_->is_record_service_request()) {
+    if (runtime_state_->query_resource_mgr() != NULL) {
+      runtime_state_->query_resource_mgr()->NotifyThreadUsageChange(-1);
+    }
+    runtime_state_->resource_pool()->ReleaseThreadToken(false);
   }
-  runtime_state_->resource_pool()->ReleaseThreadToken(false);
 }
 
 void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
