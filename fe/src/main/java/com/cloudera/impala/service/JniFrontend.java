@@ -43,6 +43,7 @@ import org.apache.log4j.FileAppender;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TBinaryProtocol;
+import org.apache.thrift.protocol.TCompactProtocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,7 +78,6 @@ import com.cloudera.impala.thrift.TLoadDataResp;
 import com.cloudera.impala.thrift.TLogLevel;
 import com.cloudera.impala.thrift.TMetadataOpRequest;
 import com.cloudera.impala.thrift.TQueryCtx;
-import com.cloudera.impala.thrift.TRecordServiceExecRequest;
 import com.cloudera.impala.thrift.TResultSet;
 import com.cloudera.impala.thrift.TShowFilesParams;
 import com.cloudera.impala.thrift.TShowGrantRoleParams;
@@ -101,6 +101,8 @@ public class JniFrontend {
   private final static Logger LOG = LoggerFactory.getLogger(JniFrontend.class);
   private final static TBinaryProtocol.Factory protocolFactory_ =
       new TBinaryProtocol.Factory();
+  private final static TCompactProtocol.Factory compactProtocolFactory_ =
+      new TCompactProtocol.Factory();
   private final Frontend frontend_;
 
   // Required minimum value (in milliseconds) for the HDFS config
@@ -166,12 +168,12 @@ public class JniFrontend {
     JniUtil.deserializeThrift(protocolFactory_, queryCtx, thriftQueryContext);
 
     StringBuilder explainString = new StringBuilder();
-    TRecordServiceExecRequest result =
+    TExecRequest result =
         frontend_.createRecordServiceExecRequest(queryCtx, explainString);
     if (explainString.length() > 0) LOG.debug(explainString.toString());
 
     // TODO: avoid creating serializer for each query?
-    TSerializer serializer = new TSerializer(protocolFactory_);
+    TSerializer serializer = new TSerializer(compactProtocolFactory_);
     try {
       return serializer.serialize(result);
     } catch (TException e) {

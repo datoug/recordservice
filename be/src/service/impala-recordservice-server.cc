@@ -37,12 +37,14 @@
 #include "util/debug-util.h"
 #include "util/impalad-metrics.h"
 #include "util/hdfs-util.h"
+#include "util/codec.h"
 #include "service/hs2-util.h"
 
 using namespace std;
 using namespace boost;
 using namespace strings;
 using namespace beeswax; // Converting QueryState
+using namespace apache::thrift;
 
 DECLARE_int32(recordservice_worker_port);
 
@@ -472,7 +474,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   LOG(ERROR) << "RecordService::PlanRequest: " << query_ctx.request.stmt;
 
   // Plan the request.
-  TRecordServiceExecRequest result;
+  TExecRequest result;
   Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
   if (tmp_tbl_lock.owns_lock()) tmp_tbl_lock.unlock();
 
@@ -486,69 +488,111 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
         "Cannot run non-SELECT statements");
   }
 
-  // Extract the types of the result.
-  DCHECK(result.__isset.result_set_metadata);
-  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
-
-  // Walk the plan to compute the tasks. We want to find the scan nodes
-  // and distribute them.
-  const vector<TQueryExecRequest>& query_requests = result.query_exec_request;
-
-  // The TRecordServiceExecRequest will contain a bunch of TQueryRequest
-  // objects.. each corresponding to a PlanFragment. This is then reconstituted
-  // into a list of TExecRequests (again one for each PlanFragment). Each
-  // TExecRequest is then serialized and set as the "task" field of the
-  // TTask object.
-  // TODO : we would need to encrypt the TExecRequest object for security
-  for (int i = 0; i < query_requests.size(); ++i) {
-    recordservice::TTask task;
-    // Fill with newly constructed TExecPlan
-    int buffer_size = 100 * 1024;  // start out with 100KB
-    ThriftSerializer serializer(false, buffer_size);
-
-    TExecRequest req;
-    req.__set_stmt_type(result.stmt_type);
-    req.__set_access_events(result.access_events);
-    // TODO : Analysis warnings and explain results should not be
-    // sent back to the worker.. move this out in such a way that
-    // only the planner client gets this.
-    req.__set_analysis_warnings(result.analysis_warnings);
-    req.__set_explain_result(result.explain_result);
-    req.__set_query_exec_request(query_requests[i]);
-    req.__set_query_options(result.query_options);
-    req.__set_result_set_metadata(result.result_set_metadata);
-    req.__set_set_query_option_request(result.set_query_option_request);
-
-    serializer.Serialize<TExecRequest>(&req, &task.task);
-
-    pair<TPlanNodeId, vector<TScanRangeLocations> > entry;
-    TScanRangeLocations locs;
-    TScanRangeLocation loc;
-    BOOST_FOREACH(entry, query_requests[i].per_node_scan_ranges) {
-      // Assuming for most cases, only 1 plan node (scan node)
-      // will be present per fragment..
-      // If the assumption is not true, it will not generally be
-      // too much of a problem, only that some reads will become
-      // non-local
-      BOOST_FOREACH(locs, entry.second) {
-        BOOST_FOREACH(loc, locs.locations) {
-          recordservice::TNetworkAddress host;
-          host.hostname = query_requests[i].host_list[loc.host_idx].hostname;
-          // TODO: this port should come from the membership information.
-          host.port = FLAGS_recordservice_worker_port;
-          task.local_hosts.push_back(host);
-        }
-      }
-    }
-    return_val.tasks.push_back(task);
-  }
-
   // TODO: this port should come from the membership information and return all hosts
   // the workers are running on.
   recordservice::TNetworkAddress default_host;
   default_host.hostname = "localhost";
   default_host.port = FLAGS_recordservice_worker_port;
   return_val.hosts.push_back(default_host);
+
+  // Extract the types of the result.
+  DCHECK(result.__isset.result_set_metadata);
+  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
+
+  // Walk the plan to compute the tasks. We want to find the scan ranges and
+  // convert them into tasks.
+  // Impala, for these queries, will generate one fragment (with a single scan node)
+  // and have all the scan ranges in that scan node. We want to generate one task
+  // (with the fragment) for each scan range.
+  // TODO: this needs to be revisited. It scales very poorly. For a scan with 1M
+  // blocks (64MB/block = ~61TB dataset), this generates 1M tasks. Even at 100B
+  // tasks, this is a 100MB response.
+  DCHECK(result.__isset.query_exec_request);
+  TQueryExecRequest& query_request = result.query_exec_request;
+  DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1);
+  vector<TScanRangeLocations> scan_ranges;
+  const int64_t scan_node_id = query_request.per_node_scan_ranges.begin()->first;
+  scan_ranges.swap(query_request.per_node_scan_ranges.begin()->second);
+
+  // TODO: log audit events. Is there right? Should we log this on the worker?
+  //if (IsAuditEventLoggingEnabled()) {
+  //  LogAuditRecord(*(exec_state->get()), *(request));
+  //}
+  result.access_events.clear();
+
+  // TODO : Send analysis warning as part of TPlanRequestResult.
+  //req.__set_analysis_warnings(result.analysis_warnings);
+  result.analysis_warnings.clear();
+
+  // Empty scan, just return. No tasks to generate.
+  if (scan_ranges.empty()) return;
+
+  // The TRecordServiceExecRequest will contain a bunch of TQueryRequest
+  // objects.. each corresponding to a PlanFragment. This is then reconstituted
+  // into a list of TExecRequests (again one for each PlanFragment). Each
+  // TExecRequest is then serialized and set as the "task" field of the
+  // TTask object.
+  // To do this we:
+  //  1. Copy the original request
+  //  2. Modify it so it contains just enough information for the scan range it is for.
+  //  3. Reserialize and compress it.
+  // TODO : we would need to encrypt the TExecRequest object for security. The client
+  // cannot tampler with the task object.
+  int buffer_size = 100 * 1024;  // start out with 100KB
+  ThriftSerializer serializer(true, buffer_size);
+
+  scoped_ptr<Codec> compressor;
+  Codec::CreateCompressor(NULL, false, THdfsCompression::LZ4, &compressor);
+
+  // Collect all references partitions and remove them from the 'result' request
+  // object. Each task will only reference a single partition and we don't want
+  // to send the rest.
+  map<int64_t, THdfsPartition> all_partitions;
+  DCHECK_EQ(query_request.desc_tbl.tableDescriptors.size(), 1);
+  if (query_request.desc_tbl.tableDescriptors[0].__isset.hdfsTable) {
+    all_partitions.swap(
+        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions);
+  }
+
+  // Do the same for hosts.
+  vector<TNetworkAddress> all_hosts;
+  all_hosts.swap(query_request.host_list);
+
+  for (int i = 0; i < scan_ranges.size(); ++i) {
+    recordservice::TTask task;
+
+    // Add the partition metadata.
+    if (scan_ranges[i].scan_range.__isset.hdfs_file_split) {
+      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
+      int64_t id = scan_ranges[i].scan_range.hdfs_file_split.partition_id;
+      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
+          all_partitions[id];
+    }
+
+    // Populate the hosts.
+    query_request.host_list.clear();
+    for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
+      TScanRangeLocation& loc = scan_ranges[i].locations[j];
+      recordservice::TNetworkAddress host;
+      host.hostname = all_hosts[loc.host_idx].hostname;
+      // TODO: this port should come from the membership information.
+      host.port = FLAGS_recordservice_worker_port;
+      task.local_hosts.push_back(host);
+
+      // Populate query_request.host_list and remap indices.
+      query_request.host_list.push_back(all_hosts[loc.host_idx]);
+      loc.host_idx = query_request.host_list.size() - 1;
+    }
+
+    // Add the scan range.
+    query_request.per_node_scan_ranges.clear();
+    query_request.per_node_scan_ranges[scan_node_id].push_back(scan_ranges[i]);
+
+    string serialized_task;
+    serializer.Serialize<TExecRequest>(&result, &serialized_task);
+    compressor->Compress(serialized_task, true, &task.task);
+    return_val.tasks.push_back(task);
+  }
 }
 
 //
@@ -565,13 +609,24 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   GetRecordServiceSession();
 
   shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
-  TExecRequest exec_req;
-  uint32_t size;
-  size = req.task.size();
-  Status status = DeserializeThriftMsg(reinterpret_cast<const uint8_t*>(&req.task[0]),
-      &size, false, &exec_req);
+
+  scoped_ptr<Codec> decompressor;
+  Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
+  string decompressed_task;
+  Status status = decompressor->Decompress(req.task, true, &decompressed_task);
   if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+    ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        status.msg().GetFullMessageDetails());
+  }
+
+  TExecRequest exec_req;
+  uint32_t size = decompressed_task.size();
+  status = DeserializeThriftMsg(
+      reinterpret_cast<const uint8_t*>(decompressed_task.data()),
+      &size, true, &exec_req);
+  if (!status.ok()) {
+    ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        status.msg().GetFullMessageDetails());
   }
   LOG(INFO) << "RecordService::ExecRequest: query plan " <<
           exec_req.query_exec_request.query_plan;
@@ -586,7 +641,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           &exec_req.query_exec_request.query_ctx,
           &exec_req, record_service_session_, &exec_state);
   if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+    ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        status.msg().GetFullMessageDetails());
   }
 
   PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);

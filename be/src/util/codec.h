@@ -51,6 +51,15 @@ class Codec {
   typedef std::map<const std::string, const THdfsCompression::type> CodecMap;
   static const CodecMap CODEC_MAP;
 
+  // Compresses input -> output.
+  // If prepend len, the first 8 bytes of the output will be the input length,
+  // stored as an 8 byte little endian int.
+  Status Compress(const std::string& input, bool prepend_len, std::string* output);
+
+  // Decompresses input->output. If prepended_len is true, the first 8 bytes of the
+  // input is the output length.
+  Status Decompress(const std::string& input, bool prepended_len, std::string* output);
+
   // Create a decompressor.
   // Input:
   //  mem_pool: the memory pool used to store the decompressed data.

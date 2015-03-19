@@ -20,12 +20,12 @@
 #include <boost/filesystem.hpp>
 #include <gutil/strings/substitute.h>
 
+#include "rpc/thrift-util.h"
 #include "runtime/row-batch.h"
 #include "runtime/runtime-state.h"
 #include "runtime/tuple.h"
 #include "runtime/tuple-row.h"
-
-#include "rpc/thrift-util.h"
+#include "util/codec.h"
 
 using namespace boost;
 using namespace impala;
@@ -122,13 +122,18 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   // Walk through all the tasks (which includes the splits for the entire table) and
   // filter out the ones that aren't assigned to this node.
+
+  scoped_ptr<Codec> decompressor;
+  Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
+  string decompressed_task;
   for (int i = 0; i < result.tasks.size(); ++i) {
+    RETURN_IF_ERROR(decompressor->Decompress(
+        result.tasks[i].task, true, &decompressed_task));
     TExecRequest exec_req;
-    uint32_t size;
-    size = result.tasks[i].task.size();
+    uint32_t size = decompressed_task.size();
     RETURN_IF_ERROR(DeserializeThriftMsg(
-        reinterpret_cast<const uint8_t*>(&result.tasks[i].task[0]),
-        &size, false, &exec_req));
+        reinterpret_cast<const uint8_t*>(decompressed_task.data()),
+        &size, true, &exec_req));
     const THdfsFileSplit& split = exec_req.query_exec_request.per_node_scan_ranges.
         begin()->second[0].scan_range.hdfs_file_split;
     if (assigned_splits.find(split) != assigned_splits.end()) {

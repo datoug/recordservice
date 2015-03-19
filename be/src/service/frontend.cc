@@ -171,8 +171,8 @@ Status Frontend::GetCatalogObject(const TCatalogObject& req,
 }
 
 Status Frontend::GetRecordServiceExecRequest(
-    const TQueryCtx& query_ctx, TRecordServiceExecRequest* result) {
-  return JniUtil::CallJniMethod(fe_, create_rs_exec_request_id_, query_ctx, result);
+    const TQueryCtx& query_ctx, TExecRequest* result) {
+  return JniUtil::CallJniMethod(fe_, create_rs_exec_request_id_, query_ctx, result, true);
 }
 
 Status Frontend::GetExecRequest(

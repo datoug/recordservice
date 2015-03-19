@@ -525,35 +525,6 @@ struct TExecRequest {
   11: optional RuntimeProfile.TEventSequence timeline
 }
 
-// Result of call to createRecordServiceExecRequest()
-struct TRecordServiceExecRequest {
-  1: required Types.TStmtType stmt_type
-
-  // Copied from the corresponding TClientRequest
-  2: required ImpalaInternalService.TQueryOptions query_options
-
-  // This object is clone of the TExecRequest but it
-  // contains a list of TQueryExecRequest objects, one
-  // for each fragment.
-  3: optional list<TQueryExecRequest> query_exec_request
-
-  // Metadata of the query result set (not set for DML)
-  4: optional Results.TResultSetMetadata result_set_metadata
-
-  // Result of EXPLAIN. Set iff stmt_type is EXPLAIN
-  5: optional TExplainResult explain_result
-
-  // List of catalog objects accessed by this request. May be empty in this
-  // case that the query did not access any Catalog objects.
-  6: optional list<TAccessEvent> access_events
-
-  // List of warnings that were generated during analysis. May be empty.
-  7: required list<string> analysis_warnings
-
-  // Set iff stmt_type is SET
-  8: optional TSetQueryOptionRequest set_query_option_request
-}
-
 // Parameters to FeSupport.cacheJar().
 struct TCacheJarParams {
   // HDFS URI for the jar

@@ -194,3 +194,42 @@ Status Codec::ProcessBlock32(bool output_preallocated, int input_length,
   *output_length = static_cast<int32_t>(output_len64);
   return Status::OK;
 }
+
+Status Codec::Compress(const string& input, bool prepend_len, string* output) {
+  int length_size = prepend_len ? sizeof(int64_t) : 0;
+  int64_t result_len = MaxOutputLen(input.size());
+  output->resize(result_len + length_size);
+  uint8_t* result_buffer = (uint8_t*)output->data();
+  if (prepend_len) {
+    int64_t input_len = input.size();
+    memcpy(result_buffer, &input_len, sizeof(int64_t));
+    result_buffer += sizeof(int64_t);
+  }
+  RETURN_IF_ERROR(ProcessBlock(true, (int64_t)input.size(), (const uint8_t*)input.data(),
+      &result_len, &result_buffer));
+  output->resize(result_len + length_size);
+  return Status::OK;
+}
+
+Status Codec::Decompress(const string& input, bool prepended_len, string* output) {
+  if (!prepended_len) return Status("Not implemented. Length must be prepended");
+  if (input.size() < sizeof(int64_t)) {
+    return Status("Corrupt input. Length not prepended");
+  }
+
+  const uint8_t* input_buffer = (const uint8_t*)input.data();
+  int64_t decompressed_len = *(const int64_t*)input_buffer;
+  input_buffer += sizeof(int64_t);
+  if (decompressed_len < 0) {
+    return Status("Corrupt input. Negative decompressed length.");
+  }
+  output->resize(decompressed_len);
+  uint8_t* result_buffer = (uint8_t*)output->data();
+
+  RETURN_IF_ERROR(ProcessBlock(true, input.size() - sizeof(int64_t), input_buffer,
+      &decompressed_len, &result_buffer));
+  if (output->size() != decompressed_len) {
+    return Status("Corrupt input. Decompressed lenght did not match expected.");
+  }
+  return Status::OK;
+}

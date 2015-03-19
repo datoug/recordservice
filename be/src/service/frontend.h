@@ -44,9 +44,10 @@ class Frontend {
   // Call FE to get explain plan
   Status GetExplainPlan(const TQueryCtx& query_ctx, std::string* explain_string);
 
-  // Call FE and get specialized RecordServiceExecRequest
+  // Call FE and get a RecordService executor request. RecordService requests have
+  // additional restrictions i.e. we only let some types of queries run.
   Status GetRecordServiceExecRequest(const TQueryCtx& query_ctx,
-         TRecordServiceExecRequest* result);
+         TExecRequest* result);
 
   // Call FE to get TExecRequest.
   Status GetExecRequest(const TQueryCtx& query_ctx, TExecRequest* result);

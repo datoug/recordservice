@@ -253,7 +253,7 @@ class JniUtil {
 
   template <typename T, typename R>
   static Status CallJniMethod(const jobject& obj, const jmethodID& method,
-      const T& arg, R* response) {
+      const T& arg, R* response, bool compact = false) {
     JNIEnv* jni_env = getJNIEnv();
     jbyteArray request_bytes;
     JniLocalFrame jni_frame;
@@ -262,7 +262,7 @@ class JniUtil {
     jbyteArray result_bytes = static_cast<jbyteArray>(
         jni_env->CallObjectMethod(obj, method, request_bytes));
     RETURN_ERROR_IF_EXC(jni_env);
-    RETURN_IF_ERROR(DeserializeThriftMsg(jni_env, result_bytes, response));
+    RETURN_IF_ERROR(DeserializeThriftMsg(jni_env, result_bytes, response, true, compact));
     return Status::OK;
   }
 
