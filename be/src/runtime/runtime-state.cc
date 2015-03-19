@@ -153,10 +153,17 @@ Status RuntimeState::Init(ExecEnv* exec_env) {
 
 void RuntimeState::InitMemTrackers(const TUniqueId& query_id, const string* pool_name,
     int64_t query_bytes_limit, int64_t query_rm_reservation_limit_bytes) {
-  MemTracker* query_parent_tracker = exec_env_->process_mem_tracker();
-  if (pool_name != NULL) {
-    query_parent_tracker = MemTracker::GetRequestPoolMemTracker(*pool_name,
-        query_parent_tracker);
+  MemTracker* query_parent_tracker = NULL;
+  if (is_record_service_request()) {
+    // TODO: this should still be counted towards the pool. This problem will go away
+    // when Impala queries are not running in this daemon.
+    query_parent_tracker = exec_env_->record_service_mem_tracker();
+  } else {
+    query_parent_tracker = exec_env_->process_mem_tracker();
+    if (pool_name != NULL) {
+      query_parent_tracker = MemTracker::GetRequestPoolMemTracker(*pool_name,
+          query_parent_tracker);
+    }
   }
   query_mem_tracker_ =
       MemTracker::GetQueryMemTracker(query_id, query_bytes_limit,

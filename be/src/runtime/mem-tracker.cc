@@ -231,6 +231,7 @@ string MemTracker::LogUsage(const string& prefix) const {
   if (CheckLimitExceeded()) ss << " memory limit exceeded.";
   if (limit_ > 0) ss << " Limit=" << PrettyPrinter::Print(limit_, TUnit::BYTES);
   ss << " Consumption=" << PrettyPrinter::Print(consumption(), TUnit::BYTES);
+  ss << " PeakConsumption=" << PrettyPrinter::Print(peak_consumption(), TUnit::BYTES);
 
   stringstream prefix_ss;
   prefix_ss << prefix << "  ";

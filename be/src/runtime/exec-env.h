@@ -84,6 +84,7 @@ class ExecEnv {
   Webserver* webserver() { return webserver_.get(); }
   MetricGroup* metrics() { return metrics_.get(); }
   MemTracker* process_mem_tracker() { return mem_tracker_.get(); }
+  MemTracker* record_service_mem_tracker() { return record_service_mem_tracker_.get(); }
   ThreadResourceMgr* thread_mgr() { return thread_mgr_.get(); }
   CgroupsMgr* cgroups_mgr() { return cgroups_mgr_.get(); }
   HdfsOpThreadPool* hdfs_op_thread_pool() { return hdfs_op_thread_pool_.get(); }
@@ -127,6 +128,7 @@ class ExecEnv {
   boost::scoped_ptr<Webserver> webserver_;
   boost::scoped_ptr<MetricGroup> metrics_;
   boost::scoped_ptr<MemTracker> mem_tracker_;
+  boost::scoped_ptr<MemTracker> record_service_mem_tracker_;
   boost::scoped_ptr<ThreadResourceMgr> thread_mgr_;
   boost::scoped_ptr<CgroupsMgr> cgroups_mgr_;
   boost::scoped_ptr<HdfsOpThreadPool> hdfs_op_thread_pool_;
