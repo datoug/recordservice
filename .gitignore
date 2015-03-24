@@ -39,3 +39,6 @@ cluster_logs/
 
 # This file is auto-generated in the build process
 common/thrift/ErrorCodes.thrift
+
+# CCache
+compile_commands.json

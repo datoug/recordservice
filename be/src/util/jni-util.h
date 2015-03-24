@@ -262,7 +262,7 @@ class JniUtil {
     jbyteArray result_bytes = static_cast<jbyteArray>(
         jni_env->CallObjectMethod(obj, method, request_bytes));
     RETURN_ERROR_IF_EXC(jni_env);
-    RETURN_IF_ERROR(DeserializeThriftMsg(jni_env, result_bytes, response, true, compact));
+    RETURN_IF_ERROR(DeserializeThriftMsg(jni_env, result_bytes, response, compact));
     return Status::OK;
   }
 

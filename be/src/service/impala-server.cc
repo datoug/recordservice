@@ -729,13 +729,15 @@ Status ImpalaServer::PreExecute(
     RETURN_IF_ERROR(RegisterQuery(session_state, *exec_state));
     *registered_exec_state = true;
 
-    RETURN_IF_ERROR((*exec_state)->UpdateQueryStatus(
-        exec_env_->frontend()->GetExecRequest(query_ctx, &result)));
-    (*exec_state)->query_events()->MarkEvent("Planning finished");
-    (*exec_state)->summary_profile()->AddEventSequence(
-        result.timeline.name, result.timeline);
-    if (result.__isset.result_set_metadata) {
-      (*exec_state)->set_result_metadata(result.result_set_metadata);
+    if (do_planning) {
+      RETURN_IF_ERROR((*exec_state)->UpdateQueryStatus(
+          exec_env_->frontend()->GetExecRequest(query_ctx, result)));
+      (*exec_state)->query_events()->MarkEvent("Planning finished");
+      (*exec_state)->summary_profile()->AddEventSequence(
+          result->timeline.name, result->timeline);
+    }
+    if (result->__isset.result_set_metadata) {
+      (*exec_state)->set_result_metadata(result->result_set_metadata);
     }
   }
   return Status::OK;

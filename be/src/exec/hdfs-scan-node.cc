@@ -414,6 +414,7 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
         AllocateScanRange(file_desc->fs, file_desc->filename.c_str(), split.length,
             split.offset, split.partition_id, (*scan_range_params_)[i].volume_id,
             try_cache, expected_local));
+    total_assigned_bytes += split.length;
   }
 
   runtime_profile()->AddCounter("BytesAssigned", TUnit::BYTES)->Set(

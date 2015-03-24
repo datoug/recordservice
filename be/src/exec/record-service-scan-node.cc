@@ -434,9 +434,9 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
         rsw_client_->iface()->CloseTask(tasks_[i].handle);
         tasks_[i].connected = false;
       } catch (const recordservice::TRecordServiceException& e) {
-        state->LogError(e.message);
+        state->LogError(ErrorMsg(TErrorCode::GENERAL, e.message));
       } catch (const std::exception& e) {
-        state->LogError(e.what());
+        state->LogError(ErrorMsg(TErrorCode::GENERAL, e.what()));
       }
     }
   }

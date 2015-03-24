@@ -42,13 +42,14 @@ Status SerializeThriftMsg(JNIEnv* env, T* msg, jbyteArray* serialized_msg) {
 }
 
 template <class T>
-Status DeserializeThriftMsg(JNIEnv* env, jbyteArray serialized_msg, T* deserialized_msg) {
+Status DeserializeThriftMsg(JNIEnv* env, jbyteArray serialized_msg, T* deserialized_msg,
+    bool compact = false) {
   jboolean is_copy = false;
   uint32_t buf_size = env->GetArrayLength(serialized_msg);
   jbyte* buf = env->GetByteArrayElements(serialized_msg, &is_copy);
 
   RETURN_IF_ERROR(DeserializeThriftMsg(
-          reinterpret_cast<uint8_t*>(buf), &buf_size, false, deserialized_msg));
+      reinterpret_cast<uint8_t*>(buf), &buf_size, compact, deserialized_msg));
 
   // Return buffer back. JNI_ABORT indicates to not copy contents back to java
   // side.

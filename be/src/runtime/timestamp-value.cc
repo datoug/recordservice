@@ -27,22 +27,16 @@ DEFINE_bool(use_local_tz_for_unix_timestamp_conversions, false,
 namespace impala {
 
 const char* TimestampValue::LLVM_CLASS_NAME = "class.impala::TimestampValue";
-const double TimestampValue::FRACTIONAL = 0.000000001;
+const double TimestampValue::ONE_BILLIONTH = 0.000000001;
 
 static const ptime EPOCH(boost::gregorian::date(1970, 1, 1));
 static const int32_t MILLIS_PER_HOUR = 60 * 60 * 1000;
-
-time_t to_time_t(ptime t) {
-  if (t == not_a_date_time) return 0;
-  time_duration::sec_type x = (t - EPOCH).total_seconds();
-  return time_t(x);
-}
 
 void TimestampValue::ToMillisAndNanos(int64_t* millis, int32_t* nanos) const {
   *millis = 0;
   *nanos = 0;
 
-  ptime t(date_, time_of_day_);
+  ptime t(date_, time_);
   time_duration diff = t - EPOCH;
   *millis = diff.total_milliseconds();
   // TODO: how to populate nanos?

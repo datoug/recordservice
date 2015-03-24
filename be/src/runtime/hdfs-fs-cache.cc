@@ -95,4 +95,8 @@ Status HdfsFsCache::GetLocalConnection(hdfsFS* fs) {
   return GetConnection("file:///", fs);
 }
 
+Status HdfsFsCache::GetDefaultConnection(hdfsFS* fs) {
+  return GetConnection("file:/", fs);
+}
+
 }

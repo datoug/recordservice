@@ -48,6 +48,9 @@ class HdfsFsCache {
   // Get connection to the local filesystem.
   Status GetLocalConnection(hdfsFS* fs);
 
+  // Get connection to the default filesystem.
+  Status GetDefaultConnection(hdfsFS* fs);
+
   // Get connection to specific fs by specifying a path.  Optionally, a local cache can
   // be provided so that the process-wide lock can be avoided on subsequent calls for
   // the same filesystem.  The caller is responsible for synchronizing the local cache

@@ -61,10 +61,11 @@ static const char* TEMP_TBL = "tmp_tbl";
 namespace impala {
 
 inline void ThrowException(const recordservice::TErrorCode::type& code,
-    const string& msg) {
+    const string& msg, const string& detail = "") {
   recordservice::TRecordServiceException ex;
   ex.code = code;
   ex.message = msg;
+  if (!detail.empty()) ex.__set_detail(detail);
   throw ex;
 }
 
@@ -81,7 +82,7 @@ inline void ThrowFetchException(const Status& status) {
     ex.code = recordservice::TErrorCode::INTERNAL_ERROR;
     ex.message = "Task failed due to an internal error.";
   }
-  ex.__set_detail(status.GetErrorMsg());
+  ex.__set_detail(status.msg().GetFullMessageDetails());
 }
 
 // Base class for test result set serializations. The functions in here and
@@ -98,8 +99,6 @@ inline void ThrowFetchException(const Status& status) {
 //   result->FinalizeResult()
 class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
  public:
-  // Convert TResultRow to ASCII using "\t" as column delimiter and store it in this
-  // result set.
   virtual Status AddOneRow(const TResultRow& row) {
     CHECK(false) << "Not used";
     return Status::OK;
@@ -340,8 +339,8 @@ shared_ptr<ImpalaServer::SessionState> ImpalaServer::GetRecordServiceSession() {
   if (record_service_session_.get() == NULL) {
     record_service_session_.reset(new SessionState());
     record_service_session_->session_type = TSessionType::RECORDSERVICE;
-    record_service_session_->start_time = TimestampValue::local_time();
-    record_service_session_->last_accessed_ms = ms_since_epoch();
+    record_service_session_->start_time = TimestampValue::LocalTime();
+    record_service_session_->last_accessed_ms = UnixMillis();
     record_service_session_->database = "default";
     record_service_session_->ref_count = 1;
   }
@@ -450,7 +449,9 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       string tmp_table;
       Status status = CreateTmpTable(req.path, &tmp_table);
       if (!status.ok()) {
-        ThrowException(recordservice::TErrorCode::INVALID_REQUEST, status.GetErrorMsg());
+        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+            "Could not create temporary table.",
+            status.msg().GetFullMessageDetails());
       }
       if (req.path.__isset.query) {
         string query = req.path.query;
@@ -480,7 +481,8 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-        status.GetErrorMsg());
+        "Could not plan request.",
+        status.msg().GetFullMessageDetails());
   }
 
   if (result.stmt_type != TStmtType::QUERY) {
@@ -616,6 +618,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   Status status = decompressor->Decompress(req.task, true, &decompressed_task);
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        "Task is corrupt.",
         status.msg().GetFullMessageDetails());
   }
 
@@ -626,6 +629,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       &size, true, &exec_req);
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        "Task is corrupt.",
         status.msg().GetFullMessageDetails());
   }
   LOG(INFO) << "RecordService::ExecRequest: query plan " <<
@@ -642,6 +646,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           &exec_req, record_service_session_, &exec_state);
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_TASK,
+        "Could not execute task.",
         status.msg().GetFullMessageDetails());
   }
 
@@ -808,7 +813,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
     string* table_name) {
 
   hdfsFS fs;
-  Status status = HdfsFsCache::instance()->GetConnection("default", &fs);
+  Status status = HdfsFsCache::instance()->GetDefaultConnection(&fs);
   if (!status.ok()) {
     // TODO: more error detail
     ThrowException(recordservice::TErrorCode::INTERNAL_ERROR,
