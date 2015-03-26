@@ -207,6 +207,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Record service planner rpcs.
   virtual void PlanRequest(recordservice::TPlanRequestResult& return_val,
       const recordservice::TPlanRequestParams& req);
+  virtual void GetSchema(recordservice::TGetSchemaResult& return_val,
+      const recordservice::TPlanRequestParams& req);
   virtual recordservice::TProtocolVersion::type GetProtocolVersion();
 
   // Record service worker rpcs.
@@ -765,6 +767,11 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Creates a temp table for 'path', returning the fully qualified name.
   Status CreateTmpTable(const recordservice::TPathRequest& path,
       std::string* table_name);
+
+  // Plans the record service request. Errors are handled by throwing a
+  // TRecordServiceException
+  TExecRequest PlanRecordServiceRequest(
+      const recordservice::TPlanRequestParams& params);
 
   // Creates/returns singleton record service session.
   boost::shared_ptr<SessionState> GetRecordServiceSession();

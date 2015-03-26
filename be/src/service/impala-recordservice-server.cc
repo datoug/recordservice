@@ -411,11 +411,8 @@ recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
   return recordservice::TProtocolVersion::V1;
 }
 
-//
-// RecordServicePlanner
-//
-void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
-  const recordservice::TPlanRequestParams& req) {
+TExecRequest ImpalaServer::PlanRecordServiceRequest(
+    const recordservice::TPlanRequestParams& req) {
   if (IsOffline()) {
     ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
         "This RecordServicePlanner is not ready to accept requests."
@@ -478,17 +475,24 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   TExecRequest result;
   Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
   if (tmp_tbl_lock.owns_lock()) tmp_tbl_lock.unlock();
-
   if (!status.ok()) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
         "Could not plan request.",
         status.msg().GetFullMessageDetails());
   }
-
   if (result.stmt_type != TStmtType::QUERY) {
     ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
         "Cannot run non-SELECT statements");
   }
+  return result;
+}
+
+//
+// RecordServicePlanner
+//
+void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
+  const recordservice::TPlanRequestParams& req) {
+  TExecRequest result = PlanRecordServiceRequest(req);
 
   // TODO: this port should come from the membership information and return all hosts
   // the workers are running on.
@@ -599,6 +603,14 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     compressor->Compress(serialized_task, true, &task.task);
     return_val.tasks.push_back(task);
   }
+}
+
+void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
+      const recordservice::TPlanRequestParams& req) {
+  // TODO: fix this to not do the whole planning.
+  TExecRequest result = PlanRecordServiceRequest(req);
+  DCHECK(result.__isset.result_set_metadata);
+  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
 }
 
 //
