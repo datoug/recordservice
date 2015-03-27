@@ -806,8 +806,12 @@ public class Frontend {
    */
   public TExecRequest createRecordServiceExecRequest(TQueryCtx queryCtx,
       StringBuilder explainString) throws ImpalaException {
-    TExecRequest request = createExecRequest(queryCtx, explainString);
+    final String UNSUPPORTED_ERROR = "RecordService only supports scan queries.";
 
+    TExecRequest request = createExecRequest(queryCtx, explainString);
+    if (request.stmt_type != TStmtType.QUERY) {
+      throw new AnalysisException(UNSUPPORTED_ERROR);
+    }
     TQueryExecRequest origQueryExecRequest = request.getQuery_exec_request();
     List<TPlanFragment> fragments = origQueryExecRequest.getFragments();
 
@@ -825,10 +829,9 @@ public class Frontend {
               "Multiple scan nodes per fragment not currently supported..");
         }
         node = pNode;
+      } else {
+        throw new AnalysisException(UNSUPPORTED_ERROR);
       }
-    }
-    if (node == null) {
-      throw new AnalysisException("No scan nodes found for this query !!");
     }
     return request;
   }
