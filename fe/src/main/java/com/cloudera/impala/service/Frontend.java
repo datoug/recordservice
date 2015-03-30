@@ -88,6 +88,7 @@ import com.cloudera.impala.common.RuntimeEnv;
 import com.cloudera.impala.planner.PlanFragment;
 import com.cloudera.impala.planner.Planner;
 import com.cloudera.impala.planner.ScanNode;
+import com.cloudera.impala.thrift.TAggregationNode;
 import com.cloudera.impala.thrift.TCatalogOpRequest;
 import com.cloudera.impala.thrift.TCatalogOpType;
 import com.cloudera.impala.thrift.TCatalogServiceRequestHeader;
@@ -830,6 +831,18 @@ public class Frontend {
         }
         node = pNode;
       } else {
+        if (TPlanNodeType.AGGREGATION_NODE == pNode.getNode_type()) {
+          // Allow count(*) only.
+          // TODO: do this during analysis? It's cleaner but more code conflicts.
+          TAggregationNode n = pNode.agg_node;
+          if (n.grouping_exprs.size()  == 0 &&
+              n.aggregate_functions.size() == 1 &&
+              n.aggregate_functions.get(0).nodes.get(0).fn.name.function_name ==
+                  "count" &&
+              n.aggregate_functions.get(0).nodes.size() == 1) {
+            continue;
+          }
+        }
         throw new AnalysisException(UNSUPPORTED_ERROR);
       }
     }
