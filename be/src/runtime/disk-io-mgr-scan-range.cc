@@ -221,7 +221,7 @@ DiskIoMgr::ScanRange::ScanRange(int capacity, int min_size, int max_size)
   if (max_buffer_size_ < 0 || max_buffer_size_ > FLAGS_read_size) {
     max_buffer_size_ = FLAGS_read_size;
   }
-  Reset(NULL, "", -1, -1, -1, false, false);
+  Reset(NULL, "", -1, -1, -1, false, false, NEVER_CACHE);
 }
 
 DiskIoMgr::ScanRange::~ScanRange() {
@@ -230,7 +230,7 @@ DiskIoMgr::ScanRange::~ScanRange() {
 }
 
 void DiskIoMgr::ScanRange::Reset(hdfsFS fs, const char* file, int64_t len, int64_t offset,
-    int disk_id, bool try_cache, bool expected_local, void* meta_data) {
+    int disk_id, bool try_cache, bool expected_local, int64_t mtime, void* meta_data) {
   DCHECK(ready_buffers_.empty());
   fs_ = fs;
   file_ = file;
@@ -244,6 +244,7 @@ void DiskIoMgr::ScanRange::Reset(hdfsFS fs, const char* file, int64_t len, int64
   io_mgr_ = NULL;
   reader_ = NULL;
   hdfs_file_ = NULL;
+  mtime_ = mtime;
 }
 
 void DiskIoMgr::ScanRange::InitInternal(DiskIoMgr* io_mgr, RequestContext* reader,

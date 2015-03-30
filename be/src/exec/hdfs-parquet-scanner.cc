@@ -119,7 +119,7 @@ Status HdfsParquetScanner::IssueInitialRanges(HdfsScanNode* scan_node,
       DiskIoMgr::ScanRange* footer_range = scan_node->AllocateScanRange(
           files[i]->fs, files[i]->filename.c_str(), footer_size, footer_start,
           metadata->partition_id, split->disk_id(), split->try_cache(),
-          split->expected_local(), -1, FOOTER_SIZE);
+          split->expected_local(), files[i]->mtime, -1, FOOTER_SIZE);
       footer_ranges.push_back(footer_range);
     }
   }
@@ -988,7 +988,8 @@ Status HdfsParquetScanner::ProcessFooter(bool* eosr) {
       DiskIoMgr::ScanRange* range = scan_node_->AllocateScanRange(
           metadata_range_->fs(), metadata_range_->file(), to_read,
           metadata_start + copy_offset, -1, metadata_range_->disk_id(),
-          metadata_range_->try_cache(), metadata_range_->expected_local());
+          metadata_range_->try_cache(), metadata_range_->expected_local(),
+          file_desc->mtime);
 
       DiskIoMgr::BufferDescriptor* io_buffer = NULL;
       RETURN_IF_ERROR(io_mgr->Read(scan_node_->reader_context(), range, &io_buffer));
@@ -1154,7 +1155,7 @@ Status HdfsParquetScanner::InitColumns(int row_group_idx) {
     DiskIoMgr::ScanRange* col_range = scan_node_->AllocateScanRange(
         metadata_range_->fs(), metadata_range_->file(), col_len, col_start,
         column_readers_[i]->col_idx(), metadata_range_->disk_id(),
-        metadata_range_->try_cache(), metadata_range_->expected_local(),
+        metadata_range_->try_cache(), metadata_range_->expected_local(), file_desc->mtime,
         INITIAL_SCAN_RANGE_CAPACITY, -1, max_scan_range_buffer_size);
     col_ranges.push_back(col_range);
 
