@@ -14,8 +14,6 @@
 
 package com.cloudera.impala.catalog;
 
-import static com.cloudera.impala.thrift.ImpalaInternalServiceConstants.DEFAULT_PARTITION_ID;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -82,7 +80,6 @@ import com.cloudera.impala.util.ListMap;
 import com.cloudera.impala.util.MetaStoreUtil;
 import com.cloudera.impala.util.TAccessLevelUtil;
 import com.cloudera.impala.util.TResultRowBuilder;
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -311,6 +308,7 @@ public class HdfsTable extends Table {
         for (int i = 0; i < blockHostPorts.length; ++i) {
           TNetworkAddress networkAddress = BlockReplica.parseLocation(blockHostPorts[i]);
           Preconditions.checkState(networkAddress != null);
+          networkAddress.setHdfs_host_name(blockHostNames[i]);
           replicas.add(new BlockReplica(hostIndex_.getIndex(networkAddress),
               cachedHosts.contains(blockHostNames[i])));
         }

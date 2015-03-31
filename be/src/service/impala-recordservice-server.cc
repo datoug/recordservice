@@ -584,7 +584,8 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
       TScanRangeLocation& loc = scan_ranges[i].locations[j];
       recordservice::TNetworkAddress host;
-      host.hostname = all_hosts[loc.host_idx].hostname;
+      DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
+      host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
       // TODO: this port should come from the membership information.
       host.port = FLAGS_recordservice_worker_port;
       task.local_hosts.push_back(host);

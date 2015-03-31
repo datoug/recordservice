@@ -109,8 +109,14 @@ enum TExplainLevel {
 // network address. The hostname field must be resolvable to an IPv4
 // address.
 struct TNetworkAddress {
+  // This can be hostname or IP.
   1: required string hostname
   2: required i32 port
+
+  // The hostname as returned by HDFS.
+  // TODO: HDFS exposes both the ip and the hostname. Impala uses the
+  // IP and MR/Spark use the hostname. Reconcile this.
+  3: optional string hdfs_host_name
 }
 
 // Wire format for UniqueId

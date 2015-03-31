@@ -42,6 +42,7 @@ import com.cloudera.impala.thrift.TNetworkAddress;
 import com.cloudera.impala.thrift.TPartitionStats;
 import com.cloudera.impala.thrift.TTableStats;
 import com.cloudera.impala.util.HdfsCachingUtil;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
@@ -49,7 +50,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Query-relevant information for one table partition. Partitions are comparable
@@ -136,9 +136,9 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
      * Parses the location (an ip address:port string) of the replica and returns a
      * TNetworkAddress with this information, or null if parsing fails.
      */
-    public static TNetworkAddress parseLocation(String location) {
-      Preconditions.checkNotNull(location);
-      String[] ip_port = location.split(":");
+    public static TNetworkAddress parseLocation(String hostPort) {
+      Preconditions.checkNotNull(hostPort);
+      String[] ip_port = hostPort.split(":");
       if (ip_port.length != 2) return null;
       try {
         return new TNetworkAddress(ip_port[0], Integer.parseInt(ip_port[1]));
