@@ -62,6 +62,7 @@
 #include "util/impalad-metrics.h"
 #include "util/network-util.h"
 #include "util/parse-util.h"
+#include "util/recordservice-metrics.h"
 #include "util/redactor.h"
 #include "util/string-parser.h"
 #include "util/summary-util.h"
@@ -294,6 +295,10 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
   ImpaladMetrics::CreateMetrics(exec_env->metrics()->GetChildGroup("impala-server"));
   ImpaladMetrics::IMPALA_SERVER_START_TIME->set_value(
       TimestampValue::LocalTime().DebugString());
+
+  // Initialize recordservice metrics
+  RecordServiceMetrics::CreateMetrics(
+      exec_env->metrics()->GetChildGroup("record-service"));
 
   // Register the membership callback if required
   if (exec_env->subscriber() != NULL) {

@@ -34,10 +34,10 @@
 #include "service/query-exec-state.h"
 #include "service/query-options.h"
 #include "rpc/thrift-util.h"
-#include "util/debug-util.h"
-#include "util/impalad-metrics.h"
-#include "util/hdfs-util.h"
 #include "util/codec.h"
+#include "util/debug-util.h"
+#include "util/hdfs-util.h"
+#include "util/recordservice-metrics.h"
 #include "service/hs2-util.h"
 
 using namespace std;
@@ -414,6 +414,7 @@ recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
 
 TExecRequest ImpalaServer::PlanRecordServiceRequest(
     const recordservice::TPlanRequestParams& req) {
+  RecordServiceMetrics::NUM_PLAN_REQUESTS->Increment(1);
   if (IsOffline()) {
     ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
         "This RecordServicePlanner is not ready to accept requests."
@@ -493,126 +494,137 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
 //
 void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   const recordservice::TPlanRequestParams& req) {
-  TExecRequest result = PlanRecordServiceRequest(req);
+  try {
+    TExecRequest result = PlanRecordServiceRequest(req);
 
-  // TODO: this port should come from the membership information and return all hosts
-  // the workers are running on.
-  recordservice::TNetworkAddress default_host;
-  default_host.hostname = "localhost";
-  default_host.port = FLAGS_recordservice_worker_port;
-  return_val.hosts.push_back(default_host);
+    // TODO: this port should come from the membership information and return all hosts
+    // the workers are running on.
+    recordservice::TNetworkAddress default_host;
+    default_host.hostname = "localhost";
+    default_host.port = FLAGS_recordservice_worker_port;
+    return_val.hosts.push_back(default_host);
 
-  // Extract the types of the result.
-  DCHECK(result.__isset.result_set_metadata);
-  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
+    // Extract the types of the result.
+    DCHECK(result.__isset.result_set_metadata);
+    PopulateResultSchema(result.result_set_metadata, &return_val.schema);
 
-  // Walk the plan to compute the tasks. We want to find the scan ranges and
-  // convert them into tasks.
-  // Impala, for these queries, will generate one fragment (with a single scan node)
-  // and have all the scan ranges in that scan node. We want to generate one task
-  // (with the fragment) for each scan range.
-  // TODO: this needs to be revisited. It scales very poorly. For a scan with 1M
-  // blocks (64MB/block = ~61TB dataset), this generates 1M tasks. Even at 100B
-  // tasks, this is a 100MB response.
-  DCHECK(result.__isset.query_exec_request);
-  TQueryExecRequest& query_request = result.query_exec_request;
-  DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1);
-  vector<TScanRangeLocations> scan_ranges;
-  const int64_t scan_node_id = query_request.per_node_scan_ranges.begin()->first;
-  scan_ranges.swap(query_request.per_node_scan_ranges.begin()->second);
+    // Walk the plan to compute the tasks. We want to find the scan ranges and
+    // convert them into tasks.
+    // Impala, for these queries, will generate one fragment (with a single scan node)
+    // and have all the scan ranges in that scan node. We want to generate one task
+    // (with the fragment) for each scan range.
+    // TODO: this needs to be revisited. It scales very poorly. For a scan with 1M
+    // blocks (64MB/block = ~61TB dataset), this generates 1M tasks. Even at 100B
+    // tasks, this is a 100MB response.
+    DCHECK(result.__isset.query_exec_request);
+    TQueryExecRequest& query_request = result.query_exec_request;
+    DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1);
+    vector<TScanRangeLocations> scan_ranges;
+    const int64_t scan_node_id = query_request.per_node_scan_ranges.begin()->first;
+    scan_ranges.swap(query_request.per_node_scan_ranges.begin()->second);
 
-  // TODO: log audit events. Is there right? Should we log this on the worker?
-  //if (IsAuditEventLoggingEnabled()) {
-  //  LogAuditRecord(*(exec_state->get()), *(request));
-  //}
-  result.access_events.clear();
+    // TODO: log audit events. Is there right? Should we log this on the worker?
+    //if (IsAuditEventLoggingEnabled()) {
+    //  LogAuditRecord(*(exec_state->get()), *(request));
+    //}
+    result.access_events.clear();
 
-  // Send analysis warning as part of TPlanRequestResult.
-  for (int i = 0; i < result.analysis_warnings.size(); ++i) {
-    recordservice::TLogMessage msg;
-    msg.message = result.analysis_warnings[i];
-    return_val.warnings.push_back(msg);
-  }
-  result.analysis_warnings.clear();
+    // Send analysis warning as part of TPlanRequestResult.
+    for (int i = 0; i < result.analysis_warnings.size(); ++i) {
+      recordservice::TLogMessage msg;
+      msg.message = result.analysis_warnings[i];
+      return_val.warnings.push_back(msg);
+    }
+    result.analysis_warnings.clear();
 
-  // Empty scan, just return. No tasks to generate.
-  if (scan_ranges.empty()) return;
+    // Empty scan, just return. No tasks to generate.
+    if (scan_ranges.empty()) return;
 
-  // The TRecordServiceExecRequest will contain a bunch of TQueryRequest
-  // objects.. each corresponding to a PlanFragment. This is then reconstituted
-  // into a list of TExecRequests (again one for each PlanFragment). Each
-  // TExecRequest is then serialized and set as the "task" field of the
-  // TTask object.
-  // To do this we:
-  //  1. Copy the original request
-  //  2. Modify it so it contains just enough information for the scan range it is for.
-  //  3. Reserialize and compress it.
-  // TODO : we would need to encrypt the TExecRequest object for security. The client
-  // cannot tamper with the task object.
-  int buffer_size = 100 * 1024;  // start out with 100KB
-  ThriftSerializer serializer(true, buffer_size);
+    // The TRecordServiceExecRequest will contain a bunch of TQueryRequest
+    // objects.. each corresponding to a PlanFragment. This is then reconstituted
+    // into a list of TExecRequests (again one for each PlanFragment). Each
+    // TExecRequest is then serialized and set as the "task" field of the
+    // TTask object.
+    // To do this we:
+    //  1. Copy the original request
+    //  2. Modify it so it contains just enough information for the scan range it is for.
+    //  3. Reserialize and compress it.
+    // TODO : we would need to encrypt the TExecRequest object for security. The client
+    // cannot tamper with the task object.
+    int buffer_size = 100 * 1024;  // start out with 100KB
+    ThriftSerializer serializer(true, buffer_size);
 
-  scoped_ptr<Codec> compressor;
-  Codec::CreateCompressor(NULL, false, THdfsCompression::LZ4, &compressor);
+    scoped_ptr<Codec> compressor;
+    Codec::CreateCompressor(NULL, false, THdfsCompression::LZ4, &compressor);
 
-  // Collect all references partitions and remove them from the 'result' request
-  // object. Each task will only reference a single partition and we don't want
-  // to send the rest.
-  map<int64_t, THdfsPartition> all_partitions;
-  DCHECK_EQ(query_request.desc_tbl.tableDescriptors.size(), 1);
-  if (query_request.desc_tbl.tableDescriptors[0].__isset.hdfsTable) {
-    all_partitions.swap(
-        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions);
-  }
-
-  // Do the same for hosts.
-  vector<TNetworkAddress> all_hosts;
-  all_hosts.swap(query_request.host_list);
-
-  for (int i = 0; i < scan_ranges.size(); ++i) {
-    recordservice::TTask task;
-
-    // Add the partition metadata.
-    if (scan_ranges[i].scan_range.__isset.hdfs_file_split) {
-      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
-      int64_t id = scan_ranges[i].scan_range.hdfs_file_split.partition_id;
-      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
-          all_partitions[id];
+    // Collect all references partitions and remove them from the 'result' request
+    // object. Each task will only reference a single partition and we don't want
+    // to send the rest.
+    map<int64_t, THdfsPartition> all_partitions;
+    DCHECK_EQ(query_request.desc_tbl.tableDescriptors.size(), 1);
+    if (query_request.desc_tbl.tableDescriptors[0].__isset.hdfsTable) {
+      all_partitions.swap(
+          query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions);
     }
 
-    // Populate the hosts.
-    query_request.host_list.clear();
-    for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
-      TScanRangeLocation& loc = scan_ranges[i].locations[j];
-      recordservice::TNetworkAddress host;
-      DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
-      host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
-      // TODO: this port should come from the membership information.
-      host.port = FLAGS_recordservice_worker_port;
-      task.local_hosts.push_back(host);
+    // Do the same for hosts.
+    vector<TNetworkAddress> all_hosts;
+    all_hosts.swap(query_request.host_list);
 
-      // Populate query_request.host_list and remap indices.
-      query_request.host_list.push_back(all_hosts[loc.host_idx]);
-      loc.host_idx = query_request.host_list.size() - 1;
+    for (int i = 0; i < scan_ranges.size(); ++i) {
+      recordservice::TTask task;
+
+      // Add the partition metadata.
+      if (scan_ranges[i].scan_range.__isset.hdfs_file_split) {
+        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
+        int64_t id = scan_ranges[i].scan_range.hdfs_file_split.partition_id;
+        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
+            all_partitions[id];
+      }
+
+      // Populate the hosts.
+      query_request.host_list.clear();
+      for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
+        TScanRangeLocation& loc = scan_ranges[i].locations[j];
+        recordservice::TNetworkAddress host;
+        DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
+        host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
+        // TODO: this port should come from the membership information.
+        host.port = FLAGS_recordservice_worker_port;
+        task.local_hosts.push_back(host);
+
+        // Populate query_request.host_list and remap indices.
+        query_request.host_list.push_back(all_hosts[loc.host_idx]);
+        loc.host_idx = query_request.host_list.size() - 1;
+      }
+
+      // Add the scan range.
+      query_request.per_node_scan_ranges.clear();
+      query_request.per_node_scan_ranges[scan_node_id].push_back(scan_ranges[i]);
+
+      string serialized_task;
+      serializer.Serialize<TExecRequest>(&result, &serialized_task);
+      compressor->Compress(serialized_task, true, &task.task);
+      return_val.tasks.push_back(task);
     }
-
-    // Add the scan range.
-    query_request.per_node_scan_ranges.clear();
-    query_request.per_node_scan_ranges[scan_node_id].push_back(scan_ranges[i]);
-
-    string serialized_task;
-    serializer.Serialize<TExecRequest>(&result, &serialized_task);
-    compressor->Compress(serialized_task, true, &task.task);
-    return_val.tasks.push_back(task);
+  } catch (const recordservice::TRecordServiceException& e) {
+    RecordServiceMetrics::NUM_FAILED_PLAN_REQUESTS->Increment(1);
+    throw e;
   }
 }
 
 void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
       const recordservice::TPlanRequestParams& req) {
-  // TODO: fix this to not do the whole planning.
-  TExecRequest result = PlanRecordServiceRequest(req);
-  DCHECK(result.__isset.result_set_metadata);
-  PopulateResultSchema(result.result_set_metadata, &return_val.schema);
+  RecordServiceMetrics::NUM_GET_SCHEMA_REQUESTS->Increment(1);
+  try {
+    // TODO: fix this to not do the whole planning.
+    TExecRequest result = PlanRecordServiceRequest(req);
+    DCHECK(result.__isset.result_set_metadata);
+    PopulateResultSchema(result.result_set_metadata, &return_val.schema);
+  } catch (const recordservice::TRecordServiceException& e) {
+    RecordServiceMetrics::NUM_FAILED_GET_SCHEMA_REQUESTS->Increment(1);
+    throw e;
+  }
 }
 
 //
@@ -620,98 +632,104 @@ void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
 //
 void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     const recordservice::TExecTaskParams& req) {
-  if (IsOffline()) {
-    ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
-        "This RecordServicePlanner is not ready to accept requests."
-        " Retry your request later.");
-  }
-
-  GetRecordServiceSession();
-
-  shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
-
-  scoped_ptr<Codec> decompressor;
-  Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
-  string decompressed_task;
-  Status status = decompressor->Decompress(req.task, true, &decompressed_task);
-  if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_TASK,
-        "Task is corrupt.",
-        status.msg().GetFullMessageDetails());
-  }
-
-  TExecRequest exec_req;
-  uint32_t size = decompressed_task.size();
-  status = DeserializeThriftMsg(
-      reinterpret_cast<const uint8_t*>(decompressed_task.data()),
-      &size, true, &exec_req);
-  if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_TASK,
-        "Task is corrupt.",
-        status.msg().GetFullMessageDetails());
-  }
-  LOG(INFO) << "RecordService::ExecRequest: query plan " <<
-          exec_req.query_exec_request.query_plan;
-
-  task_state->fetch_size = DEFAULT_FETCH_SIZE;
-  if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
-  exec_req.query_exec_request.
-      query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
-  if (req.__isset.mem_limit) {
-    // FIXME: this needs much more testing.
-    exec_req.query_exec_request.query_ctx.
-      request.query_options.__set_mem_limit(req.mem_limit);
-  }
-
-  shared_ptr<QueryExecState> exec_state;
-  status = ExecuteRecordServiceRequest(
-          &exec_req.query_exec_request.query_ctx,
-          &exec_req, record_service_session_, &exec_state);
-  if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_TASK,
-        "Could not execute task.",
-        status.msg().GetFullMessageDetails());
-  }
-
-  PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);
-  exec_state->SetRecordServiceTaskState(task_state);
-
-  // Optimization if the result exprs are all just "simple" slot refs. This means
-  // that they contain a single non-nullable tuple row. This is the common case and
-  // we can simplify the row serialization logic.
-  // TODO: this should be replaced by codegen to handle all the cases.
-  bool all_slot_refs = true;
-  const vector<ExprContext*>& output_exprs = exec_state->output_exprs();
-  for (int i = 0; i < output_exprs.size(); ++i) {
-    if (output_exprs[i]->root()->is_slotref()) {
-      SlotRef* slot_ref = reinterpret_cast<SlotRef*>(output_exprs[i]->root());
-      if (!slot_ref->tuple_is_nullable() && slot_ref->tuple_idx() == 0) continue;
+  RecordServiceMetrics::NUM_TASK_REQUESTS->Increment(1);
+  try {
+    if (IsOffline()) {
+      ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
+          "This RecordServicePlanner is not ready to accept requests."
+          " Retry your request later.");
     }
-    all_slot_refs = false;
-    break;
-  }
 
-  task_state->format = recordservice::TRowBatchFormat::Columnar;
-  if (req.__isset.row_batch_format) task_state->format = req.row_batch_format;
-  switch (task_state->format) {
-    case recordservice::TRowBatchFormat::Columnar:
-      task_state->results.reset(new RecordServiceParquetResultSet(
-          all_slot_refs, output_exprs));
+    GetRecordServiceSession();
+
+    shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
+
+    scoped_ptr<Codec> decompressor;
+    Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
+    string decompressed_task;
+    Status status = decompressor->Decompress(req.task, true, &decompressed_task);
+    if (!status.ok()) {
+      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+          "Task is corrupt.",
+          status.msg().GetFullMessageDetails());
+    }
+
+    TExecRequest exec_req;
+    uint32_t size = decompressed_task.size();
+    status = DeserializeThriftMsg(
+        reinterpret_cast<const uint8_t*>(decompressed_task.data()),
+        &size, true, &exec_req);
+    if (!status.ok()) {
+      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+          "Task is corrupt.",
+          status.msg().GetFullMessageDetails());
+    }
+    LOG(INFO) << "RecordService::ExecRequest: query plan " <<
+            exec_req.query_exec_request.query_plan;
+
+    task_state->fetch_size = DEFAULT_FETCH_SIZE;
+    if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
+    exec_req.query_exec_request.
+        query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
+    if (req.__isset.mem_limit) {
+      // FIXME: this needs much more testing.
+      exec_req.query_exec_request.query_ctx.
+        request.query_options.__set_mem_limit(req.mem_limit);
+    }
+
+    shared_ptr<QueryExecState> exec_state;
+    status = ExecuteRecordServiceRequest(
+            &exec_req.query_exec_request.query_ctx,
+            &exec_req, record_service_session_, &exec_state);
+    if (!status.ok()) {
+      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+          "Could not execute task.",
+          status.msg().GetFullMessageDetails());
+    }
+
+    PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);
+    exec_state->SetRecordServiceTaskState(task_state);
+
+    // Optimization if the result exprs are all just "simple" slot refs. This means
+    // that they contain a single non-nullable tuple row. This is the common case and
+    // we can simplify the row serialization logic.
+    // TODO: this should be replaced by codegen to handle all the cases.
+    bool all_slot_refs = true;
+    const vector<ExprContext*>& output_exprs = exec_state->output_exprs();
+    for (int i = 0; i < output_exprs.size(); ++i) {
+      if (output_exprs[i]->root()->is_slotref()) {
+        SlotRef* slot_ref = reinterpret_cast<SlotRef*>(output_exprs[i]->root());
+        if (!slot_ref->tuple_is_nullable() && slot_ref->tuple_idx() == 0) continue;
+      }
+      all_slot_refs = false;
       break;
-    default:
-      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-          "Service does not support this row batch format.");
-  }
-  task_state->results->Init(*exec_state->result_metadata(), task_state->fetch_size);
+    }
 
-  exec_state->UpdateQueryState(QueryState::RUNNING);
-  exec_state->WaitAsync();
-  status = SetQueryInflight(record_service_session_, exec_state);
-  if (!status.ok()) {
-    UnregisterQuery(exec_state->query_id(), false, &status);
+    task_state->format = recordservice::TRowBatchFormat::Columnar;
+    if (req.__isset.row_batch_format) task_state->format = req.row_batch_format;
+    switch (task_state->format) {
+      case recordservice::TRowBatchFormat::Columnar:
+        task_state->results.reset(new RecordServiceParquetResultSet(
+            all_slot_refs, output_exprs));
+        break;
+      default:
+        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+            "Service does not support this row batch format.");
+    }
+    task_state->results->Init(*exec_state->result_metadata(), task_state->fetch_size);
+
+    exec_state->UpdateQueryState(QueryState::RUNNING);
+    exec_state->WaitAsync();
+    status = SetQueryInflight(record_service_session_, exec_state);
+    if (!status.ok()) {
+      UnregisterQuery(exec_state->query_id(), false, &status);
+    }
+    return_val.handle.hi = exec_state->query_id().hi;
+    return_val.handle.lo = exec_state->query_id().lo;
+  } catch (const recordservice::TRecordServiceException& e) {
+    RecordServiceMetrics::NUM_FAILED_TASK_REQUESTS->Increment(1);
+    throw e;
   }
-  return_val.handle.hi = exec_state->query_id().hi;
-  return_val.handle.lo = exec_state->query_id().lo;
 }
 
 // Computes the percent of num/denom
@@ -725,58 +743,65 @@ static double ComputeCompletionPercentage(RuntimeProfile::Counter* num,
 
 void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
     const recordservice::TFetchParams& req) {
-  TUniqueId query_id;
-  query_id.hi = req.handle.hi;
-  query_id.lo = req.handle.lo;
+  RecordServiceMetrics::NUM_FETCH_REQUESTS->Increment(1);
+  try {
+    TUniqueId query_id;
+    query_id.hi = req.handle.hi;
+    query_id.lo = req.handle.lo;
 
-  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
-  if (exec_state.get() == NULL) {
-    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
-  }
-
-  RecordServiceTaskState* task_state = exec_state->record_service_task_state();
-  exec_state->BlockOnWait();
-
-  task_state->results->SetReturnBuffer(&return_val);
-
-  lock_guard<mutex> frl(*exec_state->fetch_rows_lock());
-  lock_guard<mutex> l(*exec_state->lock());
-
-  Status status = exec_state->FetchRows(
-      task_state->fetch_size, task_state->results.get());
-  if (!status.ok()) ThrowFetchException(status);
-
-  if (!task_state->counters_initialized) {
-    // First time the client called fetch. Extract the counters.
-    RuntimeProfile* server_profile = exec_state->server_profile();
-
-    task_state->serialize_timer = server_profile->GetCounter("RowMaterializationTimer");
-    task_state->client_timer = server_profile->GetCounter("ClientFetchWaitTimer");
-
-    RuntimeProfile* coord_profile = exec_state->coord()->query_profile();
-    vector<RuntimeProfile*> children;
-    coord_profile->GetAllChildren(&children);
-    for (int i = 0; i < children.size(); ++i) {
-      if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
-      RuntimeProfile* profile = children[i];
-      task_state->bytes_assigned_counter = profile->GetCounter("BytesAssigned");
-      task_state->bytes_read_counter = profile->GetCounter("BytesRead");
-      task_state->bytes_read_local_counter = profile->GetCounter("BytesReadLocal");
-      task_state->rows_read_counter = profile->GetCounter("RowsRead");
-      task_state->rows_returned_counter = profile->GetCounter("RowsReturned");
-      task_state->decompression_timer = profile->GetCounter("DecompressionTime");
-      task_state->hdfs_throughput_counter =
-        profile->GetCounter("PerReadThreadRawHdfsThroughput");
+    shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
+    if (exec_state.get() == NULL) {
+      ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
     }
-    task_state->counters_initialized = true;
+
+    RecordServiceTaskState* task_state = exec_state->record_service_task_state();
+    exec_state->BlockOnWait();
+
+    task_state->results->SetReturnBuffer(&return_val);
+
+    lock_guard<mutex> frl(*exec_state->fetch_rows_lock());
+    lock_guard<mutex> l(*exec_state->lock());
+
+    Status status = exec_state->FetchRows(
+        task_state->fetch_size, task_state->results.get());
+    if (!status.ok()) ThrowFetchException(status);
+
+    if (!task_state->counters_initialized) {
+      // First time the client called fetch. Extract the counters.
+      RuntimeProfile* server_profile = exec_state->server_profile();
+
+      task_state->serialize_timer = server_profile->GetCounter("RowMaterializationTimer");
+      task_state->client_timer = server_profile->GetCounter("ClientFetchWaitTimer");
+
+      RuntimeProfile* coord_profile = exec_state->coord()->query_profile();
+      vector<RuntimeProfile*> children;
+      coord_profile->GetAllChildren(&children);
+      for (int i = 0; i < children.size(); ++i) {
+        if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
+        RuntimeProfile* profile = children[i];
+        task_state->bytes_assigned_counter = profile->GetCounter("BytesAssigned");
+        task_state->bytes_read_counter = profile->GetCounter("BytesRead");
+        task_state->bytes_read_local_counter = profile->GetCounter("BytesReadLocal");
+        task_state->rows_read_counter = profile->GetCounter("RowsRead");
+        task_state->rows_returned_counter = profile->GetCounter("RowsReturned");
+        task_state->decompression_timer = profile->GetCounter("DecompressionTime");
+        task_state->hdfs_throughput_counter =
+          profile->GetCounter("PerReadThreadRawHdfsThroughput");
+      }
+      task_state->counters_initialized = true;
+    }
+
+    return_val.done = exec_state->eos();
+    return_val.task_completion_percentage = ComputeCompletionPercentage(
+        task_state->bytes_read_counter, task_state->bytes_assigned_counter);
+    return_val.row_batch_format = task_state->format;
+
+    task_state->results->FinalizeResult();
+    RecordServiceMetrics::NUM_ROWS_FETCHED->Increment(return_val.num_rows);
+  } catch (const recordservice::TRecordServiceException& e) {
+    RecordServiceMetrics::NUM_FAILED_FETCH_REQUESTS->Increment(1);
+    throw e;
   }
-
-  return_val.done = exec_state->eos();
-  return_val.task_completion_percentage = ComputeCompletionPercentage(
-      task_state->bytes_read_counter, task_state->bytes_assigned_counter);
-  return_val.row_batch_format = task_state->format;
-
-  task_state->results->FinalizeResult();
 }
 
 void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
@@ -786,6 +811,8 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
 
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
   if (exec_state.get() == NULL) return;
+
+  RecordServiceMetrics::NUM_CLOSED_TASKS->Increment(1);
   Status status = CancelInternal(query_id, true);
   if (!status.ok()) return;
   UnregisterQuery(query_id, true);
@@ -803,40 +830,45 @@ void ImpalaServer::CloseTask(const recordservice::TUniqueId& req) {
 // in the most useful way right now. Fix that.
 void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
       const recordservice::TUniqueId& req) {
-  TUniqueId query_id;
-  query_id.hi = req.hi;
-  query_id.lo = req.lo;
+  RecordServiceMetrics::NUM_GET_TASK_STATUS_REQUESTS->Increment(1);
+  try {
+    TUniqueId query_id;
+    query_id.hi = req.hi;
+    query_id.lo = req.lo;
 
-  // TODO: should this grab the lock in GetQueryExecState()?
-  shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
-  if (exec_state.get() == NULL) {
-    ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+    // TODO: should this grab the lock in GetQueryExecState()?
+    shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
+    if (exec_state.get() == NULL) {
+      ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+    }
+
+    lock_guard<mutex> l(*exec_state->lock());
+
+    RecordServiceTaskState* task_state = exec_state->record_service_task_state();
+    if (!task_state->counters_initialized) {
+      // Task hasn't started enough to have counters.
+      return;
+    }
+
+    // Populate the results from the counters.
+    return_val.stats.__set_completion_percentage(ComputeCompletionPercentage(
+        task_state->bytes_read_counter, task_state->bytes_assigned_counter));
+    SET_STAT_MS_FROM_COUNTER(task_state->serialize_timer, serialize_time_ms);
+    SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
+    SET_STAT_FROM_COUNTER(task_state->bytes_read_counter, bytes_read);
+    SET_STAT_FROM_COUNTER(task_state->bytes_read_local_counter, bytes_read_local);
+    SET_STAT_FROM_COUNTER(task_state->rows_read_counter, num_rows_read);
+    SET_STAT_FROM_COUNTER(task_state->rows_returned_counter, num_rows_returned);
+    SET_STAT_MS_FROM_COUNTER(task_state->decompression_timer, decompress_time_ms);
+    SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
+  } catch (const recordservice::TRecordServiceException& e) {
+    RecordServiceMetrics::NUM_FAILED_GET_TASK_STATUS_REQUESTS->Increment(1);
+    throw e;
   }
-
-  lock_guard<mutex> l(*exec_state->lock());
-
-  RecordServiceTaskState* task_state = exec_state->record_service_task_state();
-  if (!task_state->counters_initialized) {
-    // Task hasn't started enough to have counters.
-    return;
-  }
-
-  // Populate the results from the counters.
-  return_val.stats.__set_completion_percentage(ComputeCompletionPercentage(
-      task_state->bytes_read_counter, task_state->bytes_assigned_counter));
-  SET_STAT_MS_FROM_COUNTER(task_state->serialize_timer, serialize_time_ms);
-  SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
-  SET_STAT_FROM_COUNTER(task_state->bytes_read_counter, bytes_read);
-  SET_STAT_FROM_COUNTER(task_state->bytes_read_local_counter, bytes_read_local);
-  SET_STAT_FROM_COUNTER(task_state->rows_read_counter, num_rows_read);
-  SET_STAT_FROM_COUNTER(task_state->rows_returned_counter, num_rows_returned);
-  SET_STAT_MS_FROM_COUNTER(task_state->decompression_timer, decompress_time_ms);
-  SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
 }
 
 Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
     string* table_name) {
-
   hdfsFS fs;
   Status status = HdfsFsCache::instance()->GetDefaultConnection(&fs);
   if (!status.ok()) {
