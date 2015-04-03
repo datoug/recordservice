@@ -54,7 +54,7 @@ DECLARE_int32(recordservice_worker_port);
 static const int DEFAULT_FETCH_SIZE = 5000;
 
 // Names of temporary tables used to service path based requests.
-// TODO: everything about temp tables is a hack.
+// FIXME: everything about temp tables is a hack.
 static const char* TEMP_DB = "rs_tmp_db";
 static const char* TEMP_TBL = "tmp_tbl";
 
@@ -83,6 +83,7 @@ inline void ThrowFetchException(const Status& status) {
     ex.message = "Task failed due to an internal error.";
   }
   ex.__set_detail(status.msg().GetFullMessageDetails());
+  throw ex;
 }
 
 // Base class for test result set serializations. The functions in here and
@@ -656,6 +657,11 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
   exec_req.query_exec_request.
       query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
+  if (req.__isset.mem_limit) {
+    // FIXME: this needs much more testing.
+    exec_req.query_exec_request.query_ctx.
+      request.query_options.__set_mem_limit(req.mem_limit);
+  }
 
   shared_ptr<QueryExecState> exec_state;
   status = ExecuteRecordServiceRequest(
@@ -839,7 +845,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
         "Could not connect to HDFS");
   }
 
-  // TODO: this should do better globbing.
+  // FIXME: this should do better globbing.
   string path = request.path;
   if (path[path.size() - 1] == '*') {
     path = path.substr(0, path.size() - 1);
@@ -867,7 +873,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
   string commands[] = {
     "DROP TABLE IF EXISTS " + *table_name,
     "CREATE DATABASE IF NOT EXISTS " + string(TEMP_DB),
-    // TODO: assume text for now. How do we best handle this?
+    // FIXME: assume text for now. How do we best handle this?
     "CREATE EXTERNAL TABLE " + *table_name +
         "(record STRING) LOCATION \"" + path + "\"",
   };
