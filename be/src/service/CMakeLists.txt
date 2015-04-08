@@ -41,14 +41,19 @@ add_library(fesupport SHARED
 
 target_link_libraries(fesupport ${IMPALA_LINK_LIBS_NO_TCMALLOC})
 
-add_executable(impalad
-  impalad-main.cc
-)
+add_executable(impalad impalad-main.cc)
+add_executable(recordserviced recordserviced-main.cc)
 
 # This permits libraries loaded by dlopen to link to the symbols in the program.
 set_target_properties(impalad PROPERTIES LINK_FLAGS -rdynamic)
+set_target_properties(recordserviced PROPERTIES LINK_FLAGS -rdynamic)
 
 target_link_libraries(impalad
+  ${JAVA_JSIG_LIBRARY}
+  ${IMPALA_LINK_LIBS}
+)
+
+target_link_libraries(recordserviced
   ${JAVA_JSIG_LIBRARY}
   ${IMPALA_LINK_LIBS}
 )

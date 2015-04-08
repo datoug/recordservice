@@ -46,7 +46,7 @@ class Webserver {
   Webserver(const int port);
 
   // Uses FLAGS_webserver_{port, interface}
-  Webserver();
+  Webserver(bool is_record_service = false);
 
   ~Webserver();
 

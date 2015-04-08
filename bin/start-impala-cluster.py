@@ -55,12 +55,17 @@ parser.add_option("--log_level", type="int", dest="log_level", default=1,
 parser.add_option("--jvm_args", dest="jvm_args", default="",
                   help="Additional arguments to pass to the JVM(s) during startup.")
 
+parser.add_option("--start_recordservice", dest="start_recordservice", action="store_true",
+                  default=False, help="Starts recordserviced along with impalad")
+
 options, args = parser.parse_args()
 
 IMPALA_HOME = os.environ['IMPALA_HOME']
 KNOWN_BUILD_TYPES = ['debug', 'release']
 IMPALAD_PATH = os.path.join(IMPALA_HOME,
     'bin/start-impalad.sh -build_type=%s' % options.build_type)
+RECORD_SERVICED_PATH = os.path.join(IMPALA_HOME,
+    'bin/start-recordserviced.sh -build_type=%s' % options.build_type)
 STATE_STORE_PATH = os.path.join(IMPALA_HOME,
     'bin/start-statestored.sh -build_type=%s' % options.build_type)
 CATALOGD_PATH = os.path.join(IMPALA_HOME,
@@ -74,6 +79,7 @@ IMPALAD_PORTS = ("-beeswax_port=%d -hs2_port=%d  -be_port=%d "
                  "-llama_callback_port=%d")
 JVM_ARGS = "-jvm_debug_port=%s -jvm_args=%s"
 BE_LOGGING_ARGS = "-log_filename=%s -log_dir=%s -v=%s -logbufsecs=5"
+RECORD_SERVICE_ARGS = "-start_recordservice=%s"
 CLUSTER_WAIT_TIMEOUT_IN_SECONDS = 240
 
 def exec_impala_process(cmd, args, stderr_log_file_path):
@@ -85,9 +91,14 @@ def exec_impala_process(cmd, args, stderr_log_file_path):
   cmd = '%s %s %s 2>&1 &' % (cmd, args, redirect_output)
   os.system(cmd)
 
+def exec_recordserviced_process():
+  # TODO: logging redirect
+  os.system(RECORD_SERVICED_PATH + " &")
+
 def kill_cluster_processes(force=False):
   kill_matching_processes('catalogd')
   kill_matching_processes('impalad')
+  kill_matching_processes('recordserviced')
   kill_matching_processes('statestored')
   kill_matching_processes('mini-impala-cluster')
 
@@ -145,7 +156,16 @@ def build_jvm_args(instance_num):
   BASE_JVM_DEBUG_PORT = 30000
   return JVM_ARGS % (BASE_JVM_DEBUG_PORT + instance_num, options.jvm_args)
 
+def build_recordservice_args(start_recordservice):
+  if (start_recordservice):
+    return RECORD_SERVICE_ARGS % ("false")
+  else:
+    return RECORD_SERVICE_ARGS % ("true")
+
 def start_impalad_instances(cluster_size):
+  if (options.start_recordservice and cluster_size != 1):
+    raise RuntimeError, "If starting record service, cluster size must be 1 (\"-s 1\")"
+
   # Start each impalad instance and optionally redirect the output to a log file.
   for i in range(options.cluster_size):
     if i == 0:
@@ -157,11 +177,15 @@ def start_impalad_instances(cluster_size):
       # Yes, this is a hack, but it's easier than modifying the minikdc...
       sleep(2)
 
-    args = "%s %s %s %s" %\
+    args = "%s %s %s %s %s" %\
           (build_impalad_logging_args(i, service_name), build_jvm_args(i),
-           build_impalad_port_args(i), options.impalad_args.replace("#ID", str(i)))
+           build_impalad_port_args(i), options.impalad_args.replace("#ID", str(i)),
+           build_recordservice_args(options.start_recordservice))
     stderr_log_file_path = os.path.join(options.log_dir, '%s-error.log' % service_name)
     exec_impala_process(IMPALAD_PATH, args, stderr_log_file_path)
+
+  if (options.start_recordservice):
+    exec_recordserviced_process()
 
 def wait_for_impala_process_count(impala_cluster, retries=3):
   """Checks that the desired number of impalad/statestored processes are running.

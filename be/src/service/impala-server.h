@@ -1107,9 +1107,13 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
     int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
     ThriftServer** be_server,
+    boost::shared_ptr<ImpalaServer>* impala_server);
+
+// Starts the planner and worker record service services.
+Status StartRecordServiceServices(ExecEnv* exec_env,
+    const boost::shared_ptr<ImpalaServer>& server, int planner_port, int worker_port,
     ThriftServer** recordservice_planner_server,
-    ThriftServer** recordservice_worker_server,
-    ImpalaServer** impala_server);
+    ThriftServer** recordservice_worker_server);
 
 }
 

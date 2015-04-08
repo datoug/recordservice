@@ -52,7 +52,7 @@ class Frontend;
 // once to properly initialise service state.
 class ExecEnv {
  public:
-  ExecEnv();
+  ExecEnv(bool is_record_service = false, bool running_record_service = false);
 
   ExecEnv(const std::string& hostname, int backend_port, int subscriber_port,
           int webserver_port, const std::string& statestore_host, int statestore_port);
@@ -110,12 +110,23 @@ class ExecEnv {
   // differently.
   bool is_fe_tests() { return is_fe_tests_; }
 
+  // Returns true if this daemon is running as the record service.
+  bool is_record_service() const { return is_record_service_; }
+  bool running_record_service() const { return running_record_service_; }
+
   // Returns true if the Llama in use is pseudo-distributed, used for development
   // purposes. The pseudo-distributed version has special requirements for specifying
   // resource locations.
   bool is_pseudo_distributed_llama() { return is_pseudo_distributed_llama_; }
 
  protected:
+  // True if this daemon is recordserviced
+  const bool is_record_service_;
+
+  // True if this is impalad but running the record service services.
+  // TODO: remove when recordserviced is ready.
+  const bool running_record_service_;
+
   // Leave protected so that subclasses can override
   boost::scoped_ptr<DataStreamMgr> stream_mgr_;
   boost::scoped_ptr<ResourceBroker> resource_broker_;

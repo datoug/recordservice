@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //
-// This file contains the main() function for the impala daemon process,
-// which exports the Thrift services ImpalaService and ImpalaInternalService.
+// This file contains the main() function for the recordserviced daemon process.
+// This daemon can run as either the worker or planner (or both).
 
 #include <unistd.h>
 #include <jni.h>
@@ -44,18 +44,8 @@ using namespace boost;
 using namespace impala;
 using namespace std;
 
-DECLARE_string(classpath);
-DECLARE_bool(use_statestore);
-DECLARE_int32(beeswax_port);
-DECLARE_int32(hs2_port);
-DECLARE_int32(be_port);
-DECLARE_string(principal);
-
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
-
-// FIXME: remove this flag when recordserviced is ready.
-DEFINE_bool(start_recordservice, true, "Start RecordService services");
 
 int main(int argc, char** argv) {
   InitCommonRuntime(argc, argv, true);
@@ -67,57 +57,35 @@ int main(int argc, char** argv) {
   EXIT_IF_ERROR(HBaseTableWriter::InitJNI());
   InitFeSupport();
 
-  ExecEnv exec_env(false, FLAGS_start_recordservice);
+  ExecEnv exec_env(true, true);
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
-
-  ThriftServer* beeswax_server = NULL;
-  ThriftServer* hs2_server = NULL;
-  ThriftServer* be_server = NULL;
 
   ThriftServer* recordservice_planner = NULL;
   ThriftServer* recordservice_worker = NULL;
 
   shared_ptr<ImpalaServer> server;
-  EXIT_IF_ERROR(CreateImpalaServer(&exec_env, FLAGS_beeswax_port, FLAGS_hs2_port,
-      FLAGS_be_port, &beeswax_server, &hs2_server, &be_server,
-      &server));
+  EXIT_IF_ERROR(CreateImpalaServer(&exec_env, 0, 0, 0,
+      NULL, NULL, NULL, &server));
 
-  if (FLAGS_start_recordservice) {
-    EXIT_IF_ERROR(StartRecordServiceServices(&exec_env, server,
-        FLAGS_recordservice_planner_port, FLAGS_recordservice_worker_port,
-        &recordservice_planner, &recordservice_worker));
-  }
-
-  EXIT_IF_ERROR(be_server->Start());
+  EXIT_IF_ERROR(StartRecordServiceServices(&exec_env, server,
+      FLAGS_recordservice_planner_port, FLAGS_recordservice_worker_port,
+      &recordservice_planner, &recordservice_worker));
 
   Status status = exec_env.StartServices();
   if (!status.ok()) {
-    LOG(ERROR) << "Impalad services did not start correctly, exiting.  Error: "
+    LOG(ERROR) << "recordserviced did not start correctly, exiting. Error: "
                << status.GetDetail();
     ShutdownLogging();
     exit(1);
   }
 
-  // this blocks until the beeswax and hs2 servers terminate
-  EXIT_IF_ERROR(beeswax_server->Start());
-  EXIT_IF_ERROR(hs2_server->Start());
-  if (FLAGS_start_recordservice) {
-    EXIT_IF_ERROR(recordservice_planner->Start());
-    EXIT_IF_ERROR(recordservice_worker->Start());
-  }
+  EXIT_IF_ERROR(recordservice_planner->Start());
+  EXIT_IF_ERROR(recordservice_worker->Start());
 
   ImpaladMetrics::IMPALA_SERVER_READY->set_value(true);
-  LOG(INFO) << "Impala has started.";
+  LOG(INFO) << "recordserviced has started.";
 
-  beeswax_server->Join();
-  hs2_server->Join();
-  if (FLAGS_start_recordservice) {
-    recordservice_planner->Join();
-    recordservice_worker->Join();
-  }
-
-  delete be_server;
-  delete beeswax_server;
-  delete hs2_server;
+  recordservice_planner->Join();
+  recordservice_worker->Join();
 }

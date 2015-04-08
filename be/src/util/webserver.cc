@@ -32,6 +32,7 @@
 #include <rapidjson/prettywriter.h>
 
 #include "common/logging.h"
+#include "runtime/exec-env.h"
 #include "util/cpu-info.h"
 #include "util/disk-info.h"
 #include "util/mem-info.h"
@@ -53,6 +54,9 @@ using namespace mustache;
 const char* GetDefaultDocumentRoot();
 
 DEFINE_int32(webserver_port, 25000, "Port to start debug webserver on");
+DEFINE_int32(recordservice_webserver_port, 35000,
+    "Port to start RecordService debug webserver on");
+
 DEFINE_string(webserver_interface, "",
     "Interface to start debug webserver on. If blank, webserver binds to 0.0.0.0");
 DEFINE_string(webserver_doc_root, GetDefaultDocumentRoot(),
@@ -128,13 +132,13 @@ string BuildHeaderString(ResponseCode response, ContentType content_type) {
       content_type == HTML ? "html" : "plain");
 }
 
-Webserver::Webserver()
+Webserver::Webserver(bool is_record_service)
     : context_(NULL),
       error_handler_(UrlHandler(bind<void>(&Webserver::ErrorHandler, this, _1, _2),
           "error.tmpl", false)) {
   http_address_ = MakeNetworkAddress(
       FLAGS_webserver_interface.empty() ? "0.0.0.0" : FLAGS_webserver_interface,
-      FLAGS_webserver_port);
+      is_record_service ? FLAGS_recordservice_webserver_port : FLAGS_webserver_port);
 }
 
 Webserver::Webserver(const int port)

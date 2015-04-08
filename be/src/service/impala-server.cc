@@ -156,7 +156,6 @@ DEFINE_string(local_nodemanager_url, "", "The URL of the local Yarn Node Manager
 DECLARE_bool(enable_rm);
 DECLARE_bool(compact_catalog_topic);
 
-
 DEFINE_int32(recordservice_planner_port, 40000, "Port to run record service planner");
 DEFINE_int32(recordservice_worker_port, 40100, "Port to run record service worker");
 
@@ -297,8 +296,10 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
       TimestampValue::LocalTime().DebugString());
 
   // Initialize recordservice metrics
-  RecordServiceMetrics::CreateMetrics(
-      exec_env->metrics()->GetChildGroup("record-service"));
+  if (exec_env->running_record_service()) {
+    RecordServiceMetrics::CreateMetrics(
+        exec_env->metrics()->GetChildGroup("record-service"));
+  }
 
   // Register the membership callback if required
   if (exec_env->subscriber() != NULL) {
@@ -1674,8 +1675,7 @@ Status CreateServer(ExecEnv* exec_env, const shared_ptr<ImpalaServer>& handler,
 
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int be_port,
     ThriftServer** beeswax_server, ThriftServer** hs2_server, ThriftServer** be_server,
-    ThriftServer** recordservice_planner, ThriftServer** recordservice_worker,
-    ImpalaServer** impala_server) {
+    shared_ptr<ImpalaServer>* impala_server) {
   DCHECK((beeswax_port == 0) == (beeswax_server == NULL));
   DCHECK((hs2_port == 0) == (hs2_server == NULL));
   DCHECK((be_port == 0) == (be_server == NULL));
@@ -1725,18 +1725,6 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
     LOG(INFO) << "Impala HiveServer2 Service listening on " << hs2_port;
   }
 
-  if (recordservice_planner != NULL) {
-    RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
-          exec_env, handler, FLAGS_recordservice_planner_port, "record-service-planner",
-          recordservice_planner));
-  }
-
-  if (recordservice_worker != NULL) {
-    RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
-          exec_env, handler, FLAGS_recordservice_worker_port, "record-service-worker",
-          recordservice_worker));
-  }
-
   if (be_port != 0 && be_server != NULL) {
     shared_ptr<FragmentMgr> fragment_mgr(new FragmentMgr());
     shared_ptr<ImpalaInternalService> thrift_if(
@@ -1751,7 +1739,29 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
 
     LOG(INFO) << "ImpalaInternalService listening on " << be_port;
   }
-  if (impala_server != NULL) *impala_server = handler.get();
+  if (impala_server != NULL) *impala_server = handler;
+
+  return Status::OK;
+}
+
+Status StartRecordServiceServices(ExecEnv* exec_env,
+    const shared_ptr<ImpalaServer>& server,
+    int planner_port, int worker_port,
+    ThriftServer** recordservice_planner, ThriftServer** recordservice_worker) {
+  DCHECK((planner_port == 0) == (recordservice_planner == NULL));
+  DCHECK((worker_port == 0) == (recordservice_worker == NULL));
+
+  if (recordservice_planner != NULL) {
+    RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
+          exec_env, server, planner_port, "record-service-planner",
+          recordservice_planner));
+  }
+
+  if (recordservice_worker != NULL) {
+    RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
+          exec_env, server, worker_port, "record-service-worker",
+          recordservice_worker));
+  }
 
   return Status::OK;
 }

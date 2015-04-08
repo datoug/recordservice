@@ -63,6 +63,8 @@ DEFINE_string(state_store_host, "localhost",
     "hostname where StatestoreService is running");
 DEFINE_int32(state_store_subscriber_port, 23000,
     "port where StatestoreSubscriberService should be exported");
+DEFINE_int32(recordservice_state_store_subscriber_port, 33000,
+    "port where RecordService StatestoreSubscriberService should be exported");
 DEFINE_int32(num_hdfs_worker_threads, 16,
     "(Advanced) The number of threads in the global HDFS operation pool");
 
@@ -128,13 +130,15 @@ namespace impala {
 
 ExecEnv* ExecEnv::exec_env_ = NULL;
 
-ExecEnv::ExecEnv()
-  : stream_mgr_(new DataStreamMgr()),
+ExecEnv::ExecEnv(bool is_record_service, bool running_record_service)
+  : is_record_service_(is_record_service),
+    running_record_service_(running_record_service),
+    stream_mgr_(new DataStreamMgr()),
     impalad_client_cache_(new ImpalaInternalServiceClientCache()),
     catalogd_client_cache_(new CatalogServiceClientCache()),
     htable_factory_(new HBaseTableFactory()),
     disk_io_mgr_(new DiskIoMgr()),
-    webserver_(new Webserver()),
+    webserver_(new Webserver(is_record_service)),
     metrics_(new MetricGroup("impala-metrics")),
     mem_tracker_(NULL),
     thread_mgr_(new ThreadResourceMgr),
@@ -152,8 +156,11 @@ ExecEnv::ExecEnv()
   // Initialize the scheduler either dynamically (with a statestore) or statically (with
   // a standalone single backend)
   if (FLAGS_use_statestore) {
+    // FIXME: more record service statestore changes.
     TNetworkAddress subscriber_address =
-        MakeNetworkAddress(FLAGS_hostname, FLAGS_state_store_subscriber_port);
+        MakeNetworkAddress(FLAGS_hostname, is_record_service ?
+            FLAGS_recordservice_state_store_subscriber_port :
+            FLAGS_state_store_subscriber_port);
     TNetworkAddress statestore_address =
         MakeNetworkAddress(FLAGS_state_store_host, FLAGS_state_store_port);
 
@@ -176,7 +183,9 @@ ExecEnv::ExecEnv()
 
 ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
                  int webserver_port, const string& statestore_host, int statestore_port)
-  : stream_mgr_(new DataStreamMgr()),
+  : is_record_service_(false),
+    running_record_service_(false),
+    stream_mgr_(new DataStreamMgr()),
     impalad_client_cache_(new ImpalaInternalServiceClientCache()),
     catalogd_client_cache_(new CatalogServiceClientCache()),
     htable_factory_(new HBaseTableFactory()),

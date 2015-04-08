@@ -34,7 +34,6 @@ InProcessImpalaServer::InProcessImpalaServer(const string& hostname, int backend
     int subscriber_port, int webserver_port, const string& statestore_host,
     int statestore_port)
   : hostname_(hostname), backend_port_(backend_port),
-    impala_server_(NULL),
     exec_env_(new ExecEnv(hostname, backend_port, subscriber_port, webserver_port,
                           statestore_host, statestore_port)) {
 }
@@ -52,7 +51,7 @@ Status InProcessImpalaServer::StartWithClientServers(int beeswax_port, int hs2_p
   ThriftServer* beeswax_server;
   RETURN_IF_ERROR(CreateImpalaServer(exec_env_.get(), beeswax_port, hs2_port,
                                      backend_port_, &beeswax_server, &hs2_server,
-                                     &be_server, NULL, NULL, &impala_server_));
+                                     &be_server, &impala_server_));
   be_server_.reset(be_server);
   hs2_server_.reset(hs2_server);
   beeswax_server_.reset(beeswax_server);
@@ -71,7 +70,7 @@ Status InProcessImpalaServer::StartAsBackendOnly(bool use_statestore) {
   RETURN_IF_ERROR(exec_env_->StartServices());
   ThriftServer* be_server;
   RETURN_IF_ERROR(CreateImpalaServer(exec_env_.get(), 0, 0, backend_port_,
-        NULL, NULL, &be_server, NULL, NULL, &impala_server_));
+        NULL, NULL, &be_server, &impala_server_));
   be_server_.reset(be_server);
   RETURN_IF_ERROR(be_server_->Start());
   return Status::OK;
