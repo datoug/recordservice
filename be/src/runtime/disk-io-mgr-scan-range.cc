@@ -279,19 +279,16 @@ Status DiskIoMgr::ScanRange::Open() {
 
   if (fs_ != NULL) {
     if (hdfs_file_ != NULL) return Status::OK();
-
-    // TODO: is there much overhead opening hdfs files?  Should we try to preserve
-    // the handle across multiple scan ranges of a file?
-    hdfs_file_ = hdfsOpenFile(fs_, file(), O_RDONLY, 0, 0, 0);
+    hdfs_file_ = io_mgr_->OpenHdfsFile(fs_, file(), mtime());
     QUERY_VLOG_FILE(reader_->logger()) << "hdfsOpenFile() file=" << file();
     if (hdfs_file_ == NULL) {
       return Status(GetHdfsErrorMsg("Failed to open HDFS file ", file_));
     }
 
     QUERY_VLOG_FILE(reader_->logger()) << "hdfsSeek() offset=" << offset_;
-    if (hdfsSeek(fs_, hdfs_file_, offset_) != 0) {
-      hdfsCloseFile(fs_, hdfs_file_);
+    if (hdfsSeek(fs_, hdfs_file_->file(), offset_) != 0) {
       QUERY_VLOG_FILE(reader_->logger()) << "hdfsCloseFile() (error) file=" << file();
+      io_mgr_->CacheOrCloseFileHandle(file(), hdfs_file_, false);
       hdfs_file_ = NULL;
       string error_msg = GetHdfsErrorMsg("");
       stringstream ss;
@@ -331,7 +328,7 @@ void DiskIoMgr::ScanRange::Close() {
 
     struct hdfsReadStatistics* stats;
     if (IsDfsPath(file())) {
-      int success = hdfsFileGetReadStatistics(hdfs_file_, &stats);
+      int success = hdfsFileGetReadStatistics(hdfs_file_->file(), &stats);
       if (success == 0) {
         reader_->bytes_read_local_ += stats->totalLocalBytesRead;
         reader_->bytes_read_short_circuit_ += stats->totalShortCircuitBytesRead;
@@ -351,11 +348,12 @@ void DiskIoMgr::ScanRange::Close() {
       }
     }
     if (cached_buffer_ != NULL) {
-      hadoopRzBufferFree(hdfs_file_, cached_buffer_);
+      hadoopRzBufferFree(hdfs_file_->file(), cached_buffer_);
       cached_buffer_ = NULL;
     }
-    hdfsCloseFile(fs_, hdfs_file_);
+    io_mgr_->CacheOrCloseFileHandle(file(), hdfs_file_, false);
     QUERY_VLOG_FILE(reader_->logger()) << "hdfsCloseFile() file=" << file();
+    VLOG_FILE << "Cache HDFS file handle file=" << file();
     hdfs_file_ = NULL;
   } else {
     if (local_file_ == NULL) return;
@@ -401,7 +399,7 @@ Status DiskIoMgr::ScanRange::Read(char* buffer, int64_t* bytes_read, bool* eosr)
     int64_t max_chunk_size = MaxReadChunkSize();
     while (*bytes_read < bytes_to_read) {
       int chunk_size = min(bytes_to_read - *bytes_read, max_chunk_size);
-      int last_read = hdfsRead(fs_, hdfs_file_, buffer + *bytes_read, chunk_size);
+      int last_read = hdfsRead(fs_, hdfs_file_->file(), buffer + *bytes_read, chunk_size);
       if (last_read == -1) {
         return Status(GetHdfsErrorMsg("Error reading from HDFS file: ", file_));
       } else if (last_read == 0) {
@@ -446,7 +444,8 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
 
     DCHECK(hdfs_file_ != NULL);
     DCHECK(cached_buffer_ == NULL);
-    cached_buffer_ = hadoopReadZero(hdfs_file_, io_mgr_->cached_read_options_, len());
+    cached_buffer_ = hadoopReadZero(hdfs_file_->file(),
+        io_mgr_->cached_read_options_, len());
 
     // Data was not cached, caller will fall back to normal read path.
     if (cached_buffer_ == NULL) {
