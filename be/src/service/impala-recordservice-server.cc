@@ -24,6 +24,9 @@
 #include <boost/algorithm/string.hpp>
 #include <gutil/strings/substitute.h>
 
+#include <re2/re2.h>
+#include <re2/stringpiece.h>
+
 #include "common/logging.h"
 #include "common/version.h"
 #include "exprs/expr.h"
@@ -57,6 +60,14 @@ static const int DEFAULT_FETCH_SIZE = 5000;
 // FIXME: everything about temp tables is a hack.
 static const char* TEMP_DB = "rs_tmp_db";
 static const char* TEMP_TBL = "tmp_tbl";
+
+// Byte size of hadoop file headers.
+const int HADOOP_FILE_HEADER_SIZE = 3;
+
+const uint8_t AVRO_HEADER[HADOOP_FILE_HEADER_SIZE] = { 'O', 'b', 'j' };
+const uint8_t PARQUET_HEADER[HADOOP_FILE_HEADER_SIZE] = { 'P', 'A', 'R' };
+const uint8_t SEQUENCE_HEADER[HADOOP_FILE_HEADER_SIZE] = { 'S', 'E', 'Q' };
+const uint8_t RCFILE_HEADER[HADOOP_FILE_HEADER_SIZE] = { 'R', 'C', 'F' };
 
 namespace impala {
 
@@ -411,7 +422,7 @@ recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
 }
 
 TExecRequest ImpalaServer::PlanRecordServiceRequest(
-    const recordservice::TPlanRequestParams& req) {
+    const recordservice::TPlanRequestParams& req, scoped_ptr<re2::RE2>* path_filter) {
   RecordServiceMetrics::NUM_PLAN_REQUESTS->Increment(1);
   if (IsOffline()) {
     ThrowRecordServiceException(recordservice::TErrorCode::SERVICE_BUSY,
@@ -439,18 +450,24 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
       query_ctx.request.stmt = req.sql_stmt;
       break;
     case recordservice::TRequestType::Path: {
+
       // TODO: improve tmp table management or get impala to do it properly.
       unique_lock<mutex> l(tmp_tbl_lock_);
       tmp_tbl_lock.swap(l);
 
       string tmp_table;
-      Status status = CreateTmpTable(req.path, &tmp_table);
+      THdfsFileFormat::type format;
+      Status status = CreateTmpTable(req.path, &tmp_table, path_filter, &format);
       if (!status.ok()) {
         ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
             "Could not create temporary table.",
             status.msg().GetFullMessageDetails());
       }
       if (req.path.__isset.query) {
+        if (format != THdfsFileFormat::TEXT) {
+          ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
+              "Query request currently only supports TEXT files.");
+        }
         string query = req.path.query;
         size_t p = req.path.query.find("__PATH__");
         if (p == string::npos) {
@@ -487,13 +504,83 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
   return result;
 }
 
+// Returns the regex to match a file pattern. e.g. "*.java" -> "(.*)\.java"
+// TODO: is there a library for doing this?
+string FilePatternToRegex(const string& pattern) {
+  string result;
+  for (int i = 0; i < pattern.size(); ++i) {
+    char c = pattern.at(i);
+    if (c == '*') {
+      result.append("(.*)");
+    } else if (c == '.') {
+      result.append("\\.");
+    } else {
+      result.append(1, c);
+    }
+  }
+  return result;
+}
+
+Status ReadFileHeader(hdfsFS fs, const char* path, uint8_t header[3]) {
+  hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, sizeof(header), 0, 0);
+  if (file == NULL) return Status("Could not open file.");
+  int bytes_read = hdfsRead(fs, file, header, sizeof(header));
+  hdfsCloseFile(fs, file);
+  if (bytes_read != sizeof(header)) return Status("Could not read header.");
+  return Status::OK;
+}
+
+// TODO: move this logic to the planner? Not clear if that is easier.
+Status DetermineFileFormat(hdfsFS fs, const string& path,
+    const re2::RE2* path_filter, THdfsFileFormat::type* format, string* first_file) {
+  // Default to text.
+  *format = THdfsFileFormat::TEXT;
+  int num_entries = 1;
+  hdfsFileInfo* files = hdfsListDirectory(fs, path.c_str(), &num_entries);
+  if (files == NULL) return Status("Could not list directory.");
+
+  // Look for the first name that matches the path and filter. We'll look at
+  // the file format of that file. This doesn't handle the case where a directory
+  // is mixed format.
+  // TODO: think about that.
+  for (int i = 0; i < num_entries; ++i) {
+    if (files[i].mKind != kObjectKindFile) continue;
+    if (path_filter != NULL) {
+      char* base_filename = strrchr(files[i].mName, '/');
+      if (base_filename == NULL) {
+        base_filename = files[i].mName;
+      } else {
+        base_filename += 1;
+      }
+      if (!re2::RE2::FullMatch(base_filename, *path_filter)) continue;
+    }
+
+    uint8_t header[HADOOP_FILE_HEADER_SIZE];
+    RETURN_IF_ERROR(ReadFileHeader(fs, files[i].mName, header));
+    if (memcmp(header, AVRO_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+      *format = THdfsFileFormat::AVRO;
+    } else if (memcmp(header, PARQUET_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+      *format = THdfsFileFormat::PARQUET;
+    } else if (memcmp(header, SEQUENCE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+      *format = THdfsFileFormat::SEQUENCE_FILE;
+    } else if (memcmp(header, RCFILE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+      *format = THdfsFileFormat::RC_FILE;
+    }
+    *first_file = files[i].mName;
+    break;
+  }
+  hdfsFreeFileInfo(files, num_entries);
+  return Status::OK;
+}
+
 //
 // RecordServicePlanner
 //
 void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   const recordservice::TPlanRequestParams& req) {
   try {
-    TExecRequest result = PlanRecordServiceRequest(req);
+    scoped_ptr<re2::RE2> path_filter;
+    TExecRequest result = PlanRecordServiceRequest(req, &path_filter);
 
     // TODO: this port should come from the membership information and return all hosts
     // the workers are running on.
@@ -572,18 +659,28 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     for (int i = 0; i < scan_ranges.size(); ++i) {
       recordservice::TTask task;
 
+      TScanRangeLocations& scan_range = scan_ranges[i];
       // Add the partition metadata.
-      if (scan_ranges[i].scan_range.__isset.hdfs_file_split) {
+      if (scan_range.scan_range.__isset.hdfs_file_split) {
+        if (path_filter != NULL) {
+          const string& base_filename = scan_range.scan_range.hdfs_file_split.file_name;
+          if (!re2::RE2::FullMatch(base_filename, *path_filter.get())) {
+            VLOG_FILE << "File '" << base_filename
+                      << "' did not match pattern: '" << req.path.path << "'";
+            continue;
+          }
+        }
+
         query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
-        int64_t id = scan_ranges[i].scan_range.hdfs_file_split.partition_id;
+        int64_t id = scan_range.scan_range.hdfs_file_split.partition_id;
         query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
             all_partitions[id];
       }
 
       // Populate the hosts.
       query_request.host_list.clear();
-      for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
-        TScanRangeLocation& loc = scan_ranges[i].locations[j];
+      for (int j = 0; j < scan_range.locations.size(); ++j) {
+        TScanRangeLocation& loc = scan_range.locations[j];
         recordservice::TNetworkAddress host;
         DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
         host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
@@ -598,7 +695,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
       // Add the scan range.
       query_request.per_node_scan_ranges.clear();
-      query_request.per_node_scan_ranges[scan_node_id].push_back(scan_ranges[i]);
+      query_request.per_node_scan_ranges[scan_node_id].push_back(scan_range);
 
       string serialized_task;
       serializer.Serialize<TExecRequest>(&result, &serialized_task);
@@ -616,7 +713,8 @@ void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
   RecordServiceMetrics::NUM_GET_SCHEMA_REQUESTS->Increment(1);
   try {
     // TODO: fix this to not do the whole planning.
-    TExecRequest result = PlanRecordServiceRequest(req);
+    scoped_ptr<re2::RE2> dummy;
+    TExecRequest result = PlanRecordServiceRequest(req, &dummy);
     DCHECK(result.__isset.result_set_metadata);
     PopulateResultSchema(result.result_set_metadata, &return_val.schema);
   } catch (const recordservice::TRecordServiceException& e) {
@@ -869,7 +967,8 @@ void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
 }
 
 Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
-    string* table_name) {
+    string* table_name, scoped_ptr<re2::RE2>* path_filter,
+    THdfsFileFormat::type* format) {
   hdfsFS fs;
   Status status = HdfsFsCache::instance()->GetDefaultConnection(&fs);
   if (!status.ok()) {
@@ -878,40 +977,89 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
         "Could not connect to HDFS");
   }
 
-  // FIXME: this should do better globbing.
-  string path = request.path;
-  if (path[path.size() - 1] == '*') {
-    path = path.substr(0, path.size() - 1);
-  }
-
   bool is_directory = false;
-  status = IsDirectory(fs, path.c_str(), &is_directory);
-  if (!status.ok()) {
-    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
-        "No such file or directory: " + path);
+  string path = request.path;
+  string suffix;
+
+  // First see if the path is a directory. This means the path does not need a
+  // trailing '/' which is convenient.
+  IsDirectory(fs, path.c_str(), &is_directory); // Drop status.
+  if (!is_directory) {
+    // TODO: this should do better globbing e.g. /path/*/a/b/*/. Impala has poor support
+    // of this and requires more work.
+    size_t last_slash = path.find_last_of('/');
+    if (last_slash != string::npos) {
+      suffix = path.substr(last_slash + 1);
+      path = path.substr(0, last_slash);
+    }
+
+    status = IsDirectory(fs, path.c_str(), &is_directory);
+    if (!status.ok()) {
+      if (path.find('*') != string::npos) {
+        // Path contains a * which we should (HDFS can) expand. e.g. /path/a.*/*
+        ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
+            "Globbing is not yet supported: " + path);
+      } else {
+        ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
+            "No such file or directory: " + path);
+      }
+    }
   }
 
   if (!is_directory) {
+    stringstream ss;
+    ss << "Path must be a directory: " + path;
     // TODO: Impala should support LOCATIONs that are not directories.
-    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
-        "Path must be a directory: " + path);
+    // Move the suffix and file filtering logic there.
+    ThrowRecordServiceException(
+        recordservice::TErrorCode::INVALID_REQUEST, ss.str());
   }
 
-  ScopedSessionState session_handle(this);
-  GetRecordServiceSession(&session_handle);
+  if (!suffix.empty()) path_filter->reset(new re2::RE2(FilePatternToRegex(suffix)));
 
-  stringstream tbl_name;
-  tbl_name << TEMP_DB << "." << TEMP_TBL;
-  *table_name = tbl_name.str();
+  string first_file;
+  RETURN_IF_ERROR(
+      DetermineFileFormat(fs, path, path_filter->get(), format, &first_file));
+
+  *table_name = string(TEMP_DB) + "." + string(TEMP_TBL);
+  string create_tbl_stmt("CREATE EXTERNAL TABLE " + *table_name);
+
+  switch (*format) {
+    case THdfsFileFormat::TEXT:
+      // For text, we can't get the schema, just make it a string.
+      create_tbl_stmt += string("(record STRING)");
+      break;
+    case THdfsFileFormat::SEQUENCE_FILE:
+      // For sequence file, we can't get the schema, just make it a string.
+      create_tbl_stmt += string("(record STRING) STORED AS SEQUENCEFILE");
+      break;
+    case THdfsFileFormat::PARQUET:
+      create_tbl_stmt += string(" LIKE PARQUET '") + first_file +
+          string("' STORED AS PARQUET");
+      break;
+    case THdfsFileFormat::AVRO:
+      create_tbl_stmt += string(" LIKE AVRO '") + first_file +
+          string("' STORED AS AVRO");
+      break;
+    default: {
+      // FIXME: Add RCFile. We need to look in the file metadata for the number of
+      // columns.
+      stringstream ss;
+      ss << "File format '" << *format << "'is not supported iwth path requests.";
+      return Status(ss.str());
+    }
+  }
+  create_tbl_stmt += " LOCATION \"" + path + "\"";
 
   // For now, we'll just always use one temp table.
   string commands[] = {
     "DROP TABLE IF EXISTS " + *table_name,
     "CREATE DATABASE IF NOT EXISTS " + string(TEMP_DB),
-    // FIXME: assume text for now. How do we best handle this?
-    "CREATE EXTERNAL TABLE " + *table_name +
-        "(record STRING) LOCATION \"" + path + "\"",
+    create_tbl_stmt
   };
+
+  ScopedSessionState session_handle(this);
+  GetRecordServiceSession(&session_handle);
 
   int num_commands = sizeof(commands) / sizeof(commands[0]);
   for (int i = 0; i < num_commands; ++i) {

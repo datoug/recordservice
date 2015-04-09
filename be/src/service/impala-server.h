@@ -45,6 +45,10 @@
 #include "runtime/types.h"
 #include "rapidjson/rapidjson.h"
 
+namespace re2 {
+  class RE2;
+};
+
 namespace impala {
 
 class ExecEnv;
@@ -776,13 +780,22 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   void SetOffline(bool offline);
 
   // Creates a temp table for 'path', returning the fully qualified name.
+  // If the 'path' was not a directory (e.g. /path/file or /path/*.avro), then
+  // *suffix will be the part after the last '/' (e.g. "file", "*.avro")
+  // If path is a directory, *suffix will be empty.
   Status CreateTmpTable(const recordservice::TPathRequest& path,
-      std::string* table_name);
+      std::string* table_name, boost::scoped_ptr<re2::RE2>* path_filter,
+      THdfsFileFormat::type* file_format);
 
   // Plans the RecordService request. Errors are handled by throwing a
   // TRecordServiceException
+  // If the request is a path request, path_filter returns regex to filter the
+  // files in the path. This is built from the suffix of the path.
+  // e.g. if the path is /a/b/*.jar, suffix is *.jar.
+  // If there is no suffix, path_filter is not created.
   TExecRequest PlanRecordServiceRequest(
-      const recordservice::TPlanRequestParams& params);
+      const recordservice::TPlanRequestParams& params,
+      boost::scoped_ptr<re2::RE2>* path_filter);
 
   // Populates session with the session for this client using the client's connection
   // id. Throws an exception if the session does not exist.
