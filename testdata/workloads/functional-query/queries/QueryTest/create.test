@@ -99,6 +99,36 @@ show databases like 'ddl_test_db'
 STRING
 ====
 ---- QUERY
+drop table if exists ddl_test_db.test_like_file_create
+---- RESULTS
+====
+---- QUERY
+create table ddl_test_db.test_like_file_create like avro
+'$FILESYSTEM_PREFIX/test-warehouse/alltypestiny_avro/year=2009/month=1/000000_0'
+---- RESULTS
+====
+---- QUERY
+describe ddl_test_db.test_like_file_create
+---- RESULTS
+'id','int',''
+'bool_col','boolean',''
+'tinyint_col','int',''
+'smallint_col','int',''
+'int_col','int',''
+'bigint_col','bigint',''
+'float_col','float',''
+'double_col','double',''
+'date_string_col','string',''
+'string_col','string',''
+'timestamp_col','string',''
+---- TYPES
+STRING, STRING, STRING
+====
+---- QUERY
+drop table if exists ddl_test_db.test_like_file_create
+---- RESULTS
+====
+---- QUERY
 # Make sure creating a database with the same name doesn't throw an error when
 # IF NOT EXISTS is specified.
 create database if not exists ddl_test_db

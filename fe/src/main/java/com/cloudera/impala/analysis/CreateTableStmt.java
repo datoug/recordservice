@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 import org.apache.hadoop.fs.permission.FsAction;
 
 import com.cloudera.impala.authorization.Privilege;
@@ -36,6 +37,7 @@ import com.cloudera.impala.util.AvroSchemaParser;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 /**
@@ -51,7 +53,7 @@ public class CreateTableStmt extends StatementBase {
   private final RowFormat rowFormat_;
   private final TableName tableName_;
   private final Map<String, String> tblProperties_;
-  private final Map<String, String> serdeProperties_;
+  private Map<String, String> serdeProperties_;
   private final HdfsCachingOp cachingOp_;
   private HdfsUri location_;
 
@@ -185,6 +187,16 @@ public class CreateTableStmt extends StatementBase {
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
+    analyze(analyzer, fileFormat_);
+  }
+
+  /**
+   * Analyzes the create table statement as if it were 'format'. The table is
+   * always created with fileFormat_ but in the case of CREATE TABLE LIKE AVRO ...
+   * we want to do the analysis as if the table was AVRO.
+   */
+  protected void analyze(Analyzer analyzer, THdfsFileFormat format)
+      throws AnalysisException {
     Preconditions.checkState(tableName_ != null && !tableName_.isEmpty());
     tableName_.analyze();
     dbName_ = analyzer.getTargetDbName(tableName_);
@@ -201,7 +213,7 @@ public class CreateTableStmt extends StatementBase {
 
     // Only Avro tables can have empty column defs because they can infer them from
     // the Avro schema.
-    if (columnDefs_.isEmpty() && fileFormat_ != THdfsFileFormat.AVRO) {
+    if (columnDefs_.isEmpty() && format != THdfsFileFormat.AVRO) {
       throw new AnalysisException("Table requires at least 1 column");
     }
 
@@ -216,7 +228,7 @@ public class CreateTableStmt extends StatementBase {
     // Check that all the column names are valid and unique.
     analyzeColumnDefs(analyzer);
 
-    if (fileFormat_ == THdfsFileFormat.AVRO) {
+    if (format == THdfsFileFormat.AVRO) {
       List<ColumnDesc> newColumnDefs = analyzeAvroSchema(analyzer);
       if (newColumnDefs != columnDefs_) {
         // Replace the old column defs with the new ones and analyze them.
@@ -227,6 +239,13 @@ public class CreateTableStmt extends StatementBase {
     }
 
     if (cachingOp_ != null) cachingOp_.analyze(analyzer);
+  }
+
+  // Adds a serde property to this create stmt. This is used by avro to add the
+  // schema.
+  protected void addSerdeProperty(String key, String value) {
+    if (serdeProperties_ == null) serdeProperties_ = Maps.newHashMap();
+    serdeProperties_.put(key, value);
   }
 
   /**
@@ -261,7 +280,6 @@ public class CreateTableStmt extends StatementBase {
    */
   private List<ColumnDesc> analyzeAvroSchema(Analyzer analyzer)
       throws AnalysisException {
-    Preconditions.checkState(fileFormat_ == THdfsFileFormat.AVRO);
     // Look for the schema in TBLPROPERTIES and in SERDEPROPERTIES, with the latter
     // taking precedence.
     List<Map<String, String>> schemaSearchLocations = Lists.newArrayList();

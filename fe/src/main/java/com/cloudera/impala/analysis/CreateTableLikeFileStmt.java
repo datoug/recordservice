@@ -16,14 +16,20 @@ package com.cloudera.impala.analysis;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-
 import org.apache.hadoop.fs.permission.FsAction;
+import org.apache.hadoop.hive.serde2.avro.AvroSerdeUtils;
+
 import parquet.hadoop.ParquetFileReader;
 import parquet.hadoop.metadata.ParquetMetadata;
 import parquet.schema.OriginalType;
@@ -69,19 +75,8 @@ public class CreateTableLikeFileStmt extends CreateTableStmt {
    * Throws Analysis exception for any failure, such as failing to read the file
    * or failing to parse the contents.
    */
-  private static parquet.schema.MessageType loadParquetSchema(Path pathToFile)
-      throws AnalysisException {
-    try {
-      FileSystem fs = pathToFile.getFileSystem(FileSystemUtil.getConfiguration());
-      if (!fs.isFile(pathToFile)) {
-        throw new AnalysisException("Cannot infer schema, path is not a file: " +
-                                    pathToFile);
-      }
-    } catch (IOException e) {
-      throw new AnalysisException("Failed to connect to filesystem:" + e);
-    } catch (IllegalArgumentException e) {
-      throw new AnalysisException(e.getMessage());
-    }
+  private static parquet.schema.MessageType loadParquetSchema(
+      Path pathToFile) throws AnalysisException {
     ParquetMetadata readFooter = null;
     try {
       readFooter = ParquetFileReader.readFooter(FileSystemUtil.getConfiguration(),
@@ -192,6 +187,31 @@ public class CreateTableLikeFileStmt extends CreateTableStmt {
     return schema;
   }
 
+  /**
+   * Reads the avro data file at 'path' and populates the serde properties with the
+   * schema in the file.
+   * Throws an analysis exception if reading from the file failed or it is an invalid
+   * avro file.
+   */
+  private void setAvroSchema(FileSystem fs, Path path) throws AnalysisException {
+    InputStream fileStream = null;
+    DataFileStream<GenericRecord> reader = null;
+    try {
+      fileStream = fs.open(path);
+      reader = new DataFileStream<GenericRecord>(
+          fileStream, new GenericDatumReader<GenericRecord>());
+      // TODO: if the schema is very long, we can't store it as a literal and must
+      // persist it as a file in HDFS. What's the best place to put that?
+      addSerdeProperty(AvroSerdeUtils.SCHEMA_LITERAL, reader.getSchema().toString());
+    } catch (IOException e) {
+      throw new AnalysisException(
+          "Problem reading Avro schema at: " + path, e);
+    } finally {
+      IOUtils.closeQuietly(fileStream);
+      IOUtils.closeQuietly(reader);
+    }
+  }
+
   @Override
   public String toSql() {
     ArrayList<String> colsSql = Lists.newArrayList();
@@ -211,7 +231,26 @@ public class CreateTableLikeFileStmt extends CreateTableStmt {
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
     schemaLocation_.analyze(analyzer, Privilege.ALL, FsAction.READ_WRITE);
+    FileSystem fs = null;
+    try {
+      fs = schemaLocation_.getPath().getFileSystem(
+          FileSystemUtil.getConfiguration());
+      if (!fs.isFile(schemaLocation_.getPath())) {
+        throw new AnalysisException("Cannot infer schema, path is not a file: " +
+            schemaLocation_.getPath());
+      }
+    } catch (IOException e) {
+      throw new AnalysisException("Failed to connect to filesystem:" + e);
+    } catch (IllegalArgumentException e) {
+      throw new AnalysisException(e.getMessage());
+    }
+
     switch (schemaFileFormat_) {
+      case AVRO:
+        setAvroSchema(fs, schemaLocation_.getPath());
+        // Avro has custom logic for analysis.
+        super.analyze(analyzer, THdfsFileFormat.AVRO);
+        return;
       case PARQUET:
         getColumnDefs().addAll(extractParquetSchema(schemaLocation_));
         break;
