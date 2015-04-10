@@ -28,6 +28,7 @@ add_library(Service
   impala-server-callbacks.cc
   impala-hs2-server.cc
   impala-beeswax-server.cc
+  impala-recordservice-server.cc
   query-exec-state.cc
   query-options.cc
   child-query.cc
@@ -51,6 +52,9 @@ target_link_libraries(impalad
   ${JAVA_JSIG_LIBRARY}
   ${IMPALA_LINK_LIBS}
 )
+
+add_executable(record-service-client record-service-client.cc)
+target_link_libraries(record-service-client ImpalaThrift thriftstatic -lboost_date_time)
 
 ADD_BE_TEST(session-expiry-test session-expiry-test.cc)
 ADD_BE_TEST(hs2-util-test hs2-util-test.cc)

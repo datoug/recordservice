@@ -27,6 +27,7 @@
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaHiveServer2Service.h"
 #include "gen-cpp/ImpalaInternalService.h"
+#include "gen-cpp/RecordService.h"
 #include "gen-cpp/Frontend_types.h"
 #include "rpc/thrift-server.h"
 #include "common/status.h"
@@ -80,7 +81,8 @@ class TGetExecSummaryReq;
 // fragment: the originating coordinator might die, but we can get notified of
 // that via the statestore. This still needs to be implemented.
 class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
-                     public ThriftServer::ConnectionHandlerIf {
+                     public ThriftServer::ConnectionHandlerIf,
+                     public recordservice::RecordServiceIf {
  public:
   ImpalaServer(ExecEnv* exec_env);
   ~ImpalaServer();
@@ -200,6 +202,12 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       apache::hive::service::cli::thrift::TRenewDelegationTokenResp& return_val,
       const apache::hive::service::cli::thrift::TRenewDelegationTokenReq& req);
 
+  // Record service rpcs
+  virtual void ExecRequest(recordservice::TExecRequestResult& return_val,
+    const recordservice::TExecRequestParams& req);
+  virtual void GetCount(recordservice::TGetCountResult& return_val,
+      const recordservice::TGetCountParams& req);
+
   // ImpalaService common extensions (implemented in impala-server.cc)
   // ImpalaInternalService rpcs
   void ReportExecStatus(TReportExecStatusResult& return_val,
@@ -285,6 +293,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   class AsciiQueryResultSet;
   class HS2RowOrientedResultSet;
   class HS2ColumnarResultSet;
+  class RecordServiceResultSet;
 
   struct SessionState;
 
@@ -885,6 +894,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Protects connection_to_sessions_map_. May be taken before session_state_map_lock_.
   boost::mutex connection_to_sessions_map_lock_;
 
+  // TODO: temp single session for all record service clients
+  boost::shared_ptr<SessionState> record_service_session_;
+
   // Map from a connection ID to the associated list of sessions so that all can be closed
   // when the connection ends. HS2 allows for multiplexing several sessions across a
   // single connection. If a session has already been closed (only possible via HS2) it is
@@ -1038,7 +1050,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 // which case none of the output parameters can be assumed to be valid.
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
     int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
-    ThriftServer** be_server, ImpalaServer** impala_server);
+    ThriftServer** be_server, ThriftServer** recordservice_server,
+    ImpalaServer** impala_server);
 
 }
 

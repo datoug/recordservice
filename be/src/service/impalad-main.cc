@@ -68,9 +68,11 @@ int main(int argc, char** argv) {
   ThriftServer* beeswax_server = NULL;
   ThriftServer* hs2_server = NULL;
   ThriftServer* be_server = NULL;
+  ThriftServer* recordservice_server = NULL;
   ImpalaServer* server = NULL;
   EXIT_IF_ERROR(CreateImpalaServer(&exec_env, FLAGS_beeswax_port, FLAGS_hs2_port,
-      FLAGS_be_port, &beeswax_server, &hs2_server, &be_server, &server));
+      FLAGS_be_port, &beeswax_server, &hs2_server, &recordservice_server, &be_server,
+      &server));
 
   EXIT_IF_ERROR(be_server->Start());
 
@@ -85,10 +87,14 @@ int main(int argc, char** argv) {
   // this blocks until the beeswax and hs2 servers terminate
   EXIT_IF_ERROR(beeswax_server->Start());
   EXIT_IF_ERROR(hs2_server->Start());
+  EXIT_IF_ERROR(recordservice_server->Start());
+
   ImpaladMetrics::IMPALA_SERVER_READY->set_value(true);
   LOG(INFO) << "Impala has started.";
+
   beeswax_server->Join();
   hs2_server->Join();
+  recordservice_server->Join();
 
   delete be_server;
   delete beeswax_server;

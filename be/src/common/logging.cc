@@ -38,7 +38,7 @@
 DEFINE_string(log_filename, "",
     "Prefix of log filename - "
     "full path is <log_dir>/<log_filename>.[INFO|WARN|ERROR|FATAL]");
-DEFINE_bool(redirect_stdout_stderr, true,
+DEFINE_bool(redirect_stdout_stderr, false,
     "If true, redirects stdout/stderr to INFO/ERROR log.");
 
 DECLARE_string(redaction_rules_file);
