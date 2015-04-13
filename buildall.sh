@@ -283,9 +283,6 @@ if [ $METASTORE_SNAPSHOT_FILE ]; then
   ${IMPALA_HOME}/testdata/bin/load-metastore-snapshot.sh $METASTORE_SNAPSHOT_FILE
 fi
 
-cd ${RECORD_SERVICE_HOME}/java
-mvn clean
-
 # build common and backend
 MAKE_IMPALA_ARGS="${MAKE_IMPALA_ARGS} -build_type=${TARGET_BUILD_TYPE}"
 echo "Calling make_impala.sh ${MAKE_IMPALA_ARGS}"

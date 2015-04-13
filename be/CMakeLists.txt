@@ -219,6 +219,7 @@ endif ()
 
 # Add all external dependencies. They should come after the impala libs.
 set (IMPALA_LINK_LIBS ${IMPALA_LINK_LIBS}
+  RecordServiceThrift
   ${SNAPPY_STATIC_LIB}
   ${LZ4_STATIC_LIB}
   ${RE2_STATIC_LIB}

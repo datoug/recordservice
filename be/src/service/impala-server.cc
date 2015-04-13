@@ -672,10 +672,18 @@ Status ImpalaServer::Execute(TQueryCtx* query_ctx,
   Redact(&stmt);
   query_ctx->request.__set_redacted_stmt((const string) stmt);
 
-  Status status = ExecuteInternal(*query_ctx, session_state, &registered_exec_state,
-      exec_state);
-  if (!status.ok() && registered_exec_state) {
-    UnregisterQuery((*exec_state)->query_id(), false, &status);
+  TExecRequest request;
+  // We are splitting the ExecuteInternal method into PreExec
+  // and ExecuteInternal.. This is so that the RecordService Exec method can
+  // directly call the ExecuteInternal, since it will already have the plan
+  // at that time
+  Status status = PreExecute(&request, *query_ctx, session_state,
+      &registered_exec_state, true, exec_state);
+  if (status.ok()) {
+    status = ExecuteInternal(&request, exec_state);
+    if (!status.ok() && registered_exec_state) {
+      UnregisterQuery((*exec_state)->query_id(), false, &status);
+    }
   }
   return status;
 }

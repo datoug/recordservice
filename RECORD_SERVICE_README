@@ -1,0 +1,7 @@
+This repo contains the implementation of the RecordService daemons, implemented
+as modifications to Impala.
+
+To build this repo:
+  - Build the record service repo
+  - Make sure RECORD_SERVICE_HOME is set to the home of that repo.
+  - Follow the normal Impala build instructions.

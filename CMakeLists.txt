@@ -186,6 +186,16 @@ set_target_properties(avro PROPERTIES IMPORTED_LOCATION "${AVRO_STATIC_LIB}")
 message(STATUS "Avro include dir: " ${AVRO_INCLUDE_DIR})
 message(STATUS "Avro static library: " ${AVRO_STATIC_LIB})
 
+# find RecordService headers and libs
+find_package(RecordService REQUIRED)
+include_directories(${RECORD_SERVICE_INCLUDE_DIR})
+set(LIBS ${LIBS} ${RECORD_SERVICE_STATIC_LIB})
+add_library(RecordServiceThrift STATIC IMPORTED)
+set_target_properties(RecordServiceThrift PROPERTIES IMPORTED_LOCATION "${RECORD_SERVICE_STATIC_LIB}")
+message(STATUS "RecordService include dir: " ${RECORD_SERVICE_INCLUDE_DIR})
+message(STATUS "RecordService static library: " ${RECORD_SERVICE_STATIC_LIB})
+
+
 # Treat gutil just like an Impala native library (i.e., one built with CMake), so no need
 # for find_package()
 add_subdirectory($ENV{IMPALA_HOME}/thirdparty/gutil/)
