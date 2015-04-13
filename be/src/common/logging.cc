@@ -36,6 +36,8 @@
 #include "util/redactor.h"
 #include "util/test-info.h"
 
+#include "common/names.h"
+
 DEFINE_string(log_filename, "",
     "Prefix of log filename - "
     "full path is <log_dir>/<log_filename>.[INFO|WARN|ERROR|FATAL]");
@@ -44,11 +46,9 @@ DEFINE_bool(redirect_stdout_stderr, false,
 
 DECLARE_string(redaction_rules_file);
 
-bool logging_initialized = false;
+using boost::uuids::random_generator;
 
-using namespace boost;
-using namespace std;
-using namespace boost::uuids;
+bool logging_initialized = false;
 
 const impala::Logger NULL_LOGGER("NULL", -1);
 

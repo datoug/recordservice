@@ -22,7 +22,7 @@
 #include "common/version.h"
 #include "util/time.h"
 
-using namespace std;
+#include "common/names.h"
 
 namespace impala {
 
@@ -93,7 +93,7 @@ namespace minidump {
       int idx = (first_idx + i) % IMPALA_QUERY_LOG_NUM_ENTRIES;
       const QueryLogEntry& entry = entries[idx];
       ss << "  Timestamp=" << entry.millis_since_epoch
-         << " Idx=" << abs(entry.idx)
+         << " Idx=" << std::abs(entry.idx)
          << " User='" << string(entry.user, sizeof(entry.user))
          << "' SQL='" << string(entry.sql, sizeof(entry.sql))
          << "' Done=" << (entry.idx < 0 ? "true" : "false")

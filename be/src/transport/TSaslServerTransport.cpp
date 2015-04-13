@@ -31,9 +31,10 @@
 #include "transport/TSaslServerTransport.h"
 
 #include "common/logging.h"
+#include "util/locks.h"
 
-using namespace std;
-using namespace boost;
+#include "common/names.h"
+
 using namespace sasl;
 
 namespace apache { namespace thrift { namespace transport {

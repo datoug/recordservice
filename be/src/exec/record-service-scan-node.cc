@@ -29,10 +29,10 @@
 #include "service/impala-server.h"
 #include "util/codec.h"
 
-using namespace boost;
+#include "common/names.h"
+
 using namespace impala;
 using namespace llvm;
-using namespace std;
 using namespace strings;
 
 DECLARE_int32(recordservice_planner_port);
@@ -374,7 +374,7 @@ Status RecordServiceScanNode::ProcessTask(
       break;
     }
 
-    auto_ptr<RowBatch> row_batch(
+    std::auto_ptr<RowBatch> row_batch(
         new RowBatch(row_desc(), fetch_result.num_records, mem_tracker()));
 
     Tuple* tuple = Tuple::Create(row_batch->MaxTupleBufferSize(),

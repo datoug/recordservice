@@ -17,8 +17,11 @@
 #include "util/lock-tracker.h"
 #include "util/time.h"
 
-using namespace boost;
-using namespace std;
+#include "common/names.h"
+
+namespace posix_time = boost::posix_time;
+using boost::get_system_time;
+using boost::system_time;
 
 namespace impala {
 

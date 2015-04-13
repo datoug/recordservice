@@ -15,9 +15,7 @@
 #include <string>
 #include <gtest/gtest.h>
 #include "common/query-logging.h"
-
-using namespace boost;
-using namespace std;
+#include "common/names.h"
 
 namespace impala {
 

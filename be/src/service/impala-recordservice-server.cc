@@ -44,8 +44,8 @@
 #include "util/recordservice-metrics.h"
 #include "service/hs2-util.h"
 
-using namespace std;
-using namespace boost;
+#include "common/names.h"
+
 using namespace strings;
 using namespace beeswax; // Converting QueryState
 using namespace apache::thrift;

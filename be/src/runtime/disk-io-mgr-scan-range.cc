@@ -20,9 +20,9 @@
 #include "util/hdfs-util.h"
 #include "util/lock-tracker.h"
 
-using namespace boost;
+#include "common/names.h"
+
 using namespace impala;
-using namespace std;
 
 // The read size is the size of the reads sent to hdfs/os.
 // There is a trade off between latency and throughout, trying to keep disks busy but

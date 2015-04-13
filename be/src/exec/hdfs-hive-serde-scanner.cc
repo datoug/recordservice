@@ -30,8 +30,9 @@
 
 #include "gen-cpp/ExternalDataSource_types.h"
 
+#include "common/names.h"
+
 using namespace impala;
-using namespace std;
 
 const char* HdfsHiveSerdeScanner::EXECUTOR_CLASS =
     "com/cloudera/impala/hive/serde/HiveSerDeExecutor";

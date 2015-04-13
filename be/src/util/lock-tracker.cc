@@ -20,9 +20,9 @@
 #include "util/pretty-printer.h"
 #include "util/runtime-profile.h"
 
-using namespace boost;
+#include "common/names.h"
+
 using namespace impala;
-using namespace std;
 using namespace strings;
 
 LockTracker* LockTracker::global_;

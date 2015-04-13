@@ -33,8 +33,10 @@ extern void DumpStackTraceToString(std::string* s);
 }
 }
 
-using namespace std;
-using namespace boost;
+#include "common/names.h"
+
+using boost::char_separator;
+using boost::tokenizer;
 using namespace beeswax;
 using namespace parquet;
 

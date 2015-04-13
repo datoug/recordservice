@@ -19,8 +19,9 @@
 #include "exec/parquet-common.h"
 #include "exec/read-write-util.h"
 
+#include "common/names.h"
+
 using namespace strings;
-using namespace std;
 using namespace impala;
 using namespace impala::extdatasource;
 

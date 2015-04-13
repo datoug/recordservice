@@ -30,8 +30,7 @@
 #include "transport/TSaslTransport.h"
 
 #include "common/logging.h"
-
-using namespace std;
+#include "common/names.h"
 
 // Default size, in bytes, for the memory buffer used to stage reads.
 const int32_t DEFAULT_MEM_BUF_SIZE = 32 * 1024;

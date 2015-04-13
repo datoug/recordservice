@@ -19,9 +19,12 @@
 #include "udf/uda-test-harness.h"
 #include "testutil/test-udas.h"
 
+#include "common/names.h"
+
+using std::min;
 using namespace impala;
 using namespace impala_udf;
-using namespace std;
+
 
 //-------------------------------- Count ------------------------------------
 // Example of implementing Count(int_col).
@@ -246,7 +249,7 @@ TEST(CountMultiArgTest, Basic) {
 bool FuzzyCompare(const BigIntVal& r1, const BigIntVal& r2) {
   if (r1.is_null && r2.is_null) return true;
   if (r1.is_null || r2.is_null) return false;
-  return abs(r1.val - r2.val) <= 1;
+  return std::abs(r1.val - r2.val) <= 1;
 }
 
 TEST(CountTest, FuzzyEquals) {

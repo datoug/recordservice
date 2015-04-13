@@ -42,10 +42,9 @@
 #include "util/impalad-metrics.h"
 #include "util/thread.h"
 
-using namespace boost;
+#include "common/names.h"
+
 using namespace impala;
-using namespace std;
-using namespace strings;
 
 DECLARE_string(classpath);
 DECLARE_bool(use_statestore);

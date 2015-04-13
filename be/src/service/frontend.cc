@@ -23,7 +23,8 @@
 #include "util/jni-util.h"
 #include "util/logging-support.h"
 
-using namespace std;
+#include "common/names.h"
+
 using namespace impala;
 
 DECLARE_string(principal);

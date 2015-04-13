@@ -32,8 +32,8 @@
 #include "runtime/hdfs-fs-cache.h"
 #include "write-stream.inline.h"
 
-using namespace std;
-using namespace boost;
+#include "common/names.h"
+
 using namespace strings;
 using namespace impala;
 

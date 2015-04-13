@@ -22,9 +22,9 @@
 #include "common/logging.h"
 #include "util/cpu-info.h"
 
-using namespace boost;
+#include "common/names.h"
+
 using namespace impala;
-using namespace std;
 
 // Controls the number of threads to run work per core.  It's common to pick 2x
 // or 3x the number of cores.  This keeps the cores busy without causing excessive
@@ -106,4 +106,3 @@ void ThreadResourceMgr::UpdatePoolQuotas(ResourcePool* new_pool) {
     }
   }
 }
-
