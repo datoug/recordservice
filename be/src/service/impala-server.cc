@@ -178,6 +178,9 @@ const uint32_t MAX_CANCELLATION_QUEUE_SIZE = 65536;
 const string BEESWAX_SERVER_NAME = "beeswax-frontend";
 const string HS2_SERVER_NAME = "hiveserver2-frontend";
 
+const string RECORD_SERVICE_PLANNER_SERVER_NAME = "record-service-planner";
+const string RECORD_SERVICE_WORKER_SERVER_NAME = "record-service-worker";
+
 const char* ImpalaServer::SQLSTATE_SYNTAX_ERROR_OR_ACCESS_VIOLATION = "42000";
 const char* ImpalaServer::SQLSTATE_GENERAL_ERROR = "HY000";
 const char* ImpalaServer::SQLSTATE_OPTIONAL_FEATURE_NOT_IMPLEMENTED = "HYC00";
@@ -961,10 +964,21 @@ Status ImpalaServer::CloseSessionInternal(const TUniqueId& session_id,
     session_state_map_.erase(session_id);
   }
   DCHECK(session_state != NULL);
-  if (session_state->session_type == TSessionType::BEESWAX) {
-    ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_BEESWAX_SESSIONS->Increment(-1L);
-  } else {
-    ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_HS2_SESSIONS->Increment(-1L);
+  switch (session_state->session_type) {
+    case TSessionType::BEESWAX:
+      ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_BEESWAX_SESSIONS->Increment(-1L);
+      break;
+    case TSessionType::HIVESERVER2:
+      ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_HS2_SESSIONS->Increment(-1L);
+      break;
+    case TSessionType::RECORDSERVICE_PLANNER:
+      RecordServiceMetrics::NUM_OPEN_PLANNER_SESSIONS->Increment(-1L);
+      break;
+    case TSessionType::RECORDSERVICE_WORKER:
+      RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->Increment(-1L);
+      break;
+    default:
+      DCHECK(false);
   }
   unordered_set<TUniqueId> inflight_queries;
   {
@@ -1480,7 +1494,12 @@ bool ImpalaServer::QueryStateRecord::operator() (
 
 void ImpalaServer::ConnectionStart(
     const ThriftServer::ConnectionContext& connection_context) {
-  if (connection_context.server_name == BEESWAX_SERVER_NAME) {
+  bool is_beeswax = connection_context.server_name == BEESWAX_SERVER_NAME;
+  bool is_record_service_planner =
+      connection_context.server_name == RECORD_SERVICE_PLANNER_SERVER_NAME;
+  bool is_record_service_worker =
+      connection_context.server_name == RECORD_SERVICE_WORKER_SERVER_NAME;
+  if (is_beeswax || is_record_service_planner || is_record_service_worker) {
     // Beeswax only allows for one session per connection, so we can share the session ID
     // with the connection ID
     const TUniqueId& session_id = connection_context.connection_id;
@@ -1490,7 +1509,13 @@ void ImpalaServer::ConnectionStart(
     session_state->start_time = TimestampValue::LocalTime();
     session_state->last_accessed_ms = UnixMillis();
     session_state->database = "default";
-    session_state->session_type = TSessionType::BEESWAX;
+    if (is_beeswax) {
+      session_state->session_type = TSessionType::BEESWAX;
+    } else if (is_record_service_planner) {
+      session_state->session_type = TSessionType::RECORDSERVICE_PLANNER;
+    } else if (is_record_service_worker) {
+      session_state->session_type = TSessionType::RECORDSERVICE_WORKER;
+    }
     session_state->network_address = connection_context.network_address;
     session_state->default_query_options = default_query_options_;
     // If the username was set by a lower-level transport, use it.
@@ -1509,7 +1534,13 @@ void ImpalaServer::ConnectionStart(
       lock_guard<mutex> l(connection_to_sessions_map_lock_);
       connection_to_sessions_map_[connection_context.connection_id].push_back(session_id);
     }
-    ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_BEESWAX_SESSIONS->Increment(1L);
+    if (is_beeswax) {
+      ImpaladMetrics::IMPALA_SERVER_NUM_OPEN_BEESWAX_SESSIONS->Increment(1L);
+    } else if (is_record_service_planner) {
+      RecordServiceMetrics::NUM_OPEN_PLANNER_SESSIONS->Increment(1L);
+    } else if (is_record_service_worker) {
+      RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->Increment(1L);
+    }
   }
 }
 
@@ -1761,13 +1792,13 @@ Status StartRecordServiceServices(ExecEnv* exec_env,
 
   if (recordservice_planner != NULL) {
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
-          exec_env, server, planner_port, "record-service-planner",
+          exec_env, server, planner_port, RECORD_SERVICE_PLANNER_SERVER_NAME,
           recordservice_planner));
   }
 
   if (recordservice_worker != NULL) {
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
-          exec_env, server, worker_port, "record-service-worker",
+          exec_env, server, worker_port, RECORD_SERVICE_WORKER_SERVER_NAME,
           recordservice_worker));
   }
 

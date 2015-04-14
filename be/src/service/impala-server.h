@@ -322,6 +322,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   class RecordServiceParquetResultSet;
 
   struct SessionState;
+  class ScopedSessionState;
 
   // Execution state of a query.
   class QueryExecState;
@@ -773,8 +774,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   TExecRequest PlanRecordServiceRequest(
       const recordservice::TPlanRequestParams& params);
 
-  // Creates/returns singleton record service session.
-  boost::shared_ptr<SessionState> GetRecordServiceSession();
+  // Populates session with the session for this client using the client's connection
+  // id. Throws an exception if the session does not exist.
+  void GetRecordServiceSession(ScopedSessionState* session);
 
   // Guards query_log_ and query_log_index_
   boost::mutex query_log_lock_;
@@ -913,6 +915,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       return Status::OK;
     }
 
+    // TODO: the excessive use of pass by value of shared_ptr<SessionState> is bad.
+    boost::shared_ptr<SessionState> get() { return session_; }
+
     // Decrements the reference count so the session can be expired correctly.
     ~ScopedSessionState() {
       if (session_.get() != NULL) {
@@ -943,9 +948,6 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // Protects connection_to_sessions_map_. May be taken before session_state_map_lock_.
   boost::mutex connection_to_sessions_map_lock_;
-
-  // TODO: temp single session for all record service clients
-  boost::shared_ptr<SessionState> record_service_session_;
 
   // Lock to prevent multiple concurrent requests using the same tmp table. A hack
   // for now (otherwise, we'd have to generate unique table names and maintain them).

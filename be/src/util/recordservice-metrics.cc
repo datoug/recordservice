@@ -24,8 +24,20 @@ namespace impala {
   const char* RecordServiceMetricKeys::NAME = STRING;\
   IntCounter* RecordServiceMetrics::NAME;
 
+#define DEFINE_INT_GAUGE(NAME, STRING)\
+  const char* RecordServiceMetricKeys::NAME = STRING;\
+  IntGauge* RecordServiceMetrics::NAME;
+
 #define ADD_INT_COUNTER(m, NAME, desc)\
   NAME = m->AddCounter(RecordServiceMetricKeys::NAME, 0L, TUnit::UNIT, desc);
+
+#define ADD_INT_GAUGE(m, NAME, desc)\
+  NAME = m->AddGauge<int64_t>(RecordServiceMetricKeys::NAME, 0L, TUnit::UNIT, desc);
+
+DEFINE_INT_GAUGE(NUM_OPEN_PLANNER_SESSIONS,
+    "record-service.num-open-planner-sessions");
+DEFINE_INT_GAUGE(NUM_OPEN_WORKER_SESSIONS,
+    "record-service.num-open-worker-sessions");
 
 DEFINE_INT_COUNTER(NUM_PLAN_REQUESTS,
     "record-service.num-plan-requests");
@@ -54,6 +66,11 @@ DEFINE_INT_COUNTER(NUM_ROWS_FETCHED,
     "record-service.num-rows-fetched");
 
 void RecordServiceMetrics::CreateMetrics(MetricGroup* m) {
+  ADD_INT_GAUGE(m, NUM_OPEN_PLANNER_SESSIONS,
+      "Number of connected planner clients.");
+  ADD_INT_GAUGE(m, NUM_OPEN_WORKER_SESSIONS,
+      "Number of connected worker clients.");
+
   ADD_INT_COUNTER(m, NUM_PLAN_REQUESTS,
       "Number of Plan requests received by the service.");
   ADD_INT_COUNTER(m, NUM_FAILED_PLAN_REQUESTS,

@@ -23,6 +23,10 @@ namespace impala {
 // Contains the keys (strings) for record service metrics.
 class RecordServiceMetricKeys {
  public:
+  // Number of open Planner/Worker sessions
+  static const char* NUM_OPEN_PLANNER_SESSIONS;
+  static const char* NUM_OPEN_WORKER_SESSIONS;
+
   // Number of/number of failed plan requests received by this server.
   static const char* NUM_PLAN_REQUESTS;
   static const char* NUM_FAILED_PLAN_REQUESTS;
@@ -53,6 +57,10 @@ class RecordServiceMetricKeys {
 // Global recordservice-wide metrics.
 class RecordServiceMetrics {
  public:
+  // Gauges
+  static IntGauge* NUM_OPEN_PLANNER_SESSIONS;
+  static IntGauge* NUM_OPEN_WORKER_SESSIONS;
+
   // Counters
   static IntCounter* NUM_PLAN_REQUESTS;
   static IntCounter* NUM_FAILED_PLAN_REQUESTS;

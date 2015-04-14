@@ -331,21 +331,18 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
   bool all_slot_refs_;
 
   // Cache of the slot desc. Only set if all_slot_refs_ is true. We'll use this
-  // intead of the exprs (for performance).
+  // instead of the exprs (for performance).
   vector<SlotDesc> slot_descs_;
 };
 
-shared_ptr<ImpalaServer::SessionState> ImpalaServer::GetRecordServiceSession() {
-  unique_lock<mutex> l(connection_to_sessions_map_lock_);
-  if (record_service_session_.get() == NULL) {
-    record_service_session_.reset(new SessionState());
-    record_service_session_->session_type = TSessionType::RECORDSERVICE;
-    record_service_session_->start_time = TimestampValue::LocalTime();
-    record_service_session_->last_accessed_ms = UnixMillis();
-    record_service_session_->database = "default";
-    record_service_session_->ref_count = 1;
+void ImpalaServer::GetRecordServiceSession(ScopedSessionState* session) {
+  Status status = session->WithSession(ThriftServer::GetThreadConnectionId());
+  if (!status.ok()) {
+    // It's not clear how this is possible. The session is tied to a connection
+    // so even if this server restarted, this case should not be possible.
+    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        "Session does not exist.");
   }
-  return record_service_session_;
 }
 
 recordservice::TType ToRecordServiceType(const ColumnType& t) {
@@ -640,7 +637,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           " Retry your request later.");
     }
 
-    GetRecordServiceSession();
+    ScopedSessionState session_handle(this);
+    GetRecordServiceSession(&session_handle);
 
     shared_ptr<RecordServiceTaskState> task_state(new RecordServiceTaskState());
 
@@ -680,7 +678,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     shared_ptr<QueryExecState> exec_state;
     status = ExecuteRecordServiceRequest(
             &exec_req.query_exec_request.query_ctx,
-            &exec_req, record_service_session_, &exec_state);
+            &exec_req, session_handle.get(), &exec_state);
     if (!status.ok()) {
       ThrowException(recordservice::TErrorCode::INVALID_TASK,
           "Could not execute task.",
@@ -720,7 +718,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
 
     exec_state->UpdateQueryState(QueryState::RUNNING);
     exec_state->WaitAsync();
-    status = SetQueryInflight(record_service_session_, exec_state);
+    status = SetQueryInflight(session_handle.get(), exec_state);
     if (!status.ok()) {
       UnregisterQuery(exec_state->query_id(), false, &status);
     }
@@ -896,7 +894,9 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
         "Path must be a directory: " + path);
   }
 
-  GetRecordServiceSession();
+  ScopedSessionState session_handle(this);
+  GetRecordServiceSession(&session_handle);
+
   stringstream tbl_name;
   tbl_name << TEMP_DB << "." << TEMP_TBL;
   *table_name = tbl_name.str();
@@ -916,10 +916,10 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
     query_ctx.request.stmt = commands[i];
 
     shared_ptr<QueryExecState> exec_state;
-    RETURN_IF_ERROR(Execute(&query_ctx, record_service_session_, &exec_state));
+    RETURN_IF_ERROR(Execute(&query_ctx, session_handle.get(), &exec_state));
     exec_state->UpdateQueryState(QueryState::RUNNING);
 
-    Status status = SetQueryInflight(record_service_session_, exec_state);
+    Status status = SetQueryInflight(session_handle.get(), exec_state);
     if (!status.ok()) {
       UnregisterQuery(exec_state->query_id(), false, &status);
       return status;
