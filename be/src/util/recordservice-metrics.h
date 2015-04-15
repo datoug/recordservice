@@ -20,7 +20,7 @@
 
 namespace impala {
 
-// Contains the keys (strings) for record service metrics.
+// Contains the keys (strings) for RecordService metrics.
 class RecordServiceMetricKeys {
  public:
   // Number of open Planner/Worker sessions

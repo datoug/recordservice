@@ -128,7 +128,7 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
         per_type_files_[THdfsFileFormat::PARQUET]));
     if (progress_.done()) SetDone();
 
-    // For the record service, we always start up a single scanner thread. This bypasses
+    // For the RecordService, we always start up a single scanner thread. This bypasses
     // the more complex thread token mgr.
     if (state->is_record_service_request()) {
       COUNTER_ADD(&active_scanner_thread_counter_, 1);

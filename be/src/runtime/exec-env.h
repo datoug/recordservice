@@ -110,7 +110,7 @@ class ExecEnv {
   // differently.
   bool is_fe_tests() { return is_fe_tests_; }
 
-  // Returns true if this daemon is running as the record service.
+  // Returns true if this daemon is running as the RecordService.
   bool is_record_service() const { return is_record_service_; }
   bool running_record_service() const { return running_record_service_; }
 
@@ -123,7 +123,7 @@ class ExecEnv {
   // True if this daemon is recordserviced
   const bool is_record_service_;
 
-  // True if this is impalad but running the record service services.
+  // True if this is impalad but running the RecordService services.
   // TODO: remove when recordserviced is ready.
   const bool running_record_service_;
 

@@ -89,6 +89,16 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   ImpalaServer(ExecEnv* exec_env);
   ~ImpalaServer();
 
+  // Starts the planner and worker RecordService thrift services.
+  static Status StartRecordServiceServices(ExecEnv* exec_env,
+      const boost::shared_ptr<ImpalaServer>& server, int planner_port, int worker_port,
+      ThriftServer** recordservice_planner_server,
+      ThriftServer** recordservice_worker_server);
+
+  // Throws a recordservice::TRecordServiceException.
+  static void ThrowRecordServiceException(const recordservice::TErrorCode::type& code,
+    const string& msg, const string& detail = "");
+
   // ImpalaService rpcs: Beeswax API (implemented in impala-beeswax-server.cc)
   virtual void query(beeswax::QueryHandle& query_handle, const beeswax::Query& query);
   virtual void executeAndWait(beeswax::QueryHandle& query_handle,
@@ -204,14 +214,14 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       apache::hive::service::cli::thrift::TRenewDelegationTokenResp& return_val,
       const apache::hive::service::cli::thrift::TRenewDelegationTokenReq& req);
 
-  // Record service planner rpcs.
+  // RecordService planner rpcs.
   virtual void PlanRequest(recordservice::TPlanRequestResult& return_val,
       const recordservice::TPlanRequestParams& req);
   virtual void GetSchema(recordservice::TGetSchemaResult& return_val,
       const recordservice::TPlanRequestParams& req);
   virtual recordservice::TProtocolVersion::type GetProtocolVersion();
 
-  // Record service worker rpcs.
+  // RecordService worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,
       const recordservice::TExecTaskParams& req);
   virtual void Fetch(recordservice::TFetchResult& return_val,
@@ -769,7 +779,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   Status CreateTmpTable(const recordservice::TPathRequest& path,
       std::string* table_name);
 
-  // Plans the record service request. Errors are handled by throwing a
+  // Plans the RecordService request. Errors are handled by throwing a
   // TRecordServiceException
   TExecRequest PlanRecordServiceRequest(
       const recordservice::TPlanRequestParams& params);
@@ -1092,6 +1102,11 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // True if Impala server is offline, false otherwise.
   bool is_offline_;
+
+  // The RecordService thrift services. Only set if these services are started.
+  // Never owns lifetime.
+  ThriftServer* recordservice_planner_server_;
+  ThriftServer* recordservice_worker_server_;
 };
 
 // Create an ImpalaServer and Thrift servers.
@@ -1110,12 +1125,6 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
     int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
     ThriftServer** be_server,
     boost::shared_ptr<ImpalaServer>* impala_server);
-
-// Starts the planner and worker record service services.
-Status StartRecordServiceServices(ExecEnv* exec_env,
-    const boost::shared_ptr<ImpalaServer>& server, int planner_port, int worker_port,
-    ThriftServer** recordservice_planner_server,
-    ThriftServer** recordservice_worker_server);
 
 }
 

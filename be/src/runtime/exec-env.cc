@@ -69,7 +69,7 @@ DEFINE_int32(num_hdfs_worker_threads, 16,
     "(Advanced) The number of threads in the global HDFS operation pool");
 
 DEFINE_int32(record_service_mem_limit_mb, 2048,
-    "The memory limit for record service requests. -1 for unlimited.");
+    "The memory limit for RecordService requests. -1 for unlimited.");
 
 DECLARE_int32(state_store_port);
 DECLARE_int32(num_threads_per_core);
@@ -156,7 +156,7 @@ ExecEnv::ExecEnv(bool is_record_service, bool running_record_service)
   // Initialize the scheduler either dynamically (with a statestore) or statically (with
   // a standalone single backend)
   if (FLAGS_use_statestore) {
-    // FIXME: more record service statestore changes.
+    // FIXME: more RecordService statestore changes.
     TNetworkAddress subscriber_address =
         MakeNetworkAddress(FLAGS_hostname, is_record_service ?
             FLAGS_recordservice_state_store_subscriber_port :

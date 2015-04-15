@@ -151,7 +151,7 @@ Status RecordServiceScanNode::Open(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   RETURN_IF_ERROR(ExecNode::Open(state));
 
-  // Connect to the local record service worker
+  // Connect to the local RecordService worker
   rsw_client_.reset(
       new ThriftClient<recordservice::RecordServiceWorkerClient>("localhost",
           FLAGS_recordservice_worker_port));
@@ -239,7 +239,7 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
   vector<ExprContext*> per_thread_conjunct_ctxs;
   Status status = Expr::Clone(conjunct_ctxs_, state_, &per_thread_conjunct_ctxs);
 
-  // Connect to the local record service worker. Thrift clients are not thread safe.
+  // Connect to the local RecordService worker. Thrift clients are not thread safe.
   // TODO: pool these.
   ThriftClient<recordservice::RecordServiceWorkerClient> client("localhost",
       FLAGS_recordservice_worker_port);
@@ -311,7 +311,7 @@ Status RecordServiceScanNode::ProcessTask(
     try {
       client->iface()->Fetch(fetch_result, fetch_params);
       if (!fetch_result.__isset.columnar_row_batch) {
-        return Status("Expecting record service to return columnar row batches.");
+        return Status("Expecting RecordService to return columnar row batches.");
       }
     } catch (const recordservice::TRecordServiceException& e) {
       return Status(e.message.c_str());
@@ -325,9 +325,9 @@ Status RecordServiceScanNode::ProcessTask(
     // TODO: validate schema.
     if (input_batch.cols.size() != materialized_slots_.size()) {
       stringstream ss;
-      ss << "Invalid row batch from record service. Expecting "
+      ss << "Invalid row batch from RecordService. Expecting "
         << materialized_slots_.size()
-        << " cols. Record service returned " << input_batch.cols.size() << " cols.";
+        << " cols. RecordService returned " << input_batch.cols.size() << " cols.";
       return Status(ss.str());
     }
 

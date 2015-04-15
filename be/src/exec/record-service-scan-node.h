@@ -47,9 +47,9 @@ class Status;
 class Tuple;
 class TPlanNode;
 
-// A scan node that talks to the record service (over rpc) to return rows.
+// A scan node that talks to the RecordService (over rpc) to return rows.
 //
-// This cannot be used by the record service itself (infinite loop).
+// This cannot be used by the RecordService itself (infinite loop).
 class RecordServiceScanNode : public ScanNode {
  public:
   RecordServiceScanNode(ObjectPool* pool, const TPlanNode& tnode,

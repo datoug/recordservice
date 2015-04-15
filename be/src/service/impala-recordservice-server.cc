@@ -60,8 +60,9 @@ static const char* TEMP_TBL = "tmp_tbl";
 
 namespace impala {
 
-inline void ThrowException(const recordservice::TErrorCode::type& code,
-    const string& msg, const string& detail = "") {
+void ImpalaServer::ThrowRecordServiceException(
+    const recordservice::TErrorCode::type& code,
+    const string& msg, const string& detail) {
   recordservice::TRecordServiceException ex;
   ex.code = code;
   ex.message = msg;
@@ -87,7 +88,7 @@ inline void ThrowFetchException(const Status& status) {
 }
 
 // Base class for test result set serializations. The functions in here and
-// not used in the record service path.
+// not used in the RecordService path.
 //
 // Used to abstract away serializing results. The calling pattern is:
 //
@@ -149,7 +150,7 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
   vector<int> type_sizes_;
 };
 
-// Additional state for the record service. Put here instead of QueryExecState
+// Additional state for the RecordService. Put here instead of QueryExecState
 // to separate from Impala code.
 class ImpalaServer::RecordServiceTaskState {
  public:
@@ -204,7 +205,7 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
 
     if (all_slot_refs_) {
       // In this case, all the output exprs are slot refs and we want to serialize them
-      // to the record service format. To do this we:
+      // to the RecordService format. To do this we:
       // 1. Reserve the outgoing buffer to the max size (for fixed length types).
       // 2. Append the current value to the outgoing buffer.
       // 3. Resize the outgoing buffer when we are done with the row batch (which
@@ -338,10 +339,10 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
 void ImpalaServer::GetRecordServiceSession(ScopedSessionState* session) {
   Status status = session->WithSession(ThriftServer::GetThreadConnectionId());
   if (!status.ok()) {
-    // It's not clear how this is possible. The session is tied to a connection
-    // so even if this server restarted, this case should not be possible.
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-        "Session does not exist.");
+    // The session is tied to the thrift connection so the only way this can
+    // happen is if the server timed out the session.
+    ThrowRecordServiceException(recordservice::TErrorCode::CONNECTION_TIMED_OUT,
+        "Connection has timed out. Reconnect to the server.");
   }
 }
 
@@ -389,10 +390,10 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
       result.__set_scale(t.scale);
       break;
     default:
-      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
-          "Not supported type.");
+      ImpalaServer::ThrowRecordServiceException(
+          recordservice::TErrorCode::INVALID_REQUEST, "Not supported type.");
   }
-    return result;
+  return result;
 }
 
 static void PopulateResultSchema(const TResultSetMetadata& metadata,
@@ -413,7 +414,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
     const recordservice::TPlanRequestParams& req) {
   RecordServiceMetrics::NUM_PLAN_REQUESTS->Increment(1);
   if (IsOffline()) {
-    ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
+    ThrowRecordServiceException(recordservice::TErrorCode::SERVICE_BUSY,
         "This RecordServicePlanner is not ready to accept requests."
         " Retry your request later.");
   }
@@ -445,7 +446,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
       string tmp_table;
       Status status = CreateTmpTable(req.path, &tmp_table);
       if (!status.ok()) {
-        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
             "Could not create temporary table.",
             status.msg().GetFullMessageDetails());
       }
@@ -453,7 +454,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
         string query = req.path.query;
         size_t p = req.path.query.find("__PATH__");
         if (p == string::npos) {
-          ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+          ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
               "Query request must contain __PATH__: " + query);
         }
         query.replace(p, 8, tmp_table);
@@ -464,7 +465,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
       break;
     }
     default:
-      ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
           "Unsupported request types. Supported request types are: SQL");
   }
 
@@ -475,12 +476,12 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
   Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
   if (tmp_tbl_lock.owns_lock()) tmp_tbl_lock.unlock();
   if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
         "Could not plan request.",
         status.msg().GetFullMessageDetails());
   }
   if (result.stmt_type != TStmtType::QUERY) {
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
         "Cannot run non-SELECT statements");
   }
   return result;
@@ -632,7 +633,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   RecordServiceMetrics::NUM_TASK_REQUESTS->Increment(1);
   try {
     if (IsOffline()) {
-      ThrowException(recordservice::TErrorCode::SERVICE_BUSY,
+      ThrowRecordServiceException(recordservice::TErrorCode::SERVICE_BUSY,
           "This RecordServicePlanner is not ready to accept requests."
           " Retry your request later.");
     }
@@ -647,7 +648,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     string decompressed_task;
     Status status = decompressor->Decompress(req.task, true, &decompressed_task);
     if (!status.ok()) {
-      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
@@ -658,7 +659,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
         reinterpret_cast<const uint8_t*>(decompressed_task.data()),
         &size, true, &exec_req);
     if (!status.ok()) {
-      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
@@ -680,7 +681,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
             &exec_req.query_exec_request.query_ctx,
             &exec_req, session_handle.get(), &exec_state);
     if (!status.ok()) {
-      ThrowException(recordservice::TErrorCode::INVALID_TASK,
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Could not execute task.",
           status.msg().GetFullMessageDetails());
     }
@@ -711,7 +712,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
             all_slot_refs, output_exprs));
         break;
       default:
-        ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+        ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
             "Service does not support this row batch format.");
     }
     task_state->results->Init(*exec_state->result_metadata(), task_state->fetch_size);
@@ -749,7 +750,8 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
 
     shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
     if (exec_state.get() == NULL) {
-      ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_HANDLE,
+          "Invalid handle");
     }
 
     RecordServiceTaskState* task_state = exec_state->record_service_task_state();
@@ -837,7 +839,8 @@ void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
     // TODO: should this grab the lock in GetQueryExecState()?
     shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, false);
     if (exec_state.get() == NULL) {
-      ThrowException(recordservice::TErrorCode::INVALID_HANDLE, "Invalid handle");
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_HANDLE,
+          "Invalid handle");
     }
 
     lock_guard<mutex> l(*exec_state->lock());
@@ -871,7 +874,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
   Status status = HdfsFsCache::instance()->GetDefaultConnection(&fs);
   if (!status.ok()) {
     // TODO: more error detail
-    ThrowException(recordservice::TErrorCode::INTERNAL_ERROR,
+    ThrowRecordServiceException(recordservice::TErrorCode::INTERNAL_ERROR,
         "Could not connect to HDFS");
   }
 
@@ -884,13 +887,13 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
   bool is_directory = false;
   status = IsDirectory(fs, path.c_str(), &is_directory);
   if (!status.ok()) {
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
         "No such file or directory: " + path);
   }
 
   if (!is_directory) {
     // TODO: Impala should support LOCATIONs that are not directories.
-    ThrowException(recordservice::TErrorCode::INVALID_REQUEST,
+    ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
         "Path must be a directory: " + path);
   }
 

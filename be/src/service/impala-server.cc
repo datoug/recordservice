@@ -95,6 +95,8 @@ DEFINE_int32(hs2_port, 21050, "port on which HiveServer2 client requests are ser
 
 DEFINE_int32(fe_service_threads, 64,
     "number of threads available to serve client requests");
+DEFINE_int32(record_service_threads, 64,
+    "number of threads available to serve record service client requests");
 DEFINE_int32(be_service_threads, 64,
     "(Advanced) number of threads available to serve backend execution requests");
 DEFINE_string(default_query_options, "", "key=value pair of default query options for"
@@ -156,8 +158,8 @@ DEFINE_string(local_nodemanager_url, "", "The URL of the local Yarn Node Manager
 DECLARE_bool(enable_rm);
 DECLARE_bool(compact_catalog_topic);
 
-DEFINE_int32(recordservice_planner_port, 40000, "Port to run record service planner");
-DEFINE_int32(recordservice_worker_port, 40100, "Port to run record service worker");
+DEFINE_int32(recordservice_planner_port, 40000, "Port to run RecordService planner");
+DEFINE_int32(recordservice_worker_port, 40100, "Port to run RecordService worker");
 
 namespace impala {
 
@@ -224,7 +226,9 @@ class CancellationWork {
 };
 
 ImpalaServer::ImpalaServer(ExecEnv* exec_env)
-    : exec_env_(exec_env) {
+    : exec_env_(exec_env),
+      recordservice_planner_server_(NULL),
+      recordservice_worker_server_(NULL) {
   // Initialize default config
   InitializeConfigVariables();
 
@@ -1492,6 +1496,20 @@ bool ImpalaServer::QueryStateRecord::operator() (
   return lhs.start_time < rhs.start_time;
 }
 
+// Checks if num_connections + 1 == max. If so, we are going to saturate the handler
+// threads if we accept this connections. Instead, reject this one, and therefore all
+// subsequent ones until an existing connection closes. This prevents DOS.
+// FIXME: Something is messed up where this exception gets converted to just
+// a TTransportException.
+void CheckConnectionLimit(int64_t num_connections, int64_t max, const string& service) {
+  if (num_connections + 1 == max) {
+    LOG(WARNING) << "Rejecting client connection for " << service
+                 << " due to exhausted handler threads.";
+    ImpalaServer::ThrowRecordServiceException(recordservice::TErrorCode::SERVICE_BUSY,
+        "The server is busy processing existing requests. Try again later.");
+  }
+}
+
 void ImpalaServer::ConnectionStart(
     const ThriftServer::ConnectionContext& connection_context) {
   bool is_beeswax = connection_context.server_name == BEESWAX_SERVER_NAME;
@@ -1500,8 +1518,8 @@ void ImpalaServer::ConnectionStart(
   bool is_record_service_worker =
       connection_context.server_name == RECORD_SERVICE_WORKER_SERVER_NAME;
   if (is_beeswax || is_record_service_planner || is_record_service_worker) {
-    // Beeswax only allows for one session per connection, so we can share the session ID
-    // with the connection ID
+    // Beeswax/RecordService only allows for one session per connection, so we
+    // can share the session ID with the connection ID
     const TUniqueId& session_id = connection_context.connection_id;
     shared_ptr<SessionState> session_state;
     session_state.reset(new SessionState);
@@ -1512,8 +1530,16 @@ void ImpalaServer::ConnectionStart(
     if (is_beeswax) {
       session_state->session_type = TSessionType::BEESWAX;
     } else if (is_record_service_planner) {
+      DCHECK_NOTNULL(recordservice_planner_server_);
+      CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_PLANNER_SESSIONS->value(),
+          recordservice_planner_server_->num_worker_threads(),
+          RECORD_SERVICE_PLANNER_SERVER_NAME);
       session_state->session_type = TSessionType::RECORDSERVICE_PLANNER;
     } else if (is_record_service_worker) {
+      DCHECK_NOTNULL(recordservice_worker_server_);
+      CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->value(),
+          recordservice_worker_server_->num_worker_threads(),
+          RECORD_SERVICE_WORKER_SERVER_NAME);
       session_state->session_type = TSessionType::RECORDSERVICE_WORKER;
     }
     session_state->network_address = connection_context.network_address;
@@ -1700,7 +1726,7 @@ Status CreateServer(ExecEnv* exec_env, const shared_ptr<ImpalaServer>& handler,
 
   *server = new ThriftServer(service_name, processor, port,
       AuthManager::GetInstance()->GetExternalAuthProvider(), exec_env->metrics(),
-      FLAGS_fe_service_threads, ThriftServer::ThreadPool);
+      FLAGS_record_service_threads + 1, ThriftServer::ThreadPool);
 
   (*server)->SetConnectionHandler(handler.get());
   if (!FLAGS_ssl_server_certificate.empty()) {
@@ -1783,7 +1809,7 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
   return Status::OK;
 }
 
-Status StartRecordServiceServices(ExecEnv* exec_env,
+Status ImpalaServer::StartRecordServiceServices(ExecEnv* exec_env,
     const shared_ptr<ImpalaServer>& server,
     int planner_port, int worker_port,
     ThriftServer** recordservice_planner, ThriftServer** recordservice_worker) {
@@ -1794,12 +1820,14 @@ Status StartRecordServiceServices(ExecEnv* exec_env,
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
           exec_env, server, planner_port, RECORD_SERVICE_PLANNER_SERVER_NAME,
           recordservice_planner));
+    server->recordservice_planner_server_ = *recordservice_planner;
   }
 
   if (recordservice_worker != NULL) {
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
           exec_env, server, worker_port, RECORD_SERVICE_WORKER_SERVER_NAME,
           recordservice_worker));
+    server->recordservice_worker_server_ = *recordservice_worker;
   }
 
   return Status::OK;

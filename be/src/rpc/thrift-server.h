@@ -111,6 +111,8 @@ class ThriftServer {
     connection_handler_ = connection;
   }
 
+  int num_worker_threads() const { return num_worker_threads_; }
+
   // Returns a unique identifier for the current connection. A connection is
   // identified with the lifetime of a socket connection to this server.
   // It is only safe to call this method during a Thrift processor RPC

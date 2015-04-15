@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
       &server));
 
   if (FLAGS_start_recordservice) {
-    EXIT_IF_ERROR(StartRecordServiceServices(&exec_env, server,
+    EXIT_IF_ERROR(ImpalaServer::StartRecordServiceServices(&exec_env, server,
         FLAGS_recordservice_planner_port, FLAGS_recordservice_worker_port,
         &recordservice_planner, &recordservice_worker));
   }
