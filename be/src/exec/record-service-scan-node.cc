@@ -20,6 +20,7 @@
 #include <boost/filesystem.hpp>
 #include <gutil/strings/substitute.h>
 
+#include "exprs/expr.h"
 #include "rpc/thrift-util.h"
 #include "runtime/row-batch.h"
 #include "runtime/runtime-state.h"
@@ -148,6 +149,8 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
 Status RecordServiceScanNode::Open(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
+  RETURN_IF_ERROR(ExecNode::Open(state));
+
   // Connect to the local record service worker
   rsw_client_.reset(
       new ThriftClient<recordservice::RecordServiceWorkerClient>("localhost",
@@ -232,14 +235,18 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
   SCOPED_TIMER(state_->total_cpu_timer());
   DCHECK_LT(task_id, tasks_.size());
 
+  // ExprContexts are not thread safe, so make contexts for each thread.
+  vector<ExprContext*> per_thread_conjunct_ctxs;
+  Status status = Expr::Clone(conjunct_ctxs_, state_, &per_thread_conjunct_ctxs);
+
   // Connect to the local record service worker. Thrift clients are not thread safe.
   // TODO: pool these.
   ThriftClient<recordservice::RecordServiceWorkerClient> client("localhost",
       FLAGS_recordservice_worker_port);
 
   while (true) {
-    Status status = client.Open();
-    if (status.ok()) status = ProcessTask(&client, task_id);
+    if (status.ok()) status = client.Open();
+    if (status.ok()) status = ProcessTask(&client, task_id, per_thread_conjunct_ctxs);
 
     // Check status, and grab the next task id.
     unique_lock<mutex> l(lock_);
@@ -267,14 +274,17 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
 
 done:
     // Lock is still taken
+    // Only exit from this function.
     --num_active_scanners_;
     if (done_) materialized_row_batches_->Shutdown();
+    Expr::Close(per_thread_conjunct_ctxs, state_);
     break;
   }
 }
 
 Status RecordServiceScanNode::ProcessTask(
-    ThriftClient<recordservice::RecordServiceWorkerClient>* client, int task_id) {
+    ThriftClient<recordservice::RecordServiceWorkerClient>* client, int task_id,
+    const vector<ExprContext*>& conjunct_ctxs) {
   DCHECK(!tasks_[task_id].connected);
 
   recordservice::TExecTaskParams params;
@@ -397,7 +407,7 @@ Status RecordServiceScanNode::ProcessTask(
         }
       }
 
-      if (EvalConjuncts(&conjunct_ctxs_[0], conjunct_ctxs_.size(), row)) {
+      if (EvalConjuncts(&conjunct_ctxs[0], conjunct_ctxs.size(), row)) {
         row_batch->CommitLastRow();
         tuple = next_tuple(tuple);
         if (ReachedLimit()) break;
@@ -440,5 +450,6 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
       }
     }
   }
+
   ScanNode::Close(state);
 }

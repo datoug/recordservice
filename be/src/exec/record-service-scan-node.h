@@ -134,7 +134,7 @@ class RecordServiceScanNode : public ScanNode {
   // Run in the scanner thread to process task_[task_id]. Returns on error or
   // when the entire task is complete.
   Status ProcessTask(ThriftClient<recordservice::RecordServiceWorkerClient>*,
-      int task_id);
+      int task_id, const std::vector<ExprContext*>& expr_contexts);
 };
 
 }
