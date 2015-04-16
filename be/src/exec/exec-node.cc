@@ -158,6 +158,13 @@ Status ExecNode::Open(RuntimeState* state) {
   return Expr::Open(conjunct_ctxs_, state);
 }
 
+Status ExecNode::Reset(RuntimeState* state) {
+  for (int i = 0; i < children_.size(); ++i) {
+    RETURN_IF_ERROR(children_[i]->Reset(state));
+  }
+  return Status::OK;
+}
+
 void ExecNode::Close(RuntimeState* state) {
   if (is_closed_) return;
   is_closed_ = true;
