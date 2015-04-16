@@ -140,7 +140,7 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
   // populated in the thrift result object (to avoid a copy).
   virtual void SetReturnBuffer(recordservice::TFetchResult* result) = 0;
 
-  virtual size_t size() { return result_ == NULL ? 0 :result_->num_rows; }
+  virtual size_t size() { return result_ == NULL ? 0 : result_->num_records; }
 
  protected:
   BaseResultSet() : result_(NULL) {}
@@ -158,7 +158,7 @@ class ImpalaServer::RecordServiceTaskState {
 
   int fetch_size;
 
-  recordservice::TRowBatchFormat::type format;
+  recordservice::TRecordFormat::type format;
   scoped_ptr<ImpalaServer::BaseResultSet> results;
 
   // Populated on first call to Fetch(). At that point the query has for sure
@@ -194,14 +194,14 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
 
   virtual void SetReturnBuffer(recordservice::TFetchResult* result) {
     result_ = result;
-    result_->__isset.columnar_row_batch = true;
-    result_->columnar_row_batch.cols.resize(types_.size());
+    result_->__isset.columnar_records = true;
+    result_->columnar_records.cols.resize(types_.size());
   }
 
   virtual void AddRowBatch(RowBatch* input, int row_idx, int num_rows,
       vector<ExprContext*>* ctxs) {
-    DCHECK(result_->__isset.columnar_row_batch);
-    recordservice::TColumnarRowBatch& batch = result_->columnar_row_batch;
+    DCHECK(result_->__isset.columnar_records);
+    recordservice::TColumnarRecords& batch = result_->columnar_records;
 
     if (all_slot_refs_) {
       // In this case, all the output exprs are slot refs and we want to serialize them
@@ -316,7 +316,7 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
         }
       }
     }
-    result_->num_rows += num_rows;
+    result_->num_records += num_rows;
   }
 
  private:
@@ -704,16 +704,16 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       break;
     }
 
-    task_state->format = recordservice::TRowBatchFormat::Columnar;
-    if (req.__isset.row_batch_format) task_state->format = req.row_batch_format;
+    task_state->format = recordservice::TRecordFormat::Columnar;
+    if (req.__isset.record_format) task_state->format = req.record_format;
     switch (task_state->format) {
-      case recordservice::TRowBatchFormat::Columnar:
+      case recordservice::TRecordFormat::Columnar:
         task_state->results.reset(new RecordServiceParquetResultSet(
             all_slot_refs, output_exprs));
         break;
       default:
         ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
-            "Service does not support this row batch format.");
+            "Service does not support this record format.");
     }
     task_state->results->Init(*exec_state->result_metadata(), task_state->fetch_size);
 
@@ -794,10 +794,10 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
     return_val.done = exec_state->eos();
     return_val.task_completion_percentage = ComputeCompletionPercentage(
         task_state->bytes_read_counter, task_state->bytes_assigned_counter);
-    return_val.row_batch_format = task_state->format;
+    return_val.record_format = task_state->format;
 
     task_state->results->FinalizeResult();
-    RecordServiceMetrics::NUM_ROWS_FETCHED->Increment(return_val.num_rows);
+    RecordServiceMetrics::NUM_ROWS_FETCHED->Increment(return_val.num_records);
   } catch (const recordservice::TRecordServiceException& e) {
     RecordServiceMetrics::NUM_FAILED_FETCH_REQUESTS->Increment(1);
     throw e;
@@ -858,8 +858,8 @@ void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
     SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
     SET_STAT_FROM_COUNTER(task_state->bytes_read_counter, bytes_read);
     SET_STAT_FROM_COUNTER(task_state->bytes_read_local_counter, bytes_read_local);
-    SET_STAT_FROM_COUNTER(task_state->rows_read_counter, num_rows_read);
-    SET_STAT_FROM_COUNTER(task_state->rows_returned_counter, num_rows_returned);
+    SET_STAT_FROM_COUNTER(task_state->rows_read_counter, num_records_read);
+    SET_STAT_FROM_COUNTER(task_state->rows_returned_counter, num_records_returned);
     SET_STAT_MS_FROM_COUNTER(task_state->decompression_timer, decompress_time_ms);
     SET_STAT_FROM_COUNTER(task_state->hdfs_throughput_counter, hdfs_throughput);
   } catch (const recordservice::TRecordServiceException& e) {

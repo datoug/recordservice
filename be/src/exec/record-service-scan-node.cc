@@ -310,7 +310,7 @@ Status RecordServiceScanNode::ProcessTask(
   while (!done_) {
     try {
       client->iface()->Fetch(fetch_result, fetch_params);
-      if (!fetch_result.__isset.columnar_row_batch) {
+      if (!fetch_result.__isset.columnar_records) {
         return Status("Expecting RecordService to return columnar row batches.");
       }
     } catch (const recordservice::TRecordServiceException& e) {
@@ -320,7 +320,7 @@ Status RecordServiceScanNode::ProcessTask(
     }
 
     // Convert into row batch.
-    const recordservice::TColumnarRowBatch& input_batch = fetch_result.columnar_row_batch;
+    const recordservice::TColumnarRecords& input_batch = fetch_result.columnar_records;
 
     // TODO: validate schema.
     if (input_batch.cols.size() != materialized_slots_.size()) {
@@ -331,13 +331,13 @@ Status RecordServiceScanNode::ProcessTask(
       return Status(ss.str());
     }
 
-    if (fetch_result.num_rows == 0) {
+    if (fetch_result.num_records == 0) {
       DCHECK(fetch_result.done);
       break;
     }
 
     auto_ptr<RowBatch> row_batch(
-        new RowBatch(row_desc(), fetch_result.num_rows, mem_tracker()));
+        new RowBatch(row_desc(), fetch_result.num_records, mem_tracker()));
 
     Tuple* tuple = Tuple::Create(row_batch->MaxTupleBufferSize(),
         row_batch->tuple_data_pool());
@@ -350,9 +350,9 @@ Status RecordServiceScanNode::ProcessTask(
       COUNTER_ADD(bytes_read_counter_, input_batch.cols[i].is_null.size());
     }
 
-    COUNTER_ADD(rows_read_counter_, fetch_result.num_rows);
+    COUNTER_ADD(rows_read_counter_, fetch_result.num_records);
     SCOPED_TIMER(materialize_tuple_timer_);
-    for (int i = 0; i < fetch_result.num_rows; ++i) {
+    for (int i = 0; i < fetch_result.num_records; ++i) {
       TupleRow* row = row_batch->GetRow(row_batch->AddRow());
       row->SetTuple(0, tuple);
 
