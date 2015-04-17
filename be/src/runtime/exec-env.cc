@@ -129,6 +129,8 @@ DEFINE_int32(resource_broker_recv_timeout, 0, "Time to wait, in ms, "
     "for the underlying socket of an RPC to Llama to successfully receive data. "
     "A setting of 0 means the socket will wait indefinitely.");
 
+DECLARE_string(ssl_client_ca_certificate);
+
 // The key for a variable set in Impala's test environment only, to allow the
 // resource-broker to correctly map node addresses into a form that Llama understand.
 const static string PSEUDO_DISTRIBUTED_CONFIG_KEY =
@@ -148,8 +150,12 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service,
     server_id_(server_id),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
-    impalad_client_cache_(new ImpalaInternalServiceClientCache()),
-    catalogd_client_cache_(new CatalogServiceClientCache()),
+    impalad_client_cache_(
+        new ImpalaInternalServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty())),
+    catalogd_client_cache_(
+        new CatalogServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty())),
     htable_factory_(new HBaseTableFactory()),
     disk_io_mgr_(new DiskIoMgr()),
     webserver_(new Webserver(is_record_service)),
@@ -194,8 +200,12 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
     server_id_(Substitute("impalad@$0:$1", hostname, backend_port)),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
-    impalad_client_cache_(new ImpalaInternalServiceClientCache()),
-    catalogd_client_cache_(new CatalogServiceClientCache()),
+    impalad_client_cache_(
+        new ImpalaInternalServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty())),
+    catalogd_client_cache_(
+        new CatalogServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty())),
     htable_factory_(new HBaseTableFactory()),
     disk_io_mgr_(new DiskIoMgr()),
     webserver_(new Webserver(webserver_port)),
