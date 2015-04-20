@@ -68,7 +68,7 @@ DEFINE_int32(recordservice_state_store_subscriber_port, 33000,
 DEFINE_int32(num_hdfs_worker_threads, 16,
     "(Advanced) The number of threads in the global HDFS operation pool");
 
-DEFINE_int32(record_service_mem_limit_mb, 2048,
+DEFINE_int64(record_service_mem_limit_mb, 3072,
     "The memory limit for RecordService requests. -1 for unlimited.");
 
 DECLARE_int32(state_store_port);
