@@ -289,7 +289,7 @@ Status Webserver::Start() {
   RegisterUrlCallback("/", "root.tmpl", default_callback, false);
 
   LOG(INFO) << "Webserver started";
-  return Status::OK;
+  return Status::OK();
 }
 
 void Webserver::Stop() {

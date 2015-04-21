@@ -78,7 +78,7 @@ inline Status SetDecimalVal(const ColumnType& type, char* bytes, int len,
     }
     default: DCHECK(false);
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status DataSourceRowConverter::ResetRowBatch(
@@ -105,7 +105,7 @@ Status DataSourceRowConverter::ResetRowBatch(
       if (num_rows_ != col_data.is_null.size()) return Status(ERROR_MISMATCHED_COL_SIZES);
     }
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status DataSourceRowConverter::MaterializeNextRow(Tuple* tuple, MemPool* pool) {
@@ -214,5 +214,5 @@ Status DataSourceRowConverter::MaterializeNextRow(Tuple* tuple, MemPool* pool) {
   }
 
   ++next_row_idx_;
-  return Status::OK;
+  return Status::OK();
 }

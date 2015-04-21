@@ -49,7 +49,7 @@ Status InitLoggingDir(const string& log_dir) {
                << log_dir << ")";
     return Status("Log path is not a directory");
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void SimpleLogger::GenerateLogFileName() {
@@ -76,7 +76,7 @@ Status SimpleLogger::Init() {
   GenerateLogFileName();
   RETURN_IF_ERROR(FlushInternal());
   LOG(INFO) << "Logging to: " << log_file_name_;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleLogger::AppendEntry(const std::string& entry) {
@@ -90,7 +90,7 @@ Status SimpleLogger::AppendEntry(const std::string& entry) {
    // Not std::endl, since that causes an implicit flush
   log_file_ << entry << "\n";
   ++num_log_file_entries_;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleLogger::Flush() {
@@ -107,5 +107,5 @@ Status SimpleLogger::FlushInternal() {
   }
   log_file_.open(log_file_name_.c_str(), std::ios_base::app | std::ios_base::out);
   if (!log_file_.is_open()) return Status("Could not open log file: " + log_file_name_);
-  return Status::OK;
+  return Status::OK();
 }

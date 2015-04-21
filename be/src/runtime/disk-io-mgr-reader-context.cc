@@ -147,7 +147,7 @@ DiskIoMgr::RequestContext::RequestContext(DiskIoMgr* parent, int num_disks)
 void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger,
     LockTracker* lock_tracker) {
   DCHECK_EQ(state_, Inactive);
-  status_ = Status::OK;
+  status_ = Status::OK();
 
   bytes_read_counter_ = NULL;
   read_timer_ = NULL;

@@ -81,7 +81,7 @@ Status DiskIoMgr::ScanRange::GetNext(BufferDescriptor** buffer) {
 
   {
     unique_lock<Lock> scan_range_lock(lock_);
-    if (eosr_returned_) return Status::OK;
+    if (eosr_returned_) return Status::OK();
     DCHECK(Validate()) << DebugString();
 
     if (ready_buffers_.empty()) {
@@ -146,7 +146,7 @@ Status DiskIoMgr::ScanRange::GetNext(BufferDescriptor** buffer) {
     reader_->blocked_ranges_.Remove(this);
     reader_->ScheduleScanRange(this);
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void DiskIoMgr::ScanRange::Cancel(const Status& status) {
@@ -278,7 +278,7 @@ Status DiskIoMgr::ScanRange::Open() {
   if (is_cancelled_) return Status::CANCELLED;
 
   if (fs_ != NULL) {
-    if (hdfs_file_ != NULL) return Status::OK;
+    if (hdfs_file_ != NULL) return Status::OK();
 
     // TODO: is there much overhead opening hdfs files?  Should we try to preserve
     // the handle across multiple scan ranges of a file?
@@ -299,7 +299,7 @@ Status DiskIoMgr::ScanRange::Open() {
       return Status(ss.str());
     }
   } else {
-    if (local_file_ != NULL) return Status::OK;
+    if (local_file_ != NULL) return Status::OK();
 
     local_file_ = fopen(file(), "r");
     if (local_file_ == NULL) {
@@ -321,7 +321,7 @@ Status DiskIoMgr::ScanRange::Open() {
   if (ImpaladMetrics::IO_MGR_NUM_OPEN_FILES != NULL) {
     ImpaladMetrics::IO_MGR_NUM_OPEN_FILES->Increment(1L);
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void DiskIoMgr::ScanRange::Close() {
@@ -427,7 +427,7 @@ Status DiskIoMgr::ScanRange::Read(char* buffer, int64_t* bytes_read, bool* eosr)
   bytes_read_ += *bytes_read;
   DCHECK_LE(bytes_read_, len_);
   if (bytes_read_ == len_) *eosr = true;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
@@ -438,7 +438,7 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
   if (!status.ok()) return status;
 
   // Cached reads not supported on local filesystem.
-  if (fs_ == NULL) return Status::OK;
+  if (fs_ == NULL) return Status::OK();
 
   {
     unique_lock<Lock> hdfs_lock(hdfs_lock_);
@@ -452,7 +452,7 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
     if (cached_buffer_ == NULL) {
       QUERY_VLOG_FILE(reader_->logger())
           << "File '" << file() << "' expected to be cached but was not.";
-      return Status::OK;
+      return Status::OK();
     }
   }
 
@@ -479,5 +479,5 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
   ++reader_->num_used_buffers_;
   QUERY_VLOG_BUFFER(reader_->logger())
       << "Read " << bytes_read << " bytes from cache for '" << file() << "'";
-  return Status::OK;
+  return Status::OK();
 }

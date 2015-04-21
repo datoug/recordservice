@@ -126,7 +126,7 @@ ExecNode::~ExecNode() {
 Status ExecNode::Init(const TPlanNode& tnode) {
   RETURN_IF_ERROR(
       Expr::CreateExprTrees(pool_, tnode.conjuncts, &conjunct_ctxs_));
-  return Status::OK;
+  return Status::OK();
 }
 
 Status ExecNode::Prepare(RuntimeState* state) {
@@ -150,7 +150,7 @@ Status ExecNode::Prepare(RuntimeState* state) {
   for (int i = 0; i < children_.size(); ++i) {
     RETURN_IF_ERROR(children_[i]->Prepare(state));
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status ExecNode::Open(RuntimeState* state) {
@@ -162,7 +162,7 @@ Status ExecNode::Reset(RuntimeState* state) {
   for (int i = 0; i < children_.size(); ++i) {
     RETURN_IF_ERROR(children_[i]->Reset(state));
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void ExecNode::Close(RuntimeState* state) {
@@ -202,7 +202,7 @@ Status ExecNode::CreateTree(RuntimeState* state, const TPlan& plan,
                             const DescriptorTbl& descs, ExecNode** root) {
   if (plan.nodes.size() == 0) {
     *root = NULL;
-    return Status::OK;
+    return Status::OK();
   }
   int node_idx = 0;
   Status status = CreateTreeHelper(state, plan.nodes, descs, NULL, &node_idx, root);
@@ -256,7 +256,7 @@ Status ExecNode::CreateTreeHelper(
     node->runtime_profile()->AddChild(node->children_[0]->runtime_profile(), false);
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status ExecNode::CreateNode(RuntimeState* state, const TPlanNode& tnode,
@@ -333,7 +333,7 @@ Status ExecNode::CreateNode(RuntimeState* state, const TPlanNode& tnode,
       return Status(error_msg.str());
   }
   RETURN_IF_ERROR((*node)->Init(tnode));
-  return Status::OK;
+  return Status::OK();
 }
 
 void ExecNode::SetDebugOptions(
@@ -384,7 +384,7 @@ void ExecNode::InitRuntimeProfile(const string& name) {
 
 Status ExecNode::ExecDebugAction(TExecNodePhase::type phase, RuntimeState* state) {
   DCHECK(phase != TExecNodePhase::INVALID);
-  if (debug_phase_ != phase) return Status::OK;
+  if (debug_phase_ != phase) return Status::OK();
   if (debug_action_ == TDebugAction::FAIL) {
     return Status(TErrorCode::INTERNAL_ERROR, "Debug Action: FAIL");
   }
@@ -394,7 +394,7 @@ Status ExecNode::ExecDebugAction(TExecNodePhase::type phase, RuntimeState* state
     }
     return Status::CANCELLED;
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 bool ExecNode::EvalConjuncts(ExprContext* const* ctxs, int num_ctxs, TupleRow* row) {

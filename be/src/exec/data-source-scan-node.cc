@@ -70,7 +70,7 @@ Status DataSourceScanNode::Prepare(RuntimeState* state) {
 
   row_converter_.reset(
       new DataSourceRowConverter(tuple_desc_, NULL, materialized_slots_));
-  return Status::OK;
+  return Status::OK();
 }
 
 Status DataSourceScanNode::Open(RuntimeState* state) {
@@ -124,7 +124,7 @@ Status DataSourceScanNode::GetNextInputBatch() {
       << "data source.";
     input_batch_->eos = true;
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status DataSourceScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos) {
@@ -133,7 +133,7 @@ Status DataSourceScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, boo
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   if (ReachedLimit()) {
     *eos = true;
-    return Status::OK;
+    return Status::OK();
   }
   *eos = false;
 
@@ -168,7 +168,7 @@ Status DataSourceScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, boo
 
       if (ReachedLimit() || row_batch->AtCapacity() || input_batch_->eos) {
         *eos = ReachedLimit() || input_batch_->eos;
-        return Status::OK;
+        return Status::OK();
       }
     }
 

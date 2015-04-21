@@ -231,7 +231,7 @@ Status SimpleScheduler::Init() {
       backend_descriptor_.__set_secure_webserver(webserver_->IsSecure());
     }
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 // Utility method to help sort backends by ascending network address
@@ -348,7 +348,7 @@ Status SimpleScheduler::GetBackends(
     backendports->push_back(backend);
   }
   DCHECK_EQ(data_locations.size(), backendports->size());
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleScheduler::GetBackend(const TNetworkAddress& data_location,
@@ -401,7 +401,7 @@ Status SimpleScheduler::GetBackend(const TNetworkAddress& data_location,
     s << " -> " << backend->address << ")";
     VLOG_FILE << "SimpleScheduler assignment (data->backend):  " << s.str();
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void SimpleScheduler::GetAllKnownBackends(BackendList* backends) {
@@ -429,7 +429,7 @@ Status SimpleScheduler::ComputeScanRangeAssignment(const TQueryExecRequest& exec
         schedule->query_options(), assignment));
     schedule->AddScanRanges(entry->second.size());
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleScheduler::ComputeScanRangeAssignment(
@@ -571,7 +571,7 @@ Status SimpleScheduler::ComputeScanRangeAssignment(
     }
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void SimpleScheduler::ComputeFragmentExecParams(const TQueryExecRequest& exec_request,
@@ -830,7 +830,7 @@ Status SimpleScheduler::GetRequestPool(const string& user,
           configured_pool, resolve_pool_result.resolved_pool));
   }
   *pool = resolve_pool_result.resolved_pool;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleScheduler::Schedule(Coordinator* coord, QuerySchedule* schedule) {
@@ -859,7 +859,7 @@ Status SimpleScheduler::Schedule(Coordinator* coord, QuerySchedule* schedule) {
   RETURN_IF_ERROR(ComputeScanRangeAssignment(schedule->request(), schedule));
   ComputeFragmentHosts(schedule->request(), schedule);
   ComputeFragmentExecParams(schedule->request(), schedule);
-  if (!FLAGS_enable_rm) return Status::OK;
+  if (!FLAGS_enable_rm) return Status::OK();
   schedule->PrepareReservationRequest(pool, user);
   const TResourceBrokerReservationRequest& reservation_request =
       schedule->reservation_request();
@@ -879,7 +879,7 @@ Status SimpleScheduler::Schedule(Coordinator* coord, QuerySchedule* schedule) {
     RETURN_IF_ERROR(schedule->ValidateReservation());
     AddToActiveResourceMaps(*schedule->reservation(), coord);
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SimpleScheduler::Release(QuerySchedule* schedule) {
@@ -899,7 +899,7 @@ Status SimpleScheduler::Release(QuerySchedule* schedule) {
       return Status(join(response.status.error_msgs, ", "));
     }
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 void SimpleScheduler::AddToActiveResourceMaps(

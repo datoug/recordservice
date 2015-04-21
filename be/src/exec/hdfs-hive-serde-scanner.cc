@@ -80,7 +80,7 @@ Status HdfsHiveSerdeScanner::InitNewRange() {
 
   RETURN_IF_ERROR(HdfsTextScanner::ResetScanner());
 
-  return Status::OK;
+  return Status::OK();
 }
 
 HdfsHiveSerdeScanner::HdfsHiveSerdeScanner(HdfsScanNode* scan_node, RuntimeState* state)
@@ -117,7 +117,7 @@ Status HdfsHiveSerdeScanner::Prepare(ScannerContext* context) {
       executor_class_, EXECUTOR_DESERIALIZE_NAME, EXECUTOR_DESERIALIZE_SIG);
   RETURN_ERROR_IF_EXC(env);
 
-  return Status::OK;
+  return Status::OK();
 }
 
 int HdfsHiveSerdeScanner::WriteFields(MemPool* pool, TupleRow* tuple_row,
@@ -202,7 +202,7 @@ Status HdfsHiveSerdeScanner::WriteRowBatch(
     }
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void HdfsHiveSerdeScanner::Close() {

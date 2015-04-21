@@ -62,7 +62,7 @@ Status InProcessImpalaServer::StartWithClientServers(int beeswax_port, int hs2_p
   // Wait for up to 1s for the backend server to start
   RETURN_IF_ERROR(WaitForServer(hostname_, backend_port_, 100, 100));
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status InProcessImpalaServer::StartAsBackendOnly(bool use_statestore) {
@@ -72,12 +72,12 @@ Status InProcessImpalaServer::StartAsBackendOnly(bool use_statestore) {
         NULL, NULL, &be_server, &impala_server_));
   be_server_.reset(be_server);
   RETURN_IF_ERROR(be_server_->Start());
-  return Status::OK;
+  return Status::OK();
 }
 
 Status InProcessImpalaServer::Join() {
   be_server_->Join();
-  return Status::OK;
+  return Status::OK();
 }
 
 InProcessStatestore::InProcessStatestore(int statestore_port, int webserver_port)

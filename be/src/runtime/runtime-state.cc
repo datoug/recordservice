@@ -153,7 +153,7 @@ Status RuntimeState::Init(ExecEnv* exec_env) {
 
   obj_pool_->RegisterLockTracker(&lock_tracker_);
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void RuntimeState::InitMemTrackers(const TUniqueId& query_id, const string* pool_name,
@@ -196,17 +196,17 @@ Status RuntimeState::CreateBlockMgr() {
   RETURN_IF_ERROR(BufferedBlockMgr::Create(this, query_mem_tracker(),
       runtime_profile(), block_mgr_limit, io_mgr()->max_read_buffer_size(),
       &block_mgr_));
-  return Status::OK;
+  return Status::OK();
 }
 
 Status RuntimeState::CreateCodegen() {
-  if (codegen_.get() != NULL) return Status::OK;
+  if (codegen_.get() != NULL) return Status::OK();
   // TODO: add the fragment ID to the codegen ID as well
   RETURN_IF_ERROR(LlvmCodeGen::LoadImpalaIR(
       obj_pool_.get(), PrintId(fragment_instance_id()), &codegen_));
   codegen_->EnableOptimizations(true);
   profile_.AddChild(codegen_->runtime_profile());
-  return Status::OK;
+  return Status::OK();
 }
 
 void RuntimeState::AddLockContentionCounters() {
@@ -331,7 +331,7 @@ void RuntimeState::AddBitmapFilter(SlotId slot, Bitmap* bitmap,
 Status RuntimeState::GetCodegen(LlvmCodeGen** codegen, bool initialize) {
   if (codegen_.get() == NULL && initialize) RETURN_IF_ERROR(CreateCodegen());
   *codegen = codegen_.get();
-  return Status::OK;
+  return Status::OK();
 }
 
 }

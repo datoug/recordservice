@@ -164,7 +164,7 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   task_id_ = 0;
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status RecordServiceScanNode::Open(RuntimeState* state) {
@@ -184,7 +184,7 @@ Status RecordServiceScanNode::Open(RuntimeState* state) {
   state->resource_pool()->SetThreadAvailableCb(
       bind<void>(mem_fn(&RecordServiceScanNode::ThreadTokenAvailableCb), this, _1));
   ThreadTokenAvailableCb(state->resource_pool());
-  return Status::OK;
+  return Status::OK();
 }
 
 Status RecordServiceScanNode::GetNext(RuntimeState* state,
@@ -193,7 +193,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
 
  if (ReachedLimit()) {
     *eos = true;
-    return Status::OK;
+    return Status::OK();
   }
 
   *eos = false;
@@ -459,7 +459,7 @@ Status RecordServiceScanNode::ProcessTask(
     if (fetch_result.done) break;
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void RecordServiceScanNode::Close(RuntimeState* state) {

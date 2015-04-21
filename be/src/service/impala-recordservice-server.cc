@@ -120,7 +120,7 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
  public:
   virtual Status AddOneRow(const TResultRow& row) {
     CHECK(false) << "Not used";
-    return Status::OK;
+    return Status::OK();
   }
 
   virtual int AddRows(const QueryResultSet* other, int start_idx, int num_rows) {
@@ -135,7 +135,7 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
 
   virtual Status AddOneRow(const vector<void*>& col_values, const vector<int>& scales) {
     CHECK(false) << "Not used";
-    return Status::OK;
+    return Status::OK();
   }
 
   virtual void Init(const TResultSetMetadata& md, int fetch_size) {
@@ -511,7 +511,7 @@ Status SchemaToSqlString(const recordservice::TSchema& schema, string* sql) {
   }
   ss << ")";
   *sql = ss.str();
-  return Status::OK;
+  return Status::OK();
 }
 
 
@@ -661,7 +661,7 @@ Status ReadFileHeader(hdfsFS fs, const char* path,
   if (file == NULL) return Status("Could not open file.");
   *bytes_read = hdfsRead(fs, file, header, HADOOP_FILE_HEADER_SIZE);
   hdfsCloseFile(fs, file);
-  return Status::OK;
+  return Status::OK();
 }
 
 // TODO: move this logic to the planner? Not clear if that is easier.
@@ -1407,7 +1407,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
     UnregisterQuery(exec_state->query_id(), true);
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void ImpalaServer::GetMetric(recordservice::TMetricResponse& return_val,

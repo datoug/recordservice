@@ -122,7 +122,7 @@ Status Frontend::InitZooKeeper() {
       (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
 
   // Not using zookeeper.
-  if (!enable_delegation_tokens && !FLAGS_zookeeper_membership) return Status::OK;
+  if (!enable_delegation_tokens && !FLAGS_zookeeper_membership) return Status::OK();
 
   JNIEnv* jni_env = getJNIEnv();
   JniLocalFrame jni_frame;
@@ -133,7 +133,7 @@ Status Frontend::InitZooKeeper() {
   jni_env->CallObjectMethod(fe_, init_zookeeper_id_, sid, enable_delegation_tokens,
       running_recordservice_planner, running_recordservice_worker);
   RETURN_ERROR_IF_EXC(jni_env);
-  return Status::OK;
+  return Status::OK();
 }
 
 Status Frontend::UpdateCatalogCache(const TUpdateCatalogCacheRequest& req,
@@ -239,7 +239,7 @@ Status Frontend::ValidateSettings() {
   if (ss.str().size() > 0) {
     return Status(ss.str());
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status Frontend::ExecHiveServer2MetadataOp(const TMetadataOpRequest& request,
@@ -293,7 +293,7 @@ Status Frontend::SetCatalogInitialized() {
   RETURN_IF_ERROR(jni_frame.push(jni_env));
   jni_env->CallObjectMethod(fe_, set_catalog_initialized_id_);
   RETURN_ERROR_IF_EXC(jni_env);
-  return Status::OK;
+  return Status::OK();
 }
 
 Status Frontend::GetTableFiles(const TShowFilesParams& params, TResultSet* result) {

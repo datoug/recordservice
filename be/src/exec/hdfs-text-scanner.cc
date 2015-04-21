@@ -157,7 +157,7 @@ Status HdfsTextScanner::IssueInitialRangesInternal(
     // This will dlopen the lzo binary and can fail if the lzo binary is not present.
     RETURN_IF_ERROR(HdfsLzoTextScanner::IssueInitialRanges(scan_node, lzo_text_files));
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::ProcessSplit() {
@@ -186,7 +186,7 @@ Status HdfsTextScanner::ProcessSplit() {
   }
 
   // All done with this scan range.
-  return Status::OK;
+  return Status::OK();
 }
 
 void HdfsTextScanner::Close() {
@@ -229,7 +229,7 @@ Status HdfsTextScanner::InitNewRange() {
       scan_node_->hdfs_table()->null_column_value()));
 
   RETURN_IF_ERROR(ResetScanner());
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::ResetScanner() {
@@ -256,16 +256,16 @@ Status HdfsTextScanner::ResetScanner() {
   // not be accurate.
   RETURN_IF_ERROR(InitializeWriteTuplesFn(
     context_->partition_descriptor(), GetTHdfsFileFormat(), "HdfsTextScanner"));
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::FinishScanRange() {
-  if (scan_node_->ReachedLimit()) return Status::OK;
+  if (scan_node_->ReachedLimit()) return Status::OK();
 
   // For text we always need to scan past the scan range to find the next delimiter
   while (true) {
     bool eosr = true;
-    Status status = Status::OK;
+    Status status = Status::OK();
     byte_buffer_read_size_ = 0;
 
     // If compressed text, then there is nothing more to be read.
@@ -329,7 +329,7 @@ Status HdfsTextScanner::FinishScanRange() {
     DCHECK_EQ(num_tuples, 0);
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::ProcessRange(int* num_tuples, bool past_scan_range) {
@@ -412,9 +412,9 @@ Status HdfsTextScanner::ProcessRange(int* num_tuples, bool past_scan_range) {
       break;
     }
 
-    if (scan_node_->ReachedLimit()) return Status::OK;
+    if (scan_node_->ReachedLimit()) return Status::OK();
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::FillByteBuffer(bool* eosr, int num_bytes) {
@@ -534,7 +534,7 @@ Status HdfsTextScanner::FillByteBufferGzip(bool* eosr) {
 
     context_->ReleaseCompletedResources(NULL, true);
   }
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::FillByteBufferCompressedFile(bool* eosr) {
@@ -552,7 +552,7 @@ Status HdfsTextScanner::FillByteBufferCompressedFile(bool* eosr) {
   // If didn't read anything, return.
   if (byte_buffer_read_size_ == 0) {
     *eosr = true;
-    return Status::OK;
+    return Status::OK();
   }
 
   // Need to read the entire file.
@@ -581,7 +581,7 @@ Status HdfsTextScanner::FillByteBufferCompressedFile(bool* eosr) {
   byte_buffer_ptr_ = reinterpret_cast<char*>(decompressed_buffer);
   byte_buffer_read_size_ = decompressed_len;
   *eosr = stream_->eosr();
-  return Status::OK;
+  return Status::OK();
 }
 
 Status HdfsTextScanner::FindFirstTuple(bool* tuple_found) {
@@ -610,7 +610,7 @@ Status HdfsTextScanner::FindFirstTuple(bool* tuple_found) {
     }
   }
   DCHECK(delimited_text_parser_->AtTupleStart());
-  return Status::OK;
+  return Status::OK();
 }
 
 // Codegen for materializing parsed data into tuples.  The function WriteCompleteTuple is
@@ -639,7 +639,7 @@ Status HdfsTextScanner::Prepare(ScannerContext* context) {
   field_locations_.resize(state_->batch_size() * scan_node_->materialized_slots().size());
   row_end_locations_.resize(state_->batch_size());
 
-  return Status::OK;
+  return Status::OK();
 }
 
 void HdfsTextScanner::LogRowParseError(int row_idx, stringstream* ss) {

@@ -246,7 +246,7 @@ class ClientConnection {
         return Status(TErrorCode::RPC_GENERAL_ERROR, e.what());
       }
     }
-    return Status::OK;
+    return Status::OK();
   }
 
  private:

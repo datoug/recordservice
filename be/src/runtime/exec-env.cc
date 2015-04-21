@@ -298,7 +298,7 @@ ExecEnv::~ExecEnv() {
 Status ExecEnv::InitForFeTests() {
   mem_tracker_.reset(new MemTracker(-1, -1, "Process"));
   is_fe_tests_ = true;
-  return Status::OK;
+  return Status::OK();
 }
 
 void PopulateDocument(Document* document, const char* topic,
@@ -451,7 +451,7 @@ Status ExecEnv::StartServices() {
     }
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 }

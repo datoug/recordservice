@@ -985,7 +985,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       DCHECK(session_.get() == NULL);
       RETURN_IF_ERROR(impala_->GetSessionState(session_id, &session_, true));
       if (session != NULL) (*session) = session_;
-      return Status::OK;
+      return Status::OK();
     }
 
     /// TODO: the excessive use of pass by value of shared_ptr<SessionState> is bad.

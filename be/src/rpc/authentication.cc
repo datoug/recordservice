@@ -533,7 +533,7 @@ void SaslAuthProvider::RunKinit(Promise<Status>* first_kinit) {
     if (success) {
       if (first_time) {
         first_time = false;
-        first_kinit->Set(Status::OK);
+        first_kinit->Set(Status::OK());
       }
       failures_since_renewal = 0;
       // Workaround for Kerberos 1.8.1 - wait a short time, before requesting a renewal of
@@ -668,7 +668,7 @@ Status InitAuth(const string& appname) {
   }
 
   RETURN_IF_ERROR(AuthManager::GetInstance()->Init());
-  return Status::OK;
+  return Status::OK();
 }
 
 // Ensure that /var/tmp (the location of the Kerberos replay cache) has drwxrwxrwt
@@ -692,7 +692,7 @@ Status CheckReplayCacheDirPermissions() {
         "rectify this issue, run \"chmod 01777 /var/tmp\" as root.");
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SaslAuthProvider::InitKerberos(const string& principal,
@@ -730,7 +730,7 @@ Status SaslAuthProvider::InitKerberos(const string& principal,
             << " kerberos principal \"" << service_name_ << "/"
             << hostname_ << "@" << realm_ << "\"";
 
-  return Status::OK;
+  return Status::OK();
 }
 
 // For the environment variable attr, append "-Dthing=thingval" if "thing" is not already
@@ -748,7 +748,7 @@ static Status EnvAppend(const string& attr, const string& thing, const string& t
 
   if (!current_val.empty() && (current_val.find(thing) != string::npos)) {
     // Case 3 above
-    return Status::OK;
+    return Status::OK();
   }
 
   stringstream val_out;
@@ -763,14 +763,14 @@ static Status EnvAppend(const string& attr, const string& thing, const string& t
         thing, thingval, attr, GetStrErrMsg()));
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SaslAuthProvider::InitKerberosEnv() {
   DCHECK(!principal_.empty());
 
   // Called only during setup; no locking required.
-  if (env_setup_complete_) return Status::OK;
+  if (env_setup_complete_) return Status::OK();
 
   if (!is_regular(keytab_file_)) {
     return Status(Substitute("Bad --keytab_file value: The file $0 is not a "
@@ -833,7 +833,7 @@ Status SaslAuthProvider::InitKerberosEnv() {
   }
 
   env_setup_complete_ = true;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SaslAuthProvider::Start() {
@@ -877,7 +877,7 @@ Status SaslAuthProvider::Start() {
     }
   }
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SaslAuthProvider::GetServerTransportFactory(
@@ -920,7 +920,7 @@ Status SaslAuthProvider::GetServerTransportFactory(
            << (!principal_.empty() ? "Kerberos " : " ")
            << (has_ldap_ ? "LDAP " : " ") << "authentication";
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status SaslAuthProvider::WrapClientTransport(const string& hostname,
@@ -950,13 +950,13 @@ Status SaslAuthProvider::WrapClientTransport(const string& hostname,
   // that we successfully authenticated as a client.
   VLOG_REQUEST << "Initiating client connection using principal " << principal_;
 
-  return Status::OK;
+  return Status::OK();
 }
 
 Status NoAuthProvider::GetServerTransportFactory(shared_ptr<TTransportFactory>* factory) {
   // No Sasl - yawn.  Here, have a regular old buffered transport.
   factory->reset(new TBufferedTransportFactory());
-  return Status::OK;
+  return Status::OK();
 }
 
 Status NoAuthProvider::WrapClientTransport(const string& hostname,
@@ -964,7 +964,7 @@ Status NoAuthProvider::WrapClientTransport(const string& hostname,
     shared_ptr<TTransport>* wrapped_transport) {
   // No Sasl - yawn.  Don't do any transport wrapping for clients.
   *wrapped_transport = raw_transport;
-  return Status::OK;
+  return Status::OK();
 }
 
 Status AuthManager::Init() {
@@ -1099,7 +1099,7 @@ Status AuthManager::Init() {
   no_auth_provider_.reset(new NoAuthProvider());
   RETURN_IF_ERROR(no_auth_provider_->Start());
 
-  return Status::OK;
+  return Status::OK();
 }
 
 AuthProvider* AuthManager::GetExternalAuthProvider() {
