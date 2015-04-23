@@ -32,7 +32,34 @@
 #include "util/pretty-printer.h"
 #include "util/webserver.h"
 
+#include "gen-cpp/MetricDefs_types.h"
+#include "gen-cpp/MetricDefs_constants.h"
+
 namespace impala {
+
+/// Singleton that provides metric definitions. Metrics are defined in metrics.json
+/// and generate_metrics.py produces MetricDefs.thrift. This singleton wraps an instance
+/// of the thrift definitions.
+class MetricDefs {
+ public:
+  /// Gets the TMetricDef for the metric key. 'arg' is an optional argument to the
+  /// TMetricDef for metrics defined by a format string. The key must exist or a DCHECK
+  /// will fail.
+  /// TODO: Support multiple arguments.
+  static TMetricDef Get(const std::string& key, const std::string& arg = "");
+
+ private:
+  friend class MetricsTest;
+
+  /// Gets the MetricDefs singleton.
+  static MetricDefs* GetInstance();
+
+  /// Contains the map of all TMetricDefs, non-const for testing
+  MetricDefsConstants metric_defs_;
+
+  MetricDefs() { };
+  DISALLOW_COPY_AND_ASSIGN(MetricDefs);
+};
 
 /// A metric is a container for some value, identified by a string key. Most metrics are
 /// numeric, but this metric base-class is general enough such that metrics may be lists,
@@ -80,8 +107,11 @@ class Metric {
 
   friend class MetricGroup;
 
-  Metric(const std::string& key, const std::string& description) :
-      key_(key), description_(description) { }
+  Metric(const TMetricDef& def) : key_(def.key), description_(def.description) { }
+
+  // TODO: remove when recordservice migrates to new metrics json files.
+  Metric(const std::string& key, const std::string& description)
+    : key_(key), description_(description) {}
 
   /// Convenience method to add standard fields (name, description, human readable string)
   /// to 'val'.
@@ -102,15 +132,19 @@ class Metric {
 template<typename T, TMetricKind::type metric_kind=TMetricKind::GAUGE>
 class SimpleMetric : public Metric {
  public:
-  SimpleMetric(const std::string& key, const TUnit::type unit,
-      const T& initial_value, const std::string& description = "")
-    : Metric(key, description), unit_(unit), lock_("Metric", LockTracker::global()),
-      value_(initial_value)
-  { }
+  SimpleMetric(const TMetricDef& metric_def, const T& initial_value)
+    : Metric(metric_def), unit_(metric_def.units),
+      lock_("Metric", LockTracker::global()),
+      value_(initial_value) {
+    DCHECK_EQ(metric_kind, metric_def.kind);
+  }
 
-  SimpleMetric(const std::string& key, const TUnit::type unit,
-      const std::string& description = "")
-      : Metric(key, description), unit_(unit) { }
+  SimpleMetric(const std::string& key, const T& initial_value,
+      const TUnit::type& unit, const std::string& description)
+    : Metric(key, description), unit_(unit),
+      lock_("Metric", LockTracker::global()),
+      value_(initial_value) {
+  }
 
   virtual ~SimpleMetric() { }
 
@@ -220,27 +254,46 @@ class MetricGroup {
 
   /// Create a gauge metric object with given key and initial value (owned by this object)
   template<typename T>
-  SimpleMetric<T>* AddGauge(const std::string& key,
-      const T& value, const TUnit::type unit = TUnit::NONE,
-      const std::string& description = "") {
-    return RegisterMetric(new SimpleMetric<T, TMetricKind::GAUGE>
-        (key, unit, value, description));
+  SimpleMetric<T>* AddGauge(const std::string& key, const T& value,
+      const std::string& metric_def_arg = "") {
+    return RegisterMetric(new SimpleMetric<T, TMetricKind::GAUGE>(
+        MetricDefs::Get(key, metric_def_arg), value));
   }
 
   template<typename T>
-  SimpleMetric<T, TMetricKind::PROPERTY>* AddProperty(
+  SimpleMetric<T>* AddGauge(const std::string& key, const T& value,
+      const TUnit::type& unit, const std::string& description) {
+    return RegisterMetric(new SimpleMetric<T, TMetricKind::GAUGE>(
+        key, value, unit, description));
+  }
+
+  template<typename T>
+  SimpleMetric<T, TMetricKind::PROPERTY>* AddProperty(const std::string& key,
+      const T& value, const std::string& metric_def_arg = "") {
+    return RegisterMetric(new SimpleMetric<T, TMetricKind::PROPERTY>(
+        MetricDefs::Get(key, metric_def_arg), value));
+  }
+
+  template<typename T>
+  SimpleMetric<T, TMetricKind::PROPERTY>* AddPropertyWithDesc(
       const std::string& key, const T& value,
-      const std::string& description = "") {
-    return RegisterMetric(new SimpleMetric<T, TMetricKind::PROPERTY> (key,
-        TUnit::NONE, value, description));
+      const std::string& description) {
+    return RegisterMetric(new SimpleMetric<T, TMetricKind::PROPERTY>(key,
+        value, TUnit::NONE, description));
   }
 
   template<typename T>
   SimpleMetric<T, TMetricKind::COUNTER>* AddCounter(const std::string& key,
-      const T& value, const TUnit::type unit = TUnit::UNIT,
-      const std::string& description = "") {
+      const T& value, const std::string& metric_def_arg = "") {
+    return RegisterMetric(new SimpleMetric<T, TMetricKind::COUNTER>(
+        MetricDefs::Get(key, metric_def_arg), value));
+  }
+
+  template<typename T>
+  SimpleMetric<T, TMetricKind::COUNTER>* AddCounter(const std::string& key,
+      const T& value, const TUnit::type unit, const std::string& description) {
     return RegisterMetric(
-        new SimpleMetric<T, TMetricKind::COUNTER>(key, unit, value, description));
+        new SimpleMetric<T, TMetricKind::COUNTER>(key, value, unit, description));
   }
 
   /// Returns a metric by key. All MetricGroups reachable from this group are searched in

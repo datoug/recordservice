@@ -74,10 +74,10 @@ BooleanProperty* RecordServiceMetrics::RUNNING_PLANNER = NULL;
 BooleanProperty* RecordServiceMetrics::RUNNING_WORKER = NULL;
 
 void RecordServiceMetrics::CreateMetrics(MetricGroup* m) {
-  RUNNING_PLANNER = m->AddProperty<bool>(
+  RUNNING_PLANNER = m->AddPropertyWithDesc<bool>(
       RecordServiceMetricKeys::RUNNING_PLANNER, false,
       "If true this is running the RecordServicePlanner thrift service.");
-  RUNNING_WORKER = m->AddProperty<bool>(
+  RUNNING_WORKER = m->AddPropertyWithDesc<bool>(
       RecordServiceMetricKeys::RUNNING_WORKER, false,
       "If true this is running the RecordServiceWorker thrift service.");
 
