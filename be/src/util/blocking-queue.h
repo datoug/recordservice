@@ -26,11 +26,11 @@
 
 namespace impala {
 
-// Fixed capacity FIFO queue, where both BlockingGet and BlockingPut operations block
-// if the queue is empty or full, respectively.
+/// Fixed capacity FIFO queue, where both BlockingGet and BlockingPut operations block
+/// if the queue is empty or full, respectively.
 
-// TODO: Add some double-buffering so that readers do not block writers and vice versa.
-// Or, implement a mostly lock-free blocking queue.
+/// TODO: Add some double-buffering so that readers do not block writers and vice versa.
+/// Or, implement a mostly lock-free blocking queue.
 template <typename T>
 class BlockingQueue {
  public:
@@ -42,9 +42,9 @@ class BlockingQueue {
       total_put_wait_time_(0) {
   }
 
-  // Get an element from the queue, waiting indefinitely for one to become available.
-  // Returns false if we were shut down prior to getting the element, and there
-  // are no more elements available.
+  /// Get an element from the queue, waiting indefinitely for one to become available.
+  /// Returns false if we were shut down prior to getting the element, and there
+  /// are no more elements available.
   bool BlockingGet(T* out) {
     MonotonicStopWatch timer;
     boost::unique_lock<Lock> lock(lock_);
@@ -66,8 +66,8 @@ class BlockingQueue {
     }
   }
 
-  // Puts an element into the queue, waiting indefinitely until there is space.
-  // If the queue is shut down, returns false.
+  /// Puts an element into the queue, waiting indefinitely until there is space.
+  /// If the queue is shut down, returns false.
   bool BlockingPut(const T& val) {
     MonotonicStopWatch timer;
     boost::unique_lock<Lock> lock(lock_);
@@ -87,7 +87,7 @@ class BlockingQueue {
     return true;
   }
 
-  // Shut down the queue. Wakes up all threads waiting on BlockingGet or BlockingPut.
+  /// Shut down the queue. Wakes up all threads waiting on BlockingGet or BlockingPut.
   void Shutdown() {
     {
       boost::lock_guard<Lock> guard(lock_);
@@ -103,13 +103,13 @@ class BlockingQueue {
     return list_.size();
   }
 
-  // Returns the total amount of time threads have blocked in BlockingGet.
+  /// Returns the total amount of time threads have blocked in BlockingGet.
   int64_t total_get_wait_time() const {
     boost::lock_guard<Lock> guard(lock_);
     return total_get_wait_time_;
   }
 
-  // Returns the total amount of time threads have blocked in BlockingPut.
+  /// Returns the total amount of time threads have blocked in BlockingPut.
   int64_t total_put_wait_time() const {
     boost::lock_guard<Lock> guard(lock_);
     return total_put_wait_time_;
@@ -120,7 +120,7 @@ class BlockingQueue {
   const int max_elements_;
   ConditionVariable get_cv_;   // 'get' callers wait on this
   ConditionVariable put_cv_;   // 'put' callers wait on this
-  // lock_ guards access to list_, total_get_wait_time, and total_put_wait_time
+  /// lock_ guards access to list_, total_get_wait_time, and total_put_wait_time
   mutable Lock lock_;
   std::list<T> list_;
   int64_t total_get_wait_time_;
