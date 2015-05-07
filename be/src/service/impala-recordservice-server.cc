@@ -731,13 +731,13 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
   }
 }
 
-// Computes the percent of num/denom
-static double ComputeCompletionPercentage(RuntimeProfile::Counter* num,
+// Computes num/denom
+static double ComputeProgress(RuntimeProfile::Counter* num,
     RuntimeProfile::Counter* denom) {
   if (num == NULL || denom == NULL || denom->value() == 0) return 0;
   double result = (double)num->value() / (double)denom->value();
   if (result > 1) result = 1;
-  return result * 100;
+  return result;
 }
 
 void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
@@ -792,7 +792,7 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
     }
 
     return_val.done = exec_state->eos();
-    return_val.task_completion_percentage = ComputeCompletionPercentage(
+    return_val.task_progress = ComputeProgress(
         task_state->bytes_read_counter, task_state->bytes_assigned_counter);
     return_val.record_format = task_state->format;
 
@@ -852,7 +852,7 @@ void ImpalaServer::GetTaskStatus(recordservice::TTaskStatus& return_val,
     }
 
     // Populate the results from the counters.
-    return_val.stats.__set_completion_percentage(ComputeCompletionPercentage(
+    return_val.stats.__set_task_progress(ComputeProgress(
         task_state->bytes_read_counter, task_state->bytes_assigned_counter));
     SET_STAT_MS_FROM_COUNTER(task_state->serialize_timer, serialize_time_ms);
     SET_STAT_MS_FROM_COUNTER(task_state->client_timer, client_time_ms);
