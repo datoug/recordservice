@@ -711,25 +711,16 @@ void HdfsScanNode::Close(RuntimeState* state) {
   ScanNode::Close(state);
 }
 
-Status HdfsScanNode::AddDiskIoRanges(const vector<DiskIoMgr::ScanRange*>& ranges) {
+Status HdfsScanNode::AddDiskIoRanges(const vector<DiskIoMgr::ScanRange*>& ranges,
+    int num_files_queued) {
   RETURN_IF_ERROR(
       runtime_state_->io_mgr()->AddScanRanges(reader_context_, ranges));
+  num_unqueued_files_ -= num_files_queued;
+  DCHECK_GE(num_unqueued_files_, 0);
   if (!runtime_state_->is_record_service_request()) {
     ThreadTokenAvailableCb(runtime_state_->resource_pool());
   }
   return Status::OK;
-}
-
-Status HdfsScanNode::AddDiskIoRanges(const HdfsFileDesc* desc) {
-  // We need to add io ranges for this file before mark it as issued.
-  Status status = AddDiskIoRanges(desc->splits);
-  MarkFileDescIssued(desc);
-  return status;
-}
-
-void HdfsScanNode::MarkFileDescIssued(const HdfsFileDesc* desc) {
-  DCHECK_GT(num_unqueued_files_, 0);
-  --num_unqueued_files_;
 }
 
 void HdfsScanNode::AddMaterializedRowBatch(RowBatch* row_batch) {

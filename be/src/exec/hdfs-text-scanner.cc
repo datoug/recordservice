@@ -74,6 +74,7 @@ Status HdfsTextScanner::IssueInitialRangesInternal(
     const THdfsFileFormat::type file_format,
     HdfsScanNode* scan_node, const vector<HdfsFileDesc*>& files) {
   vector<DiskIoMgr::ScanRange*> compressed_text_scan_ranges;
+  int compressed_text_files = 0;
   vector<HdfsFileDesc*> lzo_text_files;
   bool warning_written = false;
   for (int i = 0; i < files.size(); ++i) {
@@ -90,6 +91,7 @@ Status HdfsTextScanner::IssueInitialRangesInternal(
       case THdfsCompression::SNAPPY:
       case THdfsCompression::SNAPPY_BLOCKED:
       case THdfsCompression::BZIP2:
+        ++compressed_text_files;
         for (int j = 0; j < files[i]->splits.size(); ++j) {
           // In order to decompress gzip-, snappy- and bzip2-compressed text files, we
           // need to read entire files. Only read a file if we're assigned the first split
@@ -149,10 +151,8 @@ Status HdfsTextScanner::IssueInitialRangesInternal(
         DCHECK(false);
     }
   }
-
-  if (compressed_text_scan_ranges.size() > 0) {
-    RETURN_IF_ERROR(scan_node->AddDiskIoRanges(compressed_text_scan_ranges));
-  }
+  RETURN_IF_ERROR(scan_node->AddDiskIoRanges(compressed_text_scan_ranges,
+          compressed_text_files));
   if (lzo_text_files.size() > 0) {
     // This will dlopen the lzo binary and can fail if the lzo binary is not present.
     RETURN_IF_ERROR(HdfsLzoTextScanner::IssueInitialRanges(scan_node, lzo_text_files));
