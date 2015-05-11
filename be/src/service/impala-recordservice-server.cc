@@ -62,6 +62,7 @@ static const char* TEMP_DB = "rs_tmp_db";
 static const char* TEMP_TBL = "tmp_tbl";
 
 // Byte size of hadoop file headers.
+// TODO: best place for these files?
 const int HADOOP_FILE_HEADER_SIZE = 3;
 
 const uint8_t AVRO_HEADER[HADOOP_FILE_HEADER_SIZE] = { 'O', 'b', 'j' };
@@ -165,9 +166,14 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
 // to separate from Impala code.
 class ImpalaServer::RecordServiceTaskState {
  public:
-  RecordServiceTaskState() : counters_initialized(false) {}
+  RecordServiceTaskState() : offset(0), counters_initialized(false) {}
 
+  // Maximum number of rows to return per fetch. Impala's batch size is set to
+  // this value.
   int fetch_size;
+
+  // The offset to return records.
+  int64_t offset;
 
   recordservice::TRecordFormat::type format;
   scoped_ptr<ImpalaServer::BaseResultSet> results;
@@ -191,8 +197,10 @@ class ImpalaServer::RecordServiceTaskState {
 // of the value to the end of the buffer.
 class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseResultSet {
  public:
-  RecordServiceParquetResultSet(bool all_slot_refs,
-      const vector<ExprContext*>& output_exprs) : all_slot_refs_(all_slot_refs) {
+  RecordServiceParquetResultSet(RecordServiceTaskState* state, bool all_slot_refs,
+      const vector<ExprContext*>& output_exprs)
+    : state_(state),
+      all_slot_refs_(all_slot_refs) {
     if (all_slot_refs) {
       slot_descs_.resize(output_exprs.size());
       for (int i = 0; i < output_exprs.size(); ++i) {
@@ -213,6 +221,18 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
       vector<ExprContext*>* ctxs) {
     DCHECK(result_->__isset.columnar_records);
     recordservice::TColumnarRecords& batch = result_->columnar_records;
+
+    if (state_->offset > 0) {
+      // There is an offset, skip offset num rows.
+      if (num_rows <= state_->offset) {
+        state_->offset -= num_rows;
+        return;
+      } else {
+        row_idx += state_->offset;
+        num_rows -= state_->offset;
+        state_->offset = 0;
+      }
+    }
 
     if (all_slot_refs_) {
       // In this case, all the output exprs are slot refs and we want to serialize them
@@ -339,6 +359,9 @@ class ImpalaServer::RecordServiceParquetResultSet : public ImpalaServer::BaseRes
     SlotDesc() : null_offset(0, 0) {}
   };
 
+  // Unowned.
+  RecordServiceTaskState* state_;
+
   // If true, all the output exprs are slot refs.
   bool all_slot_refs_;
 
@@ -442,6 +465,10 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
   // multiple blocks, so the cost of codegen is amortized.
   // TODO: implement codegen caching.
   query_ctx.request.query_options.__set_disable_codegen(true);
+  if (req.options.__isset.abort_on_corrupt_record) {
+    query_ctx.request.query_options.__set_abort_on_error(
+        req.options.abort_on_corrupt_record);
+  }
 
   unique_lock<mutex> tmp_tbl_lock;
 
@@ -670,10 +697,13 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
 
     for (int i = 0; i < scan_ranges.size(); ++i) {
       recordservice::TTask task;
+      task.results_ordered = false;
 
       TScanRangeLocations& scan_range = scan_ranges[i];
       // Add the partition metadata.
       if (scan_range.scan_range.__isset.hdfs_file_split) {
+        // HDFS tasks are always ordered since we single thread the scanner.
+        task.results_ordered = true;
         if (path_filter != NULL) {
           const string& base_filename = scan_range.scan_range.hdfs_file_split.file_name;
           if (!re2::RE2::FullMatch(base_filename, *path_filter.get())) {
@@ -704,6 +734,8 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
         query_request.host_list.push_back(all_hosts[loc.host_idx]);
         loc.host_idx = query_request.host_list.size() - 1;
       }
+
+      random_shuffle(task.local_hosts.begin(), task.local_hosts.end());
 
       // Add the scan range.
       query_request.per_node_scan_ranges.clear();
@@ -786,6 +818,10 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
         request.query_options.__set_mem_limit(req.mem_limit);
     }
 
+    // FIXME: this needs to verify that the contains only contains HDFS scans.
+    // The current counters depend on this too.
+    if (req.__isset.offset && req.offset != 0) task_state->offset = req.offset;
+
     shared_ptr<QueryExecState> exec_state;
     status = ExecuteRecordServiceRequest(
             &exec_req.query_exec_request.query_ctx,
@@ -795,7 +831,6 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           "Could not execute task.",
           status.msg().GetFullMessageDetails());
     }
-
     PopulateResultSchema(*exec_state->result_metadata(), &return_val.schema);
     exec_state->SetRecordServiceTaskState(task_state);
 
@@ -819,7 +854,7 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     switch (task_state->format) {
       case recordservice::TRecordFormat::Columnar:
         task_state->results.reset(new RecordServiceParquetResultSet(
-            all_slot_refs, output_exprs));
+            task_state.get(), all_slot_refs, output_exprs));
         break;
       default:
         ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
