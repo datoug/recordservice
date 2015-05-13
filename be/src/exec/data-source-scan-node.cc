@@ -59,7 +59,8 @@ Status DataSourceScanNode::Prepare(RuntimeState* state) {
 
   data_source_executor_.reset(new ExternalDataSourceExecutor());
   RETURN_IF_ERROR(data_source_executor_->Init(data_src_node_.data_source.hdfs_location,
-      data_src_node_.data_source.class_name, data_src_node_.data_source.api_version));
+      data_src_node_.data_source.class_name, data_src_node_.data_source.api_version,
+      data_src_node_.init_string));
 
   // Initialize materialized_slots_
   BOOST_FOREACH(SlotDescriptor* slot, tuple_desc_->slots()) {
