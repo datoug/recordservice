@@ -129,6 +129,7 @@ class Metric {
 //
 /// TODO: We can use type traits to select a more efficient lock-free implementation of
 /// value() etc. where it is safe to do so.
+/// TODO: CalculateValue() can be returning a value, its current interface is not clean.
 template<typename T, TMetricKind::type metric_kind=TMetricKind::GAUGE>
 class SimpleMetric : public Metric {
  public:
@@ -150,14 +151,14 @@ class SimpleMetric : public Metric {
 
   /// Returns the current value, updating it if necessary. Thread-safe.
   T value() {
-    boost::lock_guard<Lock> l(lock_);
+    boost::lock_guard<SpinLock> l(lock_);
     CalculateValue();
     return value_;
   }
 
   /// Sets the current value. Thread-safe.
   void set_value(const T& value) {
-    boost::lock_guard<Lock> l(lock_);
+    boost::lock_guard<SpinLock> l(lock_);
     value_ = value;
   }
 
@@ -167,7 +168,7 @@ class SimpleMetric : public Metric {
         << "Can't change value of PROPERTY metric: " << key();
     DCHECK(kind() != TMetricKind::COUNTER || delta >= 0)
         << "Can't decrement value of COUNTER metric: " << key();
-    boost::lock_guard<Lock> l(lock_);
+    boost::lock_guard<SpinLock> l(lock_);
     value_ += delta;
   }
 
@@ -208,11 +209,11 @@ class SimpleMetric : public Metric {
   /// the compiler to avoid calling this entirely through a compile-time constant.
   virtual void CalculateValue() { }
 
-  /// Units of this metric
+  /// Units of this metric.
   const TUnit::type unit_;
 
-  /// Guards access to value_
-  Lock lock_;
+  /// Guards access to value_.
+  SpinLock lock_;
 
   /// The current value of the metric
   T value_;
@@ -243,11 +244,11 @@ class MetricGroup {
   /// M must be a subclass of Metric.
   template <typename M>
   M* RegisterMetric(M* metric) {
-    boost::lock_guard<Lock> l(lock_);
     DCHECK(!metric->key_.empty());
-    DCHECK(metric_map_.find(metric->key_) == metric_map_.end());
-
     M* mt = obj_pool_->Add(metric);
+
+    boost::lock_guard<SpinLock> l(lock_);
+    DCHECK(metric_map_.find(metric->key_) == metric_map_.end());
     metric_map_[metric->key_] = mt;
     return mt;
   }
@@ -304,10 +305,10 @@ class MetricGroup {
   /// Used for testing only.
   template <typename M>
   M* FindMetricForTesting(const std::string& key) {
-    boost::lock_guard<Lock> l(lock_);
     std::stack<MetricGroup*> groups;
     groups.push(this);
-    while (!groups.empty()) {
+    boost::lock_guard<SpinLock> l(lock_);
+    do {
       MetricGroup* group = groups.top();
       groups.pop();
       MetricMap::const_iterator it = group->metric_map_.find(key);
@@ -315,7 +316,7 @@ class MetricGroup {
       BOOST_FOREACH(const ChildGroupMap::value_type& child, group->children_) {
         groups.push(child.second);
       }
-    }
+    } while (!groups.empty());
     return NULL;
   }
 
@@ -343,7 +344,7 @@ class MetricGroup {
   std::string name_;
 
   /// Guards metric_map_ and children_
-  Lock lock_;
+  SpinLock lock_;
 
   /// Contains all Metric objects, indexed by key
   typedef std::map<std::string, Metric*> MetricMap;
