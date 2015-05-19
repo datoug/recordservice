@@ -488,9 +488,21 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
 
   LOG(ERROR) << "RecordService::PlanRequest: " << query_ctx.request.stmt;
 
+  // Populate session information. This includes, among other things, the user
+  // information.
+  shared_ptr<SessionState> session;
+  const TUniqueId& session_id = ThriftServer::GetThreadConnectionId();
+  Status status = GetSessionState(session_id, &session);
+  if (!status.ok()) {
+    ThrowRecordServiceException(recordservice::TErrorCode::INTERNAL_ERROR,
+        "Could not get session.", status.msg().GetFullMessageDetails());
+  }
+  DCHECK(session != NULL);
+  session->ToThrift(session_id, &query_ctx.session);
+
   // Plan the request.
   TExecRequest result;
-  Status status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
+  status = exec_env_->frontend()->GetRecordServiceExecRequest(query_ctx, &result);
   if (tmp_tbl_lock.owns_lock()) tmp_tbl_lock.unlock();
   if (!status.ok()) {
     ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
