@@ -268,6 +268,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   void MembershipCallback(const StatestoreSubscriber::TopicDeltaMap&
       incoming_topic_deltas, std::vector<TTopicDelta>* subscriber_topic_updates);
 
+  void RecordServiceMembershipCallback(
+      const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
+      std::vector<TTopicDelta>* subscriber_topic_updates);
+
   void CatalogUpdateCallback(const StatestoreSubscriber::TopicDeltaMap& topic_deltas,
       std::vector<TTopicDelta>* topic_updates);
 
@@ -781,6 +785,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Set is_offline_ to the argument's value.
   void SetOffline(bool offline);
 
+  // Registers this daemon to catalog updates (from the statestore).
+  void RegisterToCatalogTopic();
+
   // Creates a temp table for 'path', returning the fully qualified name.
   // If the 'path' was not a directory (e.g. /path/file or /path/*.avro), then
   // *suffix will be the part after the last '/' (e.g. "file", "*.avro")
@@ -1024,6 +1031,11 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // (the scheduler?) that tracks this information and calls other interested components.
   typedef boost::unordered_map<std::string, TNetworkAddress> BackendAddressMap;
   BackendAddressMap known_backends_;
+
+  // RecordService workers and planners in the cluster. Only maintained if this daemon
+  // is running the planner service.
+  BackendAddressMap known_recordservice_workers_;
+  BackendAddressMap known_recordservice_planners_;
 
   // Generate unique session id for HiveServer2 session
   boost::uuids::random_generator uuid_generator_;

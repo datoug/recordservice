@@ -190,6 +190,9 @@ const int ImpalaServer::ASCII_PRECISION = 16; // print 16 digits for double/floa
 
 const int MAX_NM_MISSED_HEARTBEATS = 5;
 
+const string RECORD_SERVICE_PLANNER_MEMBERSHIP_TOPIC("recordservice-planner-membership");
+const string RECORD_SERVICE_WORKER_MEMBERSHIP_TOPIC("recordservice-worker-membership");
+
 // Work item for ImpalaServer::cancellation_thread_pool_.
 class CancellationWork {
  public:
@@ -225,10 +228,18 @@ class CancellationWork {
   bool unregister_;
 };
 
+void ImpalaServer::RegisterToCatalogTopic() {
+  LOG(INFO) << "Registering to catalog topic.";
+  StatestoreSubscriber::UpdateCallback catalog_cb =
+      bind<void>(mem_fn(&ImpalaServer::CatalogUpdateCallback), this, _1, _2);
+  exec_env_->subscriber()->AddTopic(
+      CatalogServer::IMPALA_CATALOG_TOPIC, true, catalog_cb);
+}
+
 ImpalaServer::ImpalaServer(ExecEnv* exec_env)
-    : exec_env_(exec_env),
-      recordservice_planner_server_(NULL),
-      recordservice_worker_server_(NULL) {
+  : exec_env_(exec_env),
+    recordservice_planner_server_(NULL),
+    recordservice_worker_server_(NULL) {
   // Initialize default config
   InitializeConfigVariables();
 
@@ -314,10 +325,12 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
         bind<void>(mem_fn(&ImpalaServer::MembershipCallback), this, _1, _2);
     exec_env->subscriber()->AddTopic(SimpleScheduler::IMPALA_MEMBERSHIP_TOPIC, true, cb);
 
-    StatestoreSubscriber::UpdateCallback catalog_cb =
-        bind<void>(mem_fn(&ImpalaServer::CatalogUpdateCallback), this, _1, _2);
-    exec_env->subscriber()->AddTopic(
-        CatalogServer::IMPALA_CATALOG_TOPIC, true, catalog_cb);
+    // If we are running the RecordService services in this daemon, don't register
+    // to the catalog yet. Only register if this starts up a planner service.
+    // FIXME: this is a hack for now. recordserviced should not export the HS2 and
+    // beeswax services and the code should be updated so that if any services that
+    // need the catalog is started, we register to this topic.
+    if (!exec_env->running_record_service()) RegisterToCatalogTopic();
   }
 
   EXIT_IF_ERROR(UpdateCatalogMetrics());
@@ -1448,6 +1461,104 @@ void ImpalaServer::MembershipCallback(
   }
 }
 
+void ImpalaServer::RecordServiceMembershipCallback(
+    const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
+    vector<TTopicDelta>* subscriber_topic_updates) {
+  // Loop through (potentially) processing both planner and worker membership topics.
+  for (int i = 0; i < 2; ++i) {
+    const bool planner_topic = (i == 0);
+    // Daemons that aren't exporting the planner interface don't care about the
+    // planners.
+    if (planner_topic && recordservice_planner_server_ == NULL) continue;
+    StatestoreSubscriber::TopicDeltaMap::const_iterator topic =
+        incoming_topic_deltas.find(planner_topic ?
+            RECORD_SERVICE_PLANNER_MEMBERSHIP_TOPIC :
+            RECORD_SERVICE_WORKER_MEMBERSHIP_TOPIC);
+
+    BackendAddressMap& services = planner_topic ? known_recordservice_planners_ :
+        known_recordservice_workers_;
+
+    if (topic == incoming_topic_deltas.end()) return;
+    const TTopicDelta& delta = topic->second;
+    // If this is not a delta, the update should include all entries in the topic so
+    // clear the saved mapping of known backends.
+    if (!delta.is_delta) services.clear();
+
+    const string& subscriber_id = exec_env_->subscriber()->id();
+
+    // Process membership additions.
+    BOOST_FOREACH(const TTopicItem& item, delta.topic_entries) {
+      uint32_t len = item.value.size();
+      TBackendDescriptor backend_descriptor;
+      Status status = DeserializeThriftMsg(reinterpret_cast<const uint8_t*>(
+          item.value.data()), &len, false, &backend_descriptor);
+      if (!status.ok()) {
+        VLOG(2) << "Error deserializing topic item with key: " << item.key;
+        continue;
+      }
+      // This is a new item - add it to the map of known services.
+      services.insert(make_pair(item.key, backend_descriptor.address));
+    }
+
+    // Process membership deletions.
+    BOOST_FOREACH(const string& backend_id, delta.topic_deletions) {
+      services.erase(backend_id);
+    }
+
+    if (services.find(subscriber_id) == services.end()) {
+      if (!planner_topic && recordservice_worker_server_ == NULL) {
+        // This server is just running the planner and only wants to know the
+        // worker membership. Don't update the worker membership.
+        continue;
+      }
+
+      VLOG(1) << "Registering local " << (planner_topic ? "planner" : "worker")
+              << " with statestored.";
+      subscriber_topic_updates->push_back(TTopicDelta());
+      TTopicDelta& update = subscriber_topic_updates->back();
+      update.topic_name = (planner_topic ?
+          RECORD_SERVICE_PLANNER_MEMBERSHIP_TOPIC :
+          RECORD_SERVICE_WORKER_MEMBERSHIP_TOPIC);
+      update.topic_entries.push_back(TTopicItem());
+
+      TTopicItem& item = update.topic_entries.back();
+      item.key = subscriber_id;
+
+      string hostname;
+      string ipaddress;
+      Status status = GetHostname(&hostname);
+      if (!status.ok()) {
+        LOG(WARNING) << "Could not get hostname. Cannot register with statestore.";
+        subscriber_topic_updates->pop_back();
+        continue;
+      }
+      status = ResolveIpAddress("localhost", &ipaddress);
+      if (!status.ok()) {
+        LOG(WARNING) << "Could not resolve ipaddress. Cannot register with statestore.";
+        subscriber_topic_updates->pop_back();
+        continue;
+      }
+      LOG(INFO) << "Registering server with statestore using hostname=" << hostname
+                << " ipaddress=" << ipaddress;
+
+      TBackendDescriptor service_descriptor;
+      service_descriptor.address.hostname = hostname;
+      service_descriptor.ip_address = ipaddress;
+      service_descriptor.address.port = (planner_topic ?
+          recordservice_planner_server_->port() :
+          recordservice_worker_server_->port());
+
+      ThriftSerializer serializer(false);
+      status = serializer.Serialize(&service_descriptor, &item.value);
+      if (!status.ok()) {
+        LOG(WARNING) << "Failed to serialize Impala backend address for "
+                     << "statestore topic: " << status.GetDetail();
+        subscriber_topic_updates->pop_back();
+      }
+    }
+  }
+}
+
 ImpalaServer::QueryStateRecord::QueryStateRecord(const QueryExecState& exec_state,
     bool copy_profile, const string& encoded_profile) {
   id = exec_state.query_id();
@@ -1746,7 +1857,6 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
   DCHECK((be_port == 0) == (be_server == NULL));
 
   shared_ptr<ImpalaServer> handler(new ImpalaServer(exec_env));
-
   if (beeswax_port != 0 && beeswax_server != NULL) {
     // Beeswax FE must be a TThreadPoolServer because ODBC and Hue only support
     // TThreadPoolServer.
@@ -1813,21 +1923,38 @@ Status ImpalaServer::StartRecordServiceServices(ExecEnv* exec_env,
     const shared_ptr<ImpalaServer>& server,
     int planner_port, int worker_port,
     ThriftServer** recordservice_planner, ThriftServer** recordservice_worker) {
-  DCHECK((planner_port == 0) == (recordservice_planner == NULL));
-  DCHECK((worker_port == 0) == (recordservice_worker == NULL));
-
-  if (recordservice_planner != NULL) {
+  if (recordservice_planner != NULL && planner_port != 0) {
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServicePlannerProcessor>(
           exec_env, server, planner_port, RECORD_SERVICE_PLANNER_SERVER_NAME,
           recordservice_planner));
     server->recordservice_planner_server_ = *recordservice_planner;
+
+    // This is running the planner, register to the catalog.
+    server->RegisterToCatalogTopic();
   }
 
-  if (recordservice_worker != NULL) {
+  if (recordservice_worker != NULL && worker_port != 0) {
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
           exec_env, server, worker_port, RECORD_SERVICE_WORKER_SERVER_NAME,
           recordservice_worker));
     server->recordservice_worker_server_ = *recordservice_worker;
+  }
+
+  // Register with the statestore. Do this after the servers are created.
+  if (*recordservice_planner) {
+    StatestoreSubscriber::UpdateCallback cb =
+        bind<void>(mem_fn(&ImpalaServer::RecordServiceMembershipCallback),
+            server.get(), _1, _2);
+    exec_env->subscriber()->AddTopic(RECORD_SERVICE_PLANNER_MEMBERSHIP_TOPIC, true, cb);
+  }
+
+  if (*recordservice_worker || *recordservice_planner) {
+    // We need the worker membership if we are a worker (to add to the membership)
+    // or a planner, so we know where tasks should run.
+    StatestoreSubscriber::UpdateCallback cb =
+        bind<void>(mem_fn(&ImpalaServer::RecordServiceMembershipCallback),
+            server.get(), _1, _2);
+    exec_env->subscriber()->AddTopic(RECORD_SERVICE_WORKER_MEMBERSHIP_TOPIC, true, cb);
   }
 
   return Status::OK;

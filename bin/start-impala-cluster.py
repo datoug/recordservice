@@ -57,6 +57,8 @@ parser.add_option("--jvm_args", dest="jvm_args", default="",
 
 parser.add_option("--start_recordservice", dest="start_recordservice", action="store_true",
                   default=False, help="Starts recordserviced along with impalad")
+parser.add_option("--num_planner_servers", type="int", dest="num_planner_servers",
+                  default=1, help="Number of daemons that run the planner service.")
 
 options, args = parser.parse_args()
 
@@ -140,11 +142,17 @@ def build_impalad_port_args(instance_num):
   BASE_LLAMA_CALLBACK_PORT = 28000
   BASE_RS_PLANNER_PORT = 40000
   BASE_RS_WORKER_PORT = 40100
+
+  rs_planner_port = BASE_RS_PLANNER_PORT + instance_num
+  if instance_num >= options.num_planner_servers:
+    # Setting the port to 0 indicates to not start the planner.
+    rs_planner_port = 0
+
   return IMPALAD_PORTS % (BASE_BEESWAX_PORT + instance_num, BASE_HS2_PORT + instance_num,
                           BASE_BE_PORT + instance_num,
                           BASE_STATE_STORE_SUBSCRIBER_PORT + instance_num,
                           BASE_WEBSERVER_PORT + instance_num,
-                          BASE_RS_PLANNER_PORT + instance_num,
+                          rs_planner_port,
                           BASE_RS_WORKER_PORT + instance_num,
                           BASE_LLAMA_CALLBACK_PORT + instance_num)
 
@@ -223,10 +231,14 @@ def wait_for_cluster_web(timeout_in_seconds=CLUSTER_WAIT_TIMEOUT_IN_SECONDS):
   impala_cluster = ImpalaCluster()
   # impalad processes may take a while to come up.
   wait_for_impala_process_count(impala_cluster)
+  idx = 0
   for impalad in impala_cluster.impalads:
     impalad.service.wait_for_num_known_live_backends(options.cluster_size,
         timeout=CLUSTER_WAIT_TIMEOUT_IN_SECONDS, interval=2)
-    wait_for_catalog(impalad, timeout_in_seconds=CLUSTER_WAIT_TIMEOUT_IN_SECONDS)
+    if idx < options.num_planner_servers:
+      # Non-planner servers don't get the catalog.
+      wait_for_catalog(impalad, timeout_in_seconds=CLUSTER_WAIT_TIMEOUT_IN_SECONDS)
+    idx = idx + 1
 
 def wait_for_catalog(impalad, timeout_in_seconds):
   """Waits for the impalad catalog to become ready"""

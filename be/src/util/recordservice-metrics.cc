@@ -65,7 +65,22 @@ DEFINE_INT_COUNTER(NUM_CLOSED_TASKS,
 DEFINE_INT_COUNTER(NUM_ROWS_FETCHED,
     "record-service.num-rows-fetched");
 
+const char* RecordServiceMetricKeys::RUNNING_PLANNER =
+    "record-service.running-planner";
+const char* RecordServiceMetricKeys::RUNNING_WORKER =
+    "record-service.running-worker";
+
+BooleanProperty* RecordServiceMetrics::RUNNING_PLANNER = NULL;
+BooleanProperty* RecordServiceMetrics::RUNNING_WORKER = NULL;
+
 void RecordServiceMetrics::CreateMetrics(MetricGroup* m) {
+  RUNNING_PLANNER = m->AddProperty<bool>(
+      RecordServiceMetricKeys::RUNNING_PLANNER, false,
+      "If true this is running the RecordServicePlanner thrift service.");
+  RUNNING_WORKER = m->AddProperty<bool>(
+      RecordServiceMetricKeys::RUNNING_WORKER, false,
+      "If true this is running the RecordServiceWorker thrift service.");
+
   ADD_INT_GAUGE(m, NUM_OPEN_PLANNER_SESSIONS,
       "Number of connected planner clients.");
   ADD_INT_GAUGE(m, NUM_OPEN_WORKER_SESSIONS,

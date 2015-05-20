@@ -30,6 +30,7 @@
 #include "runtime/exec-env.h"
 #include "util/jni-util.h"
 #include "util/network-util.h"
+#include "util/recordservice-metrics.h"
 #include "rpc/thrift-util.h"
 #include "rpc/thrift-server.h"
 #include "rpc/rpc-trace.h"
@@ -80,12 +81,18 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  EXIT_IF_ERROR(recordservice_planner->Start());
-  EXIT_IF_ERROR(recordservice_worker->Start());
+  if (recordservice_planner != NULL) {
+    EXIT_IF_ERROR(recordservice_planner->Start());
+    RecordServiceMetrics::RUNNING_PLANNER->set_value(true);
+  }
+  if (recordservice_worker != NULL) {
+    EXIT_IF_ERROR(recordservice_worker->Start());
+    RecordServiceMetrics::RUNNING_WORKER->set_value(true);
+  }
 
   ImpaladMetrics::IMPALA_SERVER_READY->set_value(true);
   LOG(INFO) << "recordserviced has started.";
 
-  recordservice_planner->Join();
-  recordservice_worker->Join();
+  if (recordservice_planner != NULL) recordservice_planner->Join();
+  if (recordservice_worker != NULL) recordservice_worker->Join();
 }

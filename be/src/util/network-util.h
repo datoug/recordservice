@@ -46,6 +46,9 @@ bool IsWildcardAddress(const std::string& ipaddress);
 // Utility method to print address as address:port
 std::string TNetworkAddressToString(const TNetworkAddress& address);
 
+// Resolves hostname to ipaddress, returning the first non-local host ip.
+Status ResolveIpAddress(const std::string& hostname, std::string* ipaddress);
+
 // Prints a hostport as ipaddress:port
 std::ostream& operator<<(std::ostream& out, const TNetworkAddress& hostport);
 

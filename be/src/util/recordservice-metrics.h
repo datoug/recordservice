@@ -23,6 +23,10 @@ namespace impala {
 // Contains the keys (strings) for RecordService metrics.
 class RecordServiceMetricKeys {
  public:
+  // True if the daemon is running this service.
+  static const char* RUNNING_PLANNER;
+  static const char* RUNNING_WORKER;
+
   // Number of open Planner/Worker sessions
   static const char* NUM_OPEN_PLANNER_SESSIONS;
   static const char* NUM_OPEN_WORKER_SESSIONS;
@@ -57,6 +61,10 @@ class RecordServiceMetricKeys {
 // Global recordservice-wide metrics.
 class RecordServiceMetrics {
  public:
+  // Properties
+  static BooleanProperty* RUNNING_PLANNER;
+  static BooleanProperty* RUNNING_WORKER;
+
   // Gauges
   static IntGauge* NUM_OPEN_PLANNER_SESSIONS;
   static IntGauge* NUM_OPEN_WORKER_SESSIONS;

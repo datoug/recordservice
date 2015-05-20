@@ -128,6 +128,22 @@ string TNetworkAddressToString(const TNetworkAddress& address) {
   return ss.str();
 }
 
+Status ResolveIpAddress(const string& hostname, string* ipaddress) {
+  vector<string> ipaddrs;
+  Status status = HostnameToIpAddrs(hostname, &ipaddrs);
+  if (!status.ok()) {
+    status.AddDetail("Failed to resolve " + hostname);
+    return status;
+  }
+  // Find a non-localhost address for this host; if one can't be
+  // found use the first address returned by HostnameToIpAddrs
+  *ipaddress = ipaddrs[0];
+  if (!FindFirstNonLocalhost(ipaddrs, ipaddress)) {
+    VLOG(3) << "Only localhost addresses found for " << hostname;
+  }
+  return Status::OK;
+}
+
 ostream& operator<<(ostream& out, const TNetworkAddress& hostport) {
   out << hostport.hostname << ":" << dec << hostport.port;
   return out;

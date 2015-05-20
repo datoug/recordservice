@@ -327,7 +327,7 @@ class Statestore {
     // The location of the subscriber service that this subscriber runs.
     const TNetworkAddress network_address_;
 
-    // Map of topic subscriptions to current TopicState. The the state describes whether
+    // Map of topic subscriptions to current TopicState. The state describes whether
     // updates on the topic are 'transient' (i.e., to be deleted upon subscriber failure)
     // or not and contains the version number of the last update processed by this
     // Subscriber on the topic.
