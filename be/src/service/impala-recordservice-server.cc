@@ -735,8 +735,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
         loc.host_idx = query_request.host_list.size() - 1;
       }
 
-      random_shuffle(task.local_hosts.begin(), task.local_hosts.end());
-
       // Add the scan range.
       query_request.per_node_scan_ranges.clear();
       query_request.per_node_scan_ranges[scan_node_id].push_back(scan_range);
