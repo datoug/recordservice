@@ -31,15 +31,18 @@
 #include "exec/empty-set-node.h"
 #include "exec/exchange-node.h"
 #include "exec/hash-join-node.h"
-#include "exec/hdfs-scan-node.h"
 #include "exec/hbase-scan-node.h"
-#include "exec/select-node.h"
+#include "exec/hdfs-scan-node.h"
 #include "exec/partitioned-aggregation-node.h"
 #include "exec/partitioned-hash-join-node.h"
 #include "exec/record-service-scan-node.h"
+#include "exec/select-node.h"
+#include "exec/singular-row-src-node.h"
 #include "exec/sort-node.h"
+#include "exec/subplan-node.h"
 #include "exec/topn-node.h"
 #include "exec/union-node.h"
+#include "exec/unnest-node.h"
 #include "runtime/descriptors.h"
 #include "runtime/mem-tracker.h"
 #include "runtime/mem-pool.h"
@@ -159,6 +162,7 @@ Status ExecNode::Open(RuntimeState* state) {
 }
 
 Status ExecNode::Reset(RuntimeState* state) {
+  num_rows_returned_ = 0;
   for (int i = 0; i < children_.size(); ++i) {
     RETURN_IF_ERROR(children_[i]->Reset(state));
   }
@@ -321,6 +325,15 @@ Status ExecNode::CreateNode(RuntimeState* state, const TPlanNode& tnode,
       break;
     case TPlanNodeType::ANALYTIC_EVAL_NODE:
       *node = pool->Add(new AnalyticEvalNode(pool, tnode, descs));
+      break;
+    case TPlanNodeType::SINGULAR_ROW_SRC_NODE:
+      *node = pool->Add(new SingularRowSrcNode(pool, tnode, descs));
+      break;
+    case TPlanNodeType::SUBPLAN_NODE:
+      *node = pool->Add(new SubplanNode(pool, tnode, descs));
+      break;
+    case TPlanNodeType::UNNEST_NODE:
+      *node = pool->Add(new UnnestNode(pool, tnode, descs));
       break;
     default:
       map<int, const char*>::const_iterator i =
