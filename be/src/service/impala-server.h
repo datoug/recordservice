@@ -24,12 +24,12 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#include "gen-cpp/Frontend_types.h"
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaHiveServer2Service.h"
 #include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/RecordServicePlanner.h"
 #include "gen-cpp/RecordServiceWorker.h"
-#include "gen-cpp/Frontend_types.h"
 #include "rpc/thrift-server.h"
 #include "common/status.h"
 #include "service/frontend.h"
@@ -224,6 +224,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   virtual void GetSchema(recordservice::TGetSchemaResult& return_val,
       const recordservice::TPlanRequestParams& req);
   virtual recordservice::TProtocolVersion::type GetProtocolVersion();
+  virtual void GetMetric(recordservice::TMetricResponse& return_val,
+      const std::string& key);
 
   // RecordService worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,

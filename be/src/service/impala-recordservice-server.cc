@@ -1135,4 +1135,12 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
   return Status::OK;
 }
 
+void ImpalaServer::GetMetric(recordservice::TMetricResponse& return_val,
+    const string& key) {
+  MetricGroup* metrics = exec_env_->metrics()->GetChildGroup("record-service");
+  Metric* metric = metrics->FindMetricForTesting<Metric>(key);
+  if (metric == NULL) return;
+  return_val.__set_metric(metric->ToHumanReadable());
+}
+
 }
