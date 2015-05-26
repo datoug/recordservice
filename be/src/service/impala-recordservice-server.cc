@@ -454,6 +454,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
   }
 
   TQueryCtx query_ctx;
+  PrepareQueryContext(&query_ctx);
   query_ctx.__set_is_record_service_request(true);
 
   // Setting num_nodes = 1 means we generate a single node plan which has
@@ -653,6 +654,10 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     //}
     result.access_events.clear();
 
+    return_val.request_id.hi = query_request.query_ctx.query_id.hi;
+    return_val.request_id.lo = query_request.query_ctx.query_id.lo;
+    query_request.__isset.record_service_task_id = true;
+
     // Send analysis warning as part of TPlanRequestResult.
     for (int i = 0; i < result.analysis_warnings.size(); ++i) {
       recordservice::TLogMessage msg;
@@ -698,6 +703,14 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     for (int i = 0; i < scan_ranges.size(); ++i) {
       recordservice::TTask task;
       task.results_ordered = false;
+
+      // Generate the task id from the request id. Just increment the lo field. It
+      // doesn't matter if this overflows. Return the task ID to the RecordService
+      // client as well as setting it in the plan request.
+      task.task_id.hi = return_val.request_id.hi;
+      task.task_id.lo = return_val.request_id.lo + i + 1;
+      query_request.record_service_task_id.hi = task.task_id.hi;
+      query_request.record_service_task_id.lo = task.task_id.lo;
 
       TScanRangeLocations& scan_range = scan_ranges[i];
       // Add the partition metadata.

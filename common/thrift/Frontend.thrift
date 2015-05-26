@@ -380,6 +380,9 @@ struct TQueryExecRequest {
 
   // Column lineage graph serialized into JSON
   13: optional string lineage_graph
+
+  // Set if this is a request for a RecordService task.
+  14: optional Types.TUniqueId record_service_task_id
 }
 
 enum TCatalogOpType {

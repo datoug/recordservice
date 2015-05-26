@@ -599,20 +599,31 @@ Status SimpleScheduler::ComputeScanRangeAssignment(
 void SimpleScheduler::ComputeFragmentExecParams(const TQueryExecRequest& exec_request,
     QuerySchedule* schedule) {
   vector<FragmentExecParams>* fragment_exec_params = schedule->exec_params();
-  // assign instance ids
   int64_t num_backends = 0;
-  BOOST_FOREACH(FragmentExecParams& params, *fragment_exec_params) {
-    for (int j = 0; j < params.hosts.size(); ++j) {
-      int instance_num = num_backends + j;
-      // we add instance_num to query_id.lo to create a globally-unique instance id
-      TUniqueId instance_id;
-      instance_id.hi = schedule->query_id().hi;
-      DCHECK_LT(
-          schedule->query_id().lo, numeric_limits<int64_t>::max() - instance_num - 1);
-      instance_id.lo = schedule->query_id().lo + instance_num + 1;
-      params.instance_ids.push_back(instance_id);
+  // assign instance ids
+  if (exec_request.query_ctx.is_record_service_request) {
+    // In the case of the record service, the task ids were assigned during planning,
+    // so just use those.
+    DCHECK_EQ(fragment_exec_params->size(), 1);
+    FragmentExecParams& params = (*fragment_exec_params)[0];
+    DCHECK_EQ(params.hosts.size(), 1);
+    DCHECK(exec_request.__isset.record_service_task_id);
+    params.instance_ids.push_back(exec_request.record_service_task_id);
+    num_backends += 1;
+  } else {
+    BOOST_FOREACH(FragmentExecParams& params, *fragment_exec_params) {
+      for (int j = 0; j < params.hosts.size(); ++j) {
+        int instance_num = num_backends + j;
+        // we add instance_num to query_id.lo to create a globally-unique instance id
+        TUniqueId instance_id;
+        instance_id.hi = schedule->query_id().hi;
+        DCHECK_LT(
+            schedule->query_id().lo, numeric_limits<int64_t>::max() - instance_num - 1);
+        instance_id.lo = schedule->query_id().lo + instance_num + 1;
+        params.instance_ids.push_back(instance_id);
+      }
+      num_backends += params.hosts.size();
     }
-    num_backends += params.hosts.size();
   }
   if (exec_request.fragments[0].partition.type == TPartitionType::UNPARTITIONED) {
     // the root fragment is executed directly by the coordinator
