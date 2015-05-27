@@ -91,7 +91,7 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
     if (!slots[i]->is_materialized()) continue;
     int col_idx = slots[i]->col_pos();
     materialized_slots_.push_back(slots[i]);
-    materialized_col_names_.push_back(hdfs_table_->col_names()[col_idx]);
+    materialized_col_names_.push_back(hdfs_table_->col_descs()[col_idx].name());
     if (materialized_col_names_.size() == 1) {
       stmt << materialized_col_names_[i];
     } else {

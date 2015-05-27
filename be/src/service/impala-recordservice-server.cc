@@ -140,7 +140,7 @@ class ImpalaServer::BaseResultSet : public ImpalaServer::QueryResultSet {
 
   virtual void Init(const TResultSetMetadata& md, int fetch_size) {
     for (int i = 0; i < md.columns.size(); ++i) {
-      types_.push_back(md.columns[i].columnType);
+      types_.push_back(ColumnType::FromThrift(md.columns[i].columnType));
       if (types_[i] == TYPE_TIMESTAMP) {
         type_sizes_.push_back(12);
       } else {
@@ -519,7 +519,7 @@ static void PopulateResultSchema(const TResultSetMetadata& metadata,
     recordservice::TSchema* schema) {
   schema->cols.resize(metadata.columns.size());
   for (int i = 0; i < metadata.columns.size(); ++i) {
-    ColumnType type(metadata.columns[i].columnType);
+    ColumnType type = ColumnType::FromThrift(metadata.columns[i].columnType);
     schema->cols[i].type = ToRecordServiceType(type);
     schema->cols[i].name = metadata.columns[i].columnName;
   }
