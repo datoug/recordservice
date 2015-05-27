@@ -1061,7 +1061,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       QueryLocations;
   QueryLocations query_locations_;
 
-  /// A map from unique backend ID to the corresponding TNetworkAddress of that backend.
+  /// A map from unique backend ID to the corresponding TBackendDescriptor of that backend.
   /// Used to track membership updates from the statestore so queries can be cancelled
   /// when a backend is removed. It's not enough to just cancel fragments that are running
   /// based on the deletions mentioned in the most recent statestore heartbeat; sometimes
@@ -1070,8 +1070,8 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// TODO: Currently there are multiple locations where cluster membership is tracked,
   /// here and in the scheduler. This should be consolidated so there is a single component
   /// (the scheduler?) that tracks this information and calls other interested components.
-  typedef boost::unordered_map<std::string, TNetworkAddress> BackendAddressMap;
-  BackendAddressMap known_backends_;
+  typedef boost::unordered_map<std::string, TBackendDescriptor> BackendDescriptorMap;
+  BackendDescriptorMap known_backends_;
 
   /// RecordService workers and planners in the cluster. Only maintained if this daemon
   /// is running the planner service.

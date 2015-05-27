@@ -1222,8 +1222,6 @@ public class HdfsTable extends Table {
   public long getTotalHdfsBytes() { return totalHdfsBytes_; }
   public String getHdfsBaseDir() { return hdfsBaseDir_; }
   public boolean isAvroTable() { return avroSchema_ != null; }
-
-  @Override
   public int getNumNodes() { return hostIndex_.size(); }
 
   /**
