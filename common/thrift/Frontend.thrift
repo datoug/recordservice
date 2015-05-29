@@ -720,18 +720,36 @@ struct TStartupOptions {
 }
 
 struct TGetDelegationTokenRequest {
-  1: required string user
-  2: required string renewer
+  // The authenticated user issuing the get request.
+  1: required string owner
+  // The user this token is for. e.g. oozie could request for user. in which
+  // case owner is oozie but user is 'user'
+  2: required string user
+  3: required string renewer
 }
 
 struct TGetDelegationTokenResponse {
-  1: required binary token
+  1: required string identifier
+  2: required string password
+  3: required binary token
 }
 
 struct TCancelDelegationTokenRequest {
   1: required binary token
+  2: required string user
 }
 
 struct TRenewDelegationTokenRequest {
   1: required binary token
+  2: required string user
 }
+
+struct TRetrieveUserAndPasswordRequest {
+  1: required string identifier
+}
+
+struct TRetrieveUserAndPasswordResponse {
+  1: required string user
+  2: required string password
+}
+

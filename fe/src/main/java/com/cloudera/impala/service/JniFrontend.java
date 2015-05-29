@@ -21,6 +21,7 @@ import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
@@ -58,6 +59,8 @@ import com.cloudera.impala.common.FileSystemUtil;
 import com.cloudera.impala.common.ImpalaException;
 import com.cloudera.impala.common.InternalException;
 import com.cloudera.impala.common.JniUtil;
+import com.cloudera.impala.security.AuthenticationException;
+import com.cloudera.impala.security.DelegationTokenManager;
 import com.cloudera.impala.thrift.TCancelDelegationTokenRequest;
 import com.cloudera.impala.thrift.TCatalogObject;
 import com.cloudera.impala.thrift.TDescribeTableParams;
@@ -69,6 +72,7 @@ import com.cloudera.impala.thrift.TGetDataSrcsResult;
 import com.cloudera.impala.thrift.TGetDbsParams;
 import com.cloudera.impala.thrift.TGetDbsResult;
 import com.cloudera.impala.thrift.TGetDelegationTokenRequest;
+import com.cloudera.impala.thrift.TGetDelegationTokenResponse;
 import com.cloudera.impala.thrift.TGetFunctionsParams;
 import com.cloudera.impala.thrift.TGetFunctionsResult;
 import com.cloudera.impala.thrift.TGetHadoopConfigRequest;
@@ -82,6 +86,8 @@ import com.cloudera.impala.thrift.TMetadataOpRequest;
 import com.cloudera.impala.thrift.TQueryCtx;
 import com.cloudera.impala.thrift.TRenewDelegationTokenRequest;
 import com.cloudera.impala.thrift.TResultSet;
+import com.cloudera.impala.thrift.TRetrieveUserAndPasswordRequest;
+import com.cloudera.impala.thrift.TRetrieveUserAndPasswordResponse;
 import com.cloudera.impala.thrift.TShowFilesParams;
 import com.cloudera.impala.thrift.TShowGrantRoleParams;
 import com.cloudera.impala.thrift.TShowRolesParams;
@@ -118,7 +124,8 @@ public class JniFrontend {
    */
   public JniFrontend(boolean lazy, String serverName, String authorizationPolicyFile,
       String sentryConfigFile, String authPolicyProviderClass, int impalaLogLevel,
-      int otherLogLevel) throws InternalException {
+      int otherLogLevel, boolean enableDelegationTokens, boolean runningPlanner)
+      throws InternalException {
     GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
         TLogLevel.values()[otherLogLevel]);
 
@@ -137,6 +144,14 @@ public class JniFrontend {
     LOG.info(JniUtil.getJavaVersion());
 
     frontend_ = new Frontend(authConfig);
+
+    if (enableDelegationTokens) {
+      try {
+        DelegationTokenManager.init(CONF, runningPlanner);
+      } catch (IOException e) {
+        throw new InternalException("Could not initialize delegation token manager", e);
+      }
+    }
   }
 
   /**
@@ -536,22 +551,86 @@ public class JniFrontend {
     }
   }
 
+  /**
+   * Creates a new delegation token.
+   */
   public byte[] getDelegationToken(byte[] serializedRequest) throws ImpalaException {
     TGetDelegationTokenRequest request = new TGetDelegationTokenRequest();
     JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
-    throw new InternalException("Not yet implemented.");
+    TGetDelegationTokenResponse result = new TGetDelegationTokenResponse();
+    try {
+      DelegationTokenManager.DelegationToken token =
+          DelegationTokenManager.instance().getToken(
+              new User(request.owner).getShortName(), request.renewer, request.user);
+      result.identifier = token.identifier;
+      result.password = token.password;
+      result.token = ByteBuffer.wrap(token.token);
+    } catch (IOException e) {
+      throw new AuthenticationException("Could not get delegation token", e);
+    }
+
+    TSerializer serializer = new TSerializer(protocolFactory_);
+    try {
+      return serializer.serialize(result);
+    } catch (TException e) {
+      throw new InternalException(e.getMessage());
+    }
   }
 
+  /**
+   * Cancels the delegation token.
+   */
   public void cancelDelegationToken(byte[] serializedRequest) throws ImpalaException {
     TCancelDelegationTokenRequest request = new TCancelDelegationTokenRequest();
     JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
-    throw new InternalException("Not yet implemented.");
+    try {
+      byte[] token = new byte[request.token.remaining()];
+      request.token.get(token);
+      DelegationTokenManager.instance().cancelToken(
+          new User(request.user).getShortName(), token);
+    } catch (IOException e) {
+      throw new AuthenticationException("Could not cancel delegation token", e);
+    }
   }
 
+  /**
+   * Renews the delegation token.
+   */
   public void renewDelegationToken(byte[] serializedRequest) throws ImpalaException {
     TRenewDelegationTokenRequest request = new TRenewDelegationTokenRequest();
     JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
-    throw new InternalException("Not yet implemented.");
+    try {
+      byte[] token = new byte[request.token.remaining()];
+      request.token.get(token);
+      DelegationTokenManager.instance().renewToken(
+          new User(request.user).getShortName(), token);
+    } catch (IOException e) {
+      throw new AuthenticationException("Could not renew delegation token", e);
+    }
+  }
+
+  /**
+   * Retrieves the user and password (stored in the server) for this token.
+   */
+  public byte[] retrieveUserAndPassword(byte[] serializedRequest) throws ImpalaException {
+    TRetrieveUserAndPasswordRequest request = new TRetrieveUserAndPasswordRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    TRetrieveUserAndPasswordResponse result = new TRetrieveUserAndPasswordResponse();
+    try {
+      DelegationTokenManager.UserPassword userPw =
+          DelegationTokenManager.instance().retrieveUserPassword(request.identifier);
+      result.user = userPw.user;
+      result.password = userPw.password;
+    } catch (IOException e) {
+      throw new AuthenticationException("Could not get delegation token", e);
+    }
+
+    TSerializer serializer = new TSerializer(protocolFactory_);
+    try {
+      return serializer.serialize(result);
+    } catch (TException e) {
+      throw new InternalException(e.getMessage());
+    }
   }
 
   public class CdhVersion implements Comparable<CdhVersion> {

@@ -27,6 +27,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include "common/logging.h"
+#include "rpc/authentication.h"
 
 DEFINE_bool(force_lowercase_usernames, false, "If true, all principals and usernames are"
     " mapped to lowercase shortnames before being passed to any components (Sentry, "
@@ -68,29 +69,36 @@ uint8_t* TSasl::wrap(const uint8_t* outgoing,
 }
 
 string TSasl::getUsername() {
-  const char* username;
-  int result =
-      sasl_getprop(conn, SASL_USERNAME, reinterpret_cast<const void **>(&username));
-  if (result != SASL_OK) {
-    stringstream ss;
-    ss << "Error getting SASL_USERNAME property: " << sasl_errstring(result, NULL, NULL);
-    throw SaslException(ss.str().c_str());
-  }
-  // Copy the username and return it to the caller. There is no cleanup/delete call for
-  // calls to sasl_getprops, the sasl layer handles the cleanup internally.
-  string ret(username);
+  // First try to see if this is a delegation token connection.
+  string ret = impala::AuthManager::GetInstance()->GetDigestMd5ConnectedUser(conn);
 
-  // Temporary fix to auth_to_local-style lowercase mapping from
-  // USER_NAME/REALM@DOMAIN.COM -> user_name/REALM@DOMAIN.COM
-  //
-  // TODO: The right fix is probably to use UserGroupInformation in the frontend which
-  // will use auth_to_local rules to do this.
-  if (FLAGS_force_lowercase_usernames) {
-    vector<string> components;
-    split(components, ret, is_any_of("@"));
-    if (components.size() > 0 ) {
-      to_lower(components[0]);
-      ret = join(components, "@");
+  if (ret == "") {
+    // If not, get it from the connection (for delegation tokens, this is the encoded
+    // token, not the user).
+    const char* username;
+    int result =
+        sasl_getprop(conn, SASL_USERNAME, reinterpret_cast<const void **>(&username));
+    if (result != SASL_OK) {
+      stringstream ss;
+      ss << "Error getting SASL_USERNAME property: " << sasl_errstring(result, NULL, NULL);
+      throw SaslException(ss.str().c_str());
+    }
+    // Copy the username and return it to the caller. There is no cleanup/delete call for
+    // calls to sasl_getprops, the sasl layer handles the cleanup internally.
+    ret = username;
+
+    // Temporary fix to auth_to_local-style lowercase mapping from
+    // USER_NAME/REALM@DOMAIN.COM -> user_name/REALM@DOMAIN.COM
+    //
+    // TODO: The right fix is probably to use UserGroupInformation in the frontend which
+    // will use auth_to_local rules to do this.
+    if (FLAGS_force_lowercase_usernames) {
+      vector<string> components;
+      split(components, ret, is_any_of("@"));
+      if (components.size() > 0 ) {
+        to_lower(components[0]);
+        ret = join(components, "@");
+      }
     }
   }
   return ret;
@@ -198,6 +206,16 @@ TSaslServer::TSaslServer(const string& mechanism,
       throw SaslServerImplException(sasl_errstring(result, NULL, NULL));
     }
   }
+  DCHECK(conn != NULL);
+  if (mechanism == impala::AuthManager::DIGEST_MECHANISM) {
+    impala::AuthManager::GetInstance()->AddDigestMd5Connection(conn);
+  }
+}
+
+TSaslServer::~TSaslServer() {
+  if (conn != NULL && mechanism == impala::AuthManager::DIGEST_MECHANISM) {
+    impala::AuthManager::GetInstance()->RemoveDigestMd5Connection(conn);
+  }
 }
 
 uint8_t* TSaslServer::evaluateChallengeOrResponse(const uint8_t* response,
@@ -209,6 +227,17 @@ uint8_t* TSaslServer::evaluateChallengeOrResponse(const uint8_t* response,
   if (!serverStarted) {
     result = sasl_server_start(conn,
         (const char*)response, NULL, 0, (const char**)&out, &outlen);
+    if (result == SASL_NOMECH) {
+      // In this case, we couldn't find the mechanism, meaning the .so is not
+      // on the sasl_path. For example, for digest-md5, we need to be able to locate
+      // libdigestmd5.so.
+      stringstream ss;
+      ss << sasl_errdetail(conn)
+         << "\nCheck that the library plugin for this mechanism is on the machine."
+         << " You can specify the library directories with --sasl_path service flag.";
+      LOG(WARNING) << ss.str();
+      throw SaslServerImplException(ss.str().c_str());
+    }
   } else {
     result = sasl_server_step(conn,
         (const char*)response, len, (const char**)&out, &outlen);

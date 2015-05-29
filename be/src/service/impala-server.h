@@ -232,10 +232,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   virtual recordservice::TProtocolVersion::type GetProtocolVersion();
   virtual void GetMetric(recordservice::TMetricResponse& return_val,
       const std::string& key);
-  virtual void GetDelegationToken(std::string& token,
+  virtual void GetDelegationToken(recordservice::TDelegationToken& token,
       const std::string& user, const std::string& renewer);
-  virtual void CancelDelegationToken(const std::string& token);
-  virtual void RenewDelegationToken(const std::string& token);
+  virtual void CancelDelegationToken(const recordservice::TDelegationToken& token);
+  virtual void RenewDelegationToken(const recordservice::TDelegationToken& token);
 
   // RecordService worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,
@@ -299,6 +299,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   bool IsLineageLoggingEnabled();
 
   class RecordServiceTaskState;
+
+  static const string RECORD_SERVICE_PLANNER_SERVER_NAME;
+  static const string RECORD_SERVICE_WORKER_SERVER_NAME;
 
  private:
   friend class ChildQuery;

@@ -22,12 +22,11 @@
 
 #include "common/status.h"
 #include "util/promise.h"
+#include "util/thread.h"
 
 namespace sasl { class TSasl; }
 
 namespace impala {
-
-class Thread;
 
 // An AuthProvider creates Thrift transports that are set up to authenticate themselves
 // using a protocol such as Kerberos or PLAIN/SASL. Both server and client transports are

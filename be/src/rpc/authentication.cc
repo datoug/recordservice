@@ -34,6 +34,8 @@
 #include <ldap.h>
 
 #include "rpc/auth-provider.h"
+#include "runtime/exec-env.h"
+#include "service/frontend.h"
 #include "transport/TSaslClientTransport.h"
 #include "util/debug-util.h"
 #include "util/error-util.h"
@@ -148,6 +150,7 @@ static int SaslLogCallback(void* context, int level, const char* message) {
   case SASL_LOG_ERR:   // "Unusual errors"
   case SASL_LOG_FAIL:  // "Authentication failures"
     LOG(ERROR) << "SASL message (" << authctx << "): " << message;
+    VLOG(2) << GetStackTrace();
     break;
   case SASL_LOG_WARN:  // "Non-fatal warnings"
     LOG(WARNING) << "SASL message (" << authctx << "): " << message;
@@ -300,6 +303,7 @@ static int SaslGetOption(void* context, const char* plugin_name, const char* opt
 // The "auxprop" plugin interface was intended to be a database service for the "glue"
 // layer between the mechanisms and applications.  We, however, hijack this interface
 // simply in order to provide an audit message prior to that start of authentication.
+// FIXME: is this right? Do we need to clear the password?
 static void ImpalaAuxpropLookup(void* glob_context, sasl_server_params_t* sparams,
     unsigned int flags, const char* user, unsigned ulen) {
   // This callback is called twice, once with this flag clear, and once with
@@ -307,15 +311,38 @@ static void ImpalaAuxpropLookup(void* glob_context, sasl_server_params_t* sparam
   // the flag is clear.
   if ((flags & SASL_AUXPROP_AUTHZID) == 0) {
     string user_str(user, ulen);
-    VLOG(2) << "Attempting to authenticate user \"" << user_str << "\"";
 
-    // TODO (DELEGATION): This is our chance to set the expected password. This
-    // should retrieve the token for 'user' and populated it here. Currently
-    // it's hard-coded to admin for all users.
-    int result = prop_set(sparams->propctx, SASL_AUX_PASSWORD, "admin", -1);
-    if (result != SASL_OK) {
-      LOG(WARNING) << "Could not set password for user: "
-                   << user_str << " result=" << result;
+    if (AuthManager::GetInstance()->IsDigestConnection(sparams->utils->conn)) {
+      VLOG(1) << "Attempting to authenticate user using token: \"" << user_str << "\"";
+      // This connection is using DIGEST-MD5 (aka delegation tokens). Look up the
+      // user and password.
+      Frontend* frontend = ExecEnv::GetInstance()->frontend();
+      TRetrieveUserAndPasswordRequest request;
+      request.identifier = user_str;
+      TRetrieveUserAndPasswordResponse response;
+      Status status = frontend->RetrieveUserAndPassword(request, &response);
+      if (status.ok()) {
+        VLOG(1) << "Authenticated with user: " << response.user;
+
+        // Set this user name. This is the connected user and what will subsequently
+        // be used for authorization.
+        AuthManager::GetInstance()->SetDigestMd5ConnectedUser(
+            sparams->utils->conn, response.user);
+
+        // This sets the expected password for the next phase of the handshake. The
+        // client is expected to provide the same password.
+        int result = prop_set(
+            sparams->propctx, SASL_AUX_PASSWORD, response.password.data(), -1);
+        if (result != SASL_OK) {
+          LOG(WARNING) << "Could not set password for user: "
+                       << user_str << " result=" << result;
+          return;
+        }
+      } else {
+        LOG(WARNING) << "Could not get password for user.";
+      }
+    } else {
+      VLOG(1) << "Attempting to authenticate user \"" << user_str << "\"";
     }
   }
 }
@@ -420,10 +447,7 @@ static int SaslAuthorizeExternal(sasl_conn_t* conn, void* context,
 }
 
 // Callback used by SASL DIGEST-MD5 to canonicalize user names.
-// TODO (DELEGATION): I don't think we need to do anything here. This is
-// our chance to change the user name, typically from 'user' -> 'user'@'something'.
-// Since we (and Hadoop) always use 'default' as the realm, we always will end up
-// seeing 'user'@default, which seems fine.
+// The user name is the serialized delegation token.
 static int SaslDigestCanonicalizeUsernameCb(sasl_conn_t *conn,
     void* context,      // not used
     const char* user,   // the username
@@ -1084,10 +1108,44 @@ AuthProvider* AuthManager::GetInternalAuthProvider() {
   return internal_auth_provider_.get();
 }
 
-// Returns the unsecure auth provider.
 AuthProvider* AuthManager::GetNoAuthProvider() {
   DCHECK(no_auth_provider_.get() != NULL);
   return no_auth_provider_.get();
+}
+
+void AuthManager::AddDigestMd5Connection(sasl_conn_t* conn) {
+  ScopedSpinLock l(&digest_connection_lock_);
+  DCHECK(digest_connections_.find(conn) == digest_connections_.end());
+  digest_connections_[conn] = "";
+}
+
+void AuthManager::RemoveDigestMd5Connection(sasl_conn_t* conn) {
+  ScopedSpinLock l(&digest_connection_lock_);
+  DCHECK(digest_connections_.find(conn) == digest_connections_.end());
+  digest_connections_.erase(conn);
+}
+
+void AuthManager::SetDigestMd5ConnectedUser(sasl_conn_t* conn, const string& user) {
+  ScopedSpinLock l(&digest_connection_lock_);
+  DCHECK(digest_connections_.find(conn) != digest_connections_.end());
+  DCHECK_EQ(digest_connections_[conn], "");
+  digest_connections_[conn] = user;
+}
+
+const string& AuthManager::GetDigestMd5ConnectedUser(sasl_conn_t* conn) {
+  ScopedSpinLock l(&digest_connection_lock_);
+  unordered_map<sasl_conn_t*, string>::const_iterator it =
+      digest_connections_.find(conn);
+  if (it == digest_connections_.end()) {
+    const static string empty;
+    return empty;
+  }
+  return digest_connections_[conn];
+}
+
+// Returns true if conn is a digest-md5 connection.
+bool AuthManager::IsDigestConnection(const sasl_conn_t* conn) {
+  return digest_connections_.find((sasl_conn_t*)conn) != digest_connections_.end();
 }
 
 }

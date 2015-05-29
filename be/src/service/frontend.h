@@ -167,6 +167,10 @@ class Frontend {
   // Renews the token.
   Status RenewDelegationToken(const TRenewDelegationTokenRequest& params);
 
+  // Retrieves the user and password for this token.
+  Status RetrieveUserAndPassword(const TRetrieveUserAndPasswordRequest& params,
+      TRetrieveUserAndPasswordResponse* result);
+
  private:
   // Descriptor of Java Frontend class itself, used to create a new instance.
   jclass fe_class_;
@@ -196,6 +200,7 @@ class Frontend {
   jmethodID get_delegation_token_id_; // JniFrontend.getDelegationToken
   jmethodID cancel_delegation_token_id_; // JniFrontend.cancelDelegationToken
   jmethodID renew_delegation_token_id_; // JniFrontend.renewDelegationToken
+  jmethodID retrieve_user_and_password_id_; // JniFrontend.retrieveUserAndPassword
   jmethodID fe_ctor_;
 };
 

@@ -173,6 +173,8 @@ class TSaslServer : public sasl::TSasl {
               const std::string& serverFQDN,
               const std::string& userRealm, unsigned flags, sasl_callback_t* callbacks);
 
+  virtual ~TSaslServer();
+
   /*
    * This initializes the sasl server library and should be called onece per application
    */

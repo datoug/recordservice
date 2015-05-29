@@ -1187,46 +1187,88 @@ void ImpalaServer::GetMetric(recordservice::TMetricResponse& return_val,
   return_val.__set_metric(metric->ToHumanReadable());
 }
 
-void ImpalaServer::GetDelegationToken(string& token,
+void ImpalaServer::GetDelegationToken(recordservice::TDelegationToken& token,
       const string& user, const string& renewer) {
+  VLOG_REQUEST << "GetDelegationToken() user=" << user << " renewer=" << renewer;
+  const ThriftServer::ConnectionContext* ctx = ThriftServer::GetThreadConnectionContext();
+  if (ctx->mechanism_name != AuthManager::KERBEROS_MECHANISM) {
+    stringstream ss;
+    ss << "GetDelegationToken() can only be called with a Kerberos connection. ";
+    if (ctx->mechanism_name.empty()) {
+      ss << "Current connection is unsecure.";
+    } else {
+      ss << "Current connection mechanism is " << ctx->mechanism_name;
+    }
+    ImpalaServer::ThrowRecordServiceException(
+        recordservice::TErrorCode::AUTHENTICATION_ERROR, ss.str());
+  }
+  DCHECK(!ctx->username.empty());
+
   TGetDelegationTokenRequest params;
+  params.owner = ctx->username;
   params.user = user;
   params.renewer = renewer;
 
   TGetDelegationTokenResponse response;
   Status status = exec_env_->frontend()->GetDelegationToken(params, &response);
   if (!status.ok()) {
-    // FIXME: this should use a more specific error code but depends on the failure
-    // modes in the actual (FE) implementation. Update this when that's implemented.
     ImpalaServer::ThrowRecordServiceException(
-        recordservice::TErrorCode::INVALID_REQUEST, "Could not get delegation token.",
+        recordservice::TErrorCode::AUTHENTICATION_ERROR,
+        "Could not get delegation token.",
         status.GetDetail());
   }
-  token = response.token;
+  token.identifier = response.identifier;
+  token.password = response.password;
+  token.token = response.token;
 }
 
-void ImpalaServer::CancelDelegationToken(const string& token) {
+void ImpalaServer::CancelDelegationToken(const recordservice::TDelegationToken& token) {
+  VLOG_REQUEST << "CancelDelegationToken()";
+
+  const ThriftServer::ConnectionContext* ctx = ThriftServer::GetThreadConnectionContext();
+  if (ctx->mechanism_name.empty()) {
+    ImpalaServer::ThrowRecordServiceException(
+        recordservice::TErrorCode::AUTHENTICATION_ERROR,
+        "CancelDelegationToken() can only be called from a secure connection.");
+  }
+  DCHECK(!ctx->username.empty());
+
   TCancelDelegationTokenRequest params;
-  params.token = token;
+  params.user = ctx->username;
+  params.token = token.token;
   Status status = exec_env_->frontend()->CancelDelegationToken(params);
   if (!status.ok()) {
-    // FIXME: this should use a more specific error code but depends on the failure
-    // modes in the actual (FE) implementation. Update this when that's implemented.
     ImpalaServer::ThrowRecordServiceException(
-        recordservice::TErrorCode::INVALID_REQUEST, "Could not cancel delegation token.",
+        recordservice::TErrorCode::AUTHENTICATION_ERROR,
+        "Could not cancel delegation token.",
         status.GetDetail());
   }
 }
 
-void ImpalaServer::RenewDelegationToken(const string& token) {
+void ImpalaServer::RenewDelegationToken(const recordservice::TDelegationToken& token) {
+  VLOG_REQUEST << "RenewDelegationToken()";
+  const ThriftServer::ConnectionContext* ctx = ThriftServer::GetThreadConnectionContext();
+  if (ctx->mechanism_name != AuthManager::KERBEROS_MECHANISM) {
+    stringstream ss;
+    ss << "RenewDelegationToken() can only be called with a Kerberos connection. ";
+    if (ctx->mechanism_name.empty()) {
+      ss << "Current connection is unsecure.";
+    } else {
+      ss << "Current connection mechanism is " << ctx->mechanism_name;
+    }
+    ImpalaServer::ThrowRecordServiceException(
+        recordservice::TErrorCode::AUTHENTICATION_ERROR, ss.str());
+  }
+  DCHECK(!ctx->username.empty());
+
   TRenewDelegationTokenRequest params;
-  params.token = token;
+  params.user = ctx->username;
+  params.token = token.token;
   Status status = exec_env_->frontend()->RenewDelegationToken(params);
   if (!status.ok()) {
-    // FIXME: this should use a more specific error code but depends on the failure
-    // modes in the actual (FE) implementation. Update this when that's implemented.
     ImpalaServer::ThrowRecordServiceException(
-        recordservice::TErrorCode::INVALID_REQUEST, "Could not renew delegation token.",
+        recordservice::TErrorCode::AUTHENTICATION_ERROR,
+        "Could not renew delegation token.",
         status.GetDetail());
   }
 }

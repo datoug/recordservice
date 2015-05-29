@@ -18,12 +18,14 @@
 
 #include <string>
 #include <thrift/transport/TTransport.h>
+#include <boost/unordered_map.hpp>
 
+#include "common/status.h"
 #include "rpc/auth-provider.h"
 #include "sasl/sasl.h"
 #include "transport/TSaslServerTransport.h"
 #include "transport/TSasl.h"
-#include "common/status.h"
+#include "util/spinlock.h"
 
 using namespace ::apache::thrift::transport;
 
@@ -59,6 +61,21 @@ class AuthManager {
   static const std::string DIGEST_MECHANISM;
   static const std::string PLAIN_MECHANISM;
 
+  // Add/Removes conn as an active digest-md5 connection. Thread safe.
+  void AddDigestMd5Connection(sasl_conn_t* conn);
+  void RemoveDigestMd5Connection(sasl_conn_t* conn);
+
+  // Sets the user for this DIGEST-MD5 connection. The user in 'conn' is the
+  // encoded token (we need the user name for authorization).
+  void SetDigestMd5ConnectedUser(sasl_conn_t* conn, const std::string& user);
+
+  // Returns the connected user if conn is an authenticated DIGEST-MD5 connection.
+  // return empty string otherwise.
+  const std::string& GetDigestMd5ConnectedUser(sasl_conn_t* conn);
+
+  // Returns true if conn is a digest-md5 connection.
+  bool IsDigestConnection(const sasl_conn_t* conn);
+
  private:
   static AuthManager* auth_manager_;
 
@@ -67,6 +84,14 @@ class AuthManager {
   boost::scoped_ptr<AuthProvider> internal_auth_provider_;
   boost::scoped_ptr<AuthProvider> external_auth_provider_;
   boost::scoped_ptr<AuthProvider> no_auth_provider_;
+
+  // Lock and map of all active server digest md5 connections and their user names.
+  // When the connection is created, it is added to this with an empty user.
+  // During the token negotiation, the user is set.
+  // TODO: it would be ideal if we could just attach this information to the sasl_conn_t
+  // object but not sure that is possible.
+  SpinLock digest_connection_lock_;
+  boost::unordered_map<sasl_conn_t*, std::string> digest_connections_;
 };
 
 

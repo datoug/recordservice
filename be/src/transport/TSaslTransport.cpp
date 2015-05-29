@@ -266,13 +266,6 @@ namespace apache { namespace thrift { namespace transport {
     // read header
     transport_->readAll(messageHeader, HEADER_LENGTH);
 
-    // get the length
-    *length = decodeInt(messageHeader, STATUS_BYTES);
-
-    // get payload
-    protoBuf_.reset(new uint8_t[*length]);
-    transport_->readAll(protoBuf_.get(), *length);
-
     // get payload status
     *status = (NegotiationStatus)messageHeader[0];
     if ((*status < TSASL_START) || (*status > TSASL_COMPLETE)) {
@@ -280,6 +273,14 @@ namespace apache { namespace thrift { namespace transport {
     } else if (*status == TSASL_BAD || *status == TSASL_ERROR) {
         throw TTransportException("sasl Peer indicated failure: ");
     }
+
+    // get the length
+    *length = decodeInt(messageHeader, STATUS_BYTES);
+
+    // get payload
+    protoBuf_.reset(new uint8_t[*length]);
+    transport_->readAll(protoBuf_.get(), *length);
+
     return protoBuf_.get();
   }
 }

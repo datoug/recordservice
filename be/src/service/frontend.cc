@@ -27,6 +27,8 @@ using namespace impala;
 
 DECLARE_string(sentry_config);
 DECLARE_int32(non_impala_java_vlog);
+DECLARE_int32(recordservice_planner_port);
+DECLARE_int32(recordservice_worker_port);
 
 DEFINE_bool(load_catalog_at_startup, false, "if true, load all catalog data at startup");
 
@@ -53,7 +55,7 @@ DEFINE_string(authorized_proxy_user_config, "",
 Frontend::Frontend() {
   JniMethodDescriptor methods[] = {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;II)V", &fe_ctor_},
+        "Ljava/lang/String;IIZZ)V", &fe_ctor_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
     {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
     {"getExplainPlan", "([B)Ljava/lang/String;", &get_explain_plan_id_},
@@ -78,6 +80,7 @@ Frontend::Frontend() {
     {"getDelegationToken", "([B)[B", &get_delegation_token_id_},
     {"cancelDelegationToken", "([B)V", &cancel_delegation_token_id_},
     {"renewDelegationToken", "([B)V", &renew_delegation_token_id_},
+    {"retrieveUserAndPassword", "([B)[B", &retrieve_user_and_password_id_},
   };
 
   JNIEnv* jni_env = getJNIEnv();
@@ -91,6 +94,9 @@ Frontend::Frontend() {
   };
 
   jboolean lazy = (FLAGS_load_catalog_at_startup ? false : true);
+  jboolean enable_delegation_tokens =
+      FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0;
+  jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
   jstring policy_file_path =
       jni_env->NewStringUTF(FLAGS_authorization_policy_file.c_str());
   jstring server_name =
@@ -101,7 +107,8 @@ Frontend::Frontend() {
       jni_env->NewStringUTF(FLAGS_authorization_policy_provider_class.c_str());
   jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
       policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
-      FlagToTLogLevel(FLAGS_non_impala_java_vlog));
+      FlagToTLogLevel(FLAGS_non_impala_java_vlog), enable_delegation_tokens,
+      running_recordservice_planner);
   EXIT_IF_EXC(jni_env);
   EXIT_IF_ERROR(JniUtil::LocalToGlobalRef(jni_env, fe, &fe_));
 }
@@ -230,20 +237,22 @@ Status Frontend::LoadData(const TLoadDataReq& request, TLoadDataResp* response) 
   return JniUtil::CallJniMethod(fe_, load_table_data_id_, request, response);
 }
 
-// Get/Create delegation token for user.
 Status Frontend::GetDelegationToken(const TGetDelegationTokenRequest& params,
     TGetDelegationTokenResponse* result) {
   return JniUtil::CallJniMethod(fe_, get_delegation_token_id_, params, result);
 }
 
-// Cancels the token.
 Status Frontend::CancelDelegationToken(const TCancelDelegationTokenRequest& params) {
   return JniUtil::CallJniMethod(fe_, cancel_delegation_token_id_, params);
 }
 
-// Renews the token.
 Status Frontend::RenewDelegationToken(const TRenewDelegationTokenRequest& params) {
   return JniUtil::CallJniMethod(fe_, renew_delegation_token_id_, params);
+}
+
+Status Frontend::RetrieveUserAndPassword(const TRetrieveUserAndPasswordRequest& params,
+      TRetrieveUserAndPasswordResponse* result) {
+  return JniUtil::CallJniMethod(fe_, retrieve_user_and_password_id_, params, result);
 }
 
 bool Frontend::IsAuthorizationError(const Status& status) {

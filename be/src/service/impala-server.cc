@@ -186,8 +186,8 @@ const uint32_t MAX_CANCELLATION_QUEUE_SIZE = 65536;
 const string BEESWAX_SERVER_NAME = "beeswax-frontend";
 const string HS2_SERVER_NAME = "hiveserver2-frontend";
 
-const string RECORD_SERVICE_PLANNER_SERVER_NAME = "record-service-planner";
-const string RECORD_SERVICE_WORKER_SERVER_NAME = "record-service-worker";
+const string ImpalaServer::RECORD_SERVICE_PLANNER_SERVER_NAME("record-service-planner");
+const string ImpalaServer::RECORD_SERVICE_WORKER_SERVER_NAME("record-service-worker");
 
 // Service to test authentication, not enabled in production.
 // TODO: add Echo() to one of the existing services?
