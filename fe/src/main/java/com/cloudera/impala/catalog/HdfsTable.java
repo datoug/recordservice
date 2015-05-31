@@ -515,7 +515,7 @@ public class HdfsTable extends Table {
     final Timer.Context loadVolumeIdsTimer = Metrics.INSTANCE
         .getTimerCtx(loadVolumeIdsTimerName_);
 
-    LoadMetadataUtil.loadDiskIds(getFullName(), getNumNodes(), blocksToLoad);
+    LoadMetadataUtil.loadDiskIds(getFullName(), hostIndex_.size(), blocksToLoad);
 
     // Stop timer for loadVolumeIds.
     timeSpent = loadVolumeIdsTimer.stop() / Metrics.NANOTOMILLISEC;
@@ -662,7 +662,7 @@ public class HdfsTable extends Table {
     Map<FsKey, FileBlocksInfo> blocksToLoad = Maps.newHashMap();
     HdfsPartition hdfsPartition = createPartition(storageDescriptor, msPartition,
         fileDescMap_, blocksToLoad);
-    LoadMetadataUtil.loadDiskIds(getFullName(), getNumNodes(), blocksToLoad);
+    LoadMetadataUtil.loadDiskIds(getFullName(), hostIndex_.size(), blocksToLoad);
     return hdfsPartition;
   }
 
@@ -1222,7 +1222,6 @@ public class HdfsTable extends Table {
   public long getTotalHdfsBytes() { return totalHdfsBytes_; }
   public String getHdfsBaseDir() { return hdfsBaseDir_; }
   public boolean isAvroTable() { return avroSchema_ != null; }
-  public int getNumNodes() { return hostIndex_.size(); }
 
   /**
    * Get the index of hosts that store replicas of blocks of this table.
