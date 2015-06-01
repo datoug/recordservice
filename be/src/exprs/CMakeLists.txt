@@ -51,6 +51,7 @@ add_library(Exprs
   udf-builtins.cc
   utility-functions.cc
 )
+add_dependencies(Exprs thrift-cpp)
 
 add_executable(expr-benchmark expr-benchmark.cc)
 target_link_libraries(expr-benchmark ${IMPALA_TEST_LINK_LIBS})
