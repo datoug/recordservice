@@ -289,7 +289,6 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
    */
   public String getPartitionName() {
     List<String> partitionCols = Lists.newArrayList();
-    List<String> partitionValues = Lists.newArrayList();
     for (int i = 0; i < getTable().getNumClusteringCols(); ++i) {
       partitionCols.add(getTable().getColumns().get(i).getName());
     }
@@ -324,7 +323,6 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
    */
   public String getConjunctSql() {
     List<String> partitionCols = Lists.newArrayList();
-    List<String> partitionValues = Lists.newArrayList();
     for (int i = 0; i < getTable().getNumClusteringCols(); ++i) {
       partitionCols.add(ToSqlUtils.getIdentSql(getTable().getColumns().get(i).getName()));
     }
@@ -372,8 +370,16 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
   public boolean isMarkedCached() { return isMarkedCached_; }
   void markCached() { isMarkedCached_ = true; }
 
+  /**
+   * Updates the file format of this partition and sets the corresponding input/output
+   * format classes.
+   */
   public void setFileFormat(HdfsFileFormat fileFormat) {
     fileFormatDescriptor_.setFileFormat(fileFormat);
+    cachedMsPartitionDescriptor_.sdInputFormat = fileFormat.inputFormat();
+    cachedMsPartitionDescriptor_.sdOutputFormat = fileFormat.outputFormat();
+    cachedMsPartitionDescriptor_.sdSerdeInfo.setSerializationLib(
+        fileFormatDescriptor_.getFileFormat().serializationLib());
   }
 
   public void setLocation(String location) { location_ = location; }
@@ -444,8 +450,11 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
   //
   // TODO: Cache this descriptor in HdfsTable so that identical descriptors are shared
   // between HdfsPartition instances.
+  // TODO: sdInputFormat and sdOutputFormat can be mutated by Impala when the file format
+  // of a partition changes; move these fields to HdfsPartition.
   private static class CachedHmsPartitionDescriptor {
-    public final String sdOutputFormat;
+    public String sdInputFormat;
+    public String sdOutputFormat;
     public final boolean sdCompressed;
     public final int sdNumBuckets;
     public final org.apache.hadoop.hive.metastore.api.SerDeInfo sdSerdeInfo;
@@ -466,6 +475,7 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
         msCreateTime = msLastAccessTime = 0;
       }
       if (sd != null) {
+        sdInputFormat = sd.getInputFormat();
         sdOutputFormat = sd.getOutputFormat();
         sdCompressed = sd.isCompressed();
         sdNumBuckets = sd.getNumBuckets();
@@ -474,6 +484,7 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
         sdSortCols = ImmutableList.copyOf(sd.getSortCols());
         sdParameters = ImmutableMap.copyOf(sd.getParameters());
       } else {
+        sdInputFormat = "";
         sdOutputFormat = "";
         sdCompressed = false;
         sdNumBuckets = 0;
@@ -494,10 +505,11 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
   public org.apache.hadoop.hive.metastore.api.Partition toHmsPartition() {
     if (cachedMsPartitionDescriptor_ == null) return null;
     Preconditions.checkNotNull(table_.getNonPartitionFieldSchemas());
+    // Update the serde library class based on the currently used file format.
     org.apache.hadoop.hive.metastore.api.StorageDescriptor storageDescriptor =
         new org.apache.hadoop.hive.metastore.api.StorageDescriptor(
             table_.getNonPartitionFieldSchemas(), location_,
-            fileFormatDescriptor_.getFileFormat().toJavaClassName(),
+            cachedMsPartitionDescriptor_.sdInputFormat,
             cachedMsPartitionDescriptor_.sdOutputFormat,
             cachedMsPartitionDescriptor_.sdCompressed,
             cachedMsPartitionDescriptor_.sdNumBuckets,
