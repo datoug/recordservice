@@ -58,6 +58,7 @@ add_library(Exec
   hdfs-sequence-table-writer.cc
   hdfs-parquet-scanner.cc
   hdfs-parquet-table-writer.cc
+  hdfs-hive-serde-scanner.cc
   hbase-scan-node.cc
   hbase-table-scanner.cc
   incr-stats-util.cc

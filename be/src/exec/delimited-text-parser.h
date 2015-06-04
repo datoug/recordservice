@@ -38,9 +38,9 @@ class DelimitedTextParser {
   // is_materialized_col[i] = <true if column i should be materialized, false otherwise>
   // Owned by caller.
   //
-  // The main method is ParseData which fills in a vector of pointers and lengths to the
-  // fields.  It also can handle an escape character which masks a tuple or field
-  // delimiter that occurs in the data.
+  // The main method is ParseFieldLocations which fills in a vector of pointers and
+  // lengths to the fields.  It also can handle an escape character which masks a tuple
+  // or field delimiter that occurs in the data.
   DelimitedTextParser(
       int num_cols, int num_partition_keys, const bool* is_materialized_col,
       char tuple_delim, char field_delim_ = '\0', char collection_item_delim = '^',
@@ -72,13 +72,13 @@ class DelimitedTextParser {
   //   num_tuples: Number of tuples parsed
   //   num_fields: Number of materialized fields parsed
   //   next_column_start: pointer within file_buffer_ where the next field starts
-  //                      after the return from the call to ParseData
+  //                      after the return from the call to ParseFieldLocations
   Status ParseFieldLocations(int max_tuples, int64_t remaining_len,
       char** byte_buffer_ptr, char** row_end_locations,
       FieldLocation* field_locations,
       int* num_tuples, int* num_fields, char** next_column_start);
 
-  // Parse a single tuple from buffer.  
+  // Parse a single tuple from buffer.
   // - buffer/len are input parameters for the entire record.
   // - on return field_locations will contain the start/len for each materialized
   //   col.
@@ -86,7 +86,7 @@ class DelimitedTextParser {
   // This function is used to parse sequence file records which do not need to
   // parse for tuple delimiters.
   template <bool process_escapes>
-  void ParseSingleTuple(int64_t len, char* buffer, FieldLocation* field_locations, 
+  void ParseSingleTuple(int64_t len, char* buffer, FieldLocation* field_locations,
       int* num_fields);
 
   // FindFirstInstance returns the position after the first non-escaped tuple

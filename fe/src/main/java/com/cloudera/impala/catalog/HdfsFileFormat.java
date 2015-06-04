@@ -28,6 +28,7 @@ public enum HdfsFileFormat {
   TEXT,
   SEQUENCE_FILE,
   AVRO,
+  HIVE_SERDE,
   PARQUET,
   RECORDSERVICE;
 
@@ -128,6 +129,7 @@ public enum HdfsFileFormat {
       case AVRO: return HdfsFileFormat.AVRO;
       case PARQUET: return HdfsFileFormat.PARQUET;
       case RECORDSERVICE: return HdfsFileFormat.RECORDSERVICE;
+      case HIVE_SERDE: return HdfsFileFormat.HIVE_SERDE;
       default:
         throw new RuntimeException("Unknown THdfsFileFormat: "
             + thriftFormat + " - should never happen!");
@@ -142,6 +144,7 @@ public enum HdfsFileFormat {
       case AVRO: return THdfsFileFormat.AVRO;
       case PARQUET: return THdfsFileFormat.PARQUET;
       case RECORDSERVICE: return THdfsFileFormat.RECORDSERVICE;
+      case HIVE_SERDE: return THdfsFileFormat.HIVE_SERDE;
       default:
         throw new RuntimeException("Unknown HdfsFormat: "
             + this + " - should never happen!");

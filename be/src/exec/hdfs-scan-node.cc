@@ -20,6 +20,7 @@
 #include "exec/hdfs-rcfile-scanner.h"
 #include "exec/hdfs-avro-scanner.h"
 #include "exec/hdfs-parquet-scanner.h"
+#include "exec/hdfs-hive-serde-scanner.h"
 
 #include <sstream>
 #include <boost/algorithm/string.hpp>
@@ -126,6 +127,8 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
         per_type_files_[THdfsFileFormat::AVRO]));
     RETURN_IF_ERROR(HdfsParquetScanner::IssueInitialRanges(this,
         per_type_files_[THdfsFileFormat::PARQUET]));
+    RETURN_IF_ERROR(HdfsHiveSerdeScanner::IssueInitialRanges(this,
+        per_type_files_[THdfsFileFormat::HIVE_SERDE]));
     if (progress_.done()) SetDone();
 
     // For the RecordService, we always start up a single scanner thread. This bypasses
@@ -264,6 +267,9 @@ HdfsScanner* HdfsScanNode::CreateAndPrepareScanner(HdfsPartitionDescriptor* part
       break;
     case THdfsFileFormat::PARQUET:
       scanner = new HdfsParquetScanner(this, runtime_state_);
+      break;
+    case THdfsFileFormat::HIVE_SERDE:
+      scanner = new HdfsHiveSerdeScanner(this, runtime_state_);
       break;
     default:
       DCHECK(false) << "Unknown Hdfs file format type:" << partition->file_format();

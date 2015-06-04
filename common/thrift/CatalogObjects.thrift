@@ -50,10 +50,11 @@ enum THdfsFileFormat {
   RC_FILE,
   SEQUENCE_FILE,
   AVRO,
+  HIVE_SERDE,
   PARQUET,
   // TODO: Record Service is not an HDFS file format. This needs to be removed
   // and Impala needs to be updated to properly support custom InputFormat/Serdes.
-  RECORDSERVICE,
+  RECORDSERVICE
 }
 
 enum THdfsCompression {
@@ -252,6 +253,11 @@ struct THdfsPartition {
 
   // (key,value) pairs stored in the Hive Metastore.
   15: optional map<string, string> hms_parameters
+
+  // Hive serde class name, used in frontend HiveSerdeExecutor to
+  // deserialize rows passed from backend HdfsHiveSerdeScanner.
+  // This is only set for HDFS partitions that require to run Hive serde to parse.
+  16: optional string serde_class_name
 }
 
 struct THdfsTable {

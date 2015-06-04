@@ -28,6 +28,7 @@ include "TCLIService.thrift"
 include "Status.thrift"
 include "CatalogObjects.thrift"
 include "CatalogService.thrift"
+include "ExternalDataSource.thrift"
 
 // These are supporting structs for JniFrontend.java, which serves as the glue
 // between our C++ execution environment and the Java frontend.
@@ -61,6 +62,18 @@ struct THiveUdfExecutorCtorParams {
   // NULL.
   6: required i64 output_null_ptr
   7: required i64 output_buffer_ptr
+}
+
+struct TSerDeInput {
+  // Byte buffer to store the rows to parse
+  1: required binary data
+
+  // A list of lengths for each row
+  2: required list<i32> lengths
+}
+
+struct TSerDeOutput {
+  1: required ExternalDataSource.TRowBatch batch
 }
 
 // Arguments to getTableNames, which returns a list of tables that match an

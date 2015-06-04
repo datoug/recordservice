@@ -599,7 +599,8 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
         thriftPartition.mapKeyDelim,
         thriftPartition.escapeChar,
         (byte) '"', // TODO: We should probably add quoteChar to THdfsPartition.
-        thriftPartition.blockSize);
+        thriftPartition.blockSize,
+        thriftPartition.serde_class_name);
 
     List<LiteralExpr> literalExpr = Lists.newArrayList();
     if (id != ImpalaInternalServiceConstants.DEFAULT_PARTITION_ID) {
@@ -678,6 +679,7 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
         fileFormatDescriptor_.getEscapeChar(),
         fileFormatDescriptor_.getFileFormat().toThrift(), thriftExprs,
         fileFormatDescriptor_.getBlockSize());
+    thriftHdfsPart.setSerde_class_name(fileFormatDescriptor_.getSerdeClassName());
     thriftHdfsPart.setLocation(location_);
     thriftHdfsPart.setStats(new TTableStats(numRows_));
     thriftHdfsPart.setAccess_level(accessLevel_);

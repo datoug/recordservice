@@ -72,6 +72,11 @@ public class HdfsStorageDescriptor {
   private final byte quoteChar_;
   private final int blockSize_;
 
+  // This could be null for catalog objects created before the optional field
+  // "serde_class_name" is added to THdfsPartition in CatalogObjects.thrift.
+  // TODO: think about how to deal with this more.
+  private final String serdeClassName_;
+
   public void setFileFormat(HdfsFileFormat fileFormat) {
     fileFormat_ = fileFormat;
   }
@@ -146,7 +151,7 @@ public class HdfsStorageDescriptor {
 
   public HdfsStorageDescriptor(String tblName, HdfsFileFormat fileFormat, byte lineDelim,
       byte fieldDelim, byte collectionDelim, byte mapKeyDelim, byte escapeChar,
-      byte quoteChar, int blockSize) {
+      byte quoteChar, int blockSize, String serdeClassName) {
     this.fileFormat_ = fileFormat;
     this.lineDelim_ = lineDelim;
     this.fieldDelim_ = fieldDelim;
@@ -154,6 +159,7 @@ public class HdfsStorageDescriptor {
     this.mapKeyDelim_ = mapKeyDelim;
     this.quoteChar_ = quoteChar;
     this.blockSize_ = blockSize;
+    this.serdeClassName_ = serdeClassName;
 
     // You can set the escape character as a tuple or row delim.  Empirically,
     // this is ignored by hive.
@@ -197,11 +203,27 @@ public class HdfsStorageDescriptor {
       StorageDescriptor sd)
       throws InvalidStorageDescriptorException {
     Map<String, Byte> delimMap = extractDelimiters(sd.getSerdeInfo());
-    if (!COMPATIBLE_SERDES.contains(sd.getSerdeInfo().getSerializationLib())) {
-      throw new InvalidStorageDescriptorException(String.format("Impala does not " +
-          "support tables of this type. REASON: SerDe library '%s' is not " +
-          "supported.", sd.getSerdeInfo().getSerializationLib()));
+
+    HdfsFileFormat format = HdfsFileFormat.fromJavaClassName(sd.getInputFormat());
+    String serializationLib = sd.getSerdeInfo().getSerializationLib();
+
+    // If file format is TEXT and SerDe is not LazySimpleSerde, we'll activate
+    // the Hive serde executor on the frontend and scanner on the backend to process
+    // the input file, and hence we change the format to be HIVE_SERDE. We also want
+    // to skip the serde class check in this case.
+    if (format == HdfsFileFormat.TEXT) {
+      if (serializationLib != null &&
+          !serializationLib.equals("org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe")) {
+        format = HdfsFileFormat.HIVE_SERDE;
+      }
+    } else {
+      if (!COMPATIBLE_SERDES.contains(serializationLib)) {
+        throw new InvalidStorageDescriptorException(String.format("Impala does not " +
+            "support tables of this type. REASON: SerDe library '%s' is not " +
+            "supported.", serializationLib));
+      }
     }
+
     // Extract the blocksize and compression specification from the SerDe parameters,
     // if present.
     Map<String, String> parameters = sd.getSerdeInfo().getParameters();
@@ -213,14 +235,15 @@ public class HdfsStorageDescriptor {
 
     try {
       return new HdfsStorageDescriptor(tblName,
-          HdfsFileFormat.fromJavaClassName(sd.getInputFormat()),
+          format,
           delimMap.get(serdeConstants.LINE_DELIM),
           delimMap.get(serdeConstants.FIELD_DELIM),
           delimMap.get(serdeConstants.COLLECTION_DELIM),
           delimMap.get(serdeConstants.MAPKEY_DELIM),
           delimMap.get(serdeConstants.ESCAPE_CHAR),
           delimMap.get(serdeConstants.QUOTE_CHAR),
-          blockSize);
+          blockSize,
+          serializationLib);
     } catch (IllegalArgumentException ex) {
       // Thrown by fromJavaClassName
       throw new InvalidStorageDescriptorException(ex);
@@ -235,4 +258,5 @@ public class HdfsStorageDescriptor {
   public byte getQuoteChar() { return quoteChar_; }
   public HdfsFileFormat getFileFormat() { return fileFormat_; }
   public int getBlockSize() { return blockSize_; }
+  public String getSerdeClassName() { return serdeClassName_; }
 }
