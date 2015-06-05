@@ -33,7 +33,7 @@
 namespace apache { namespace thrift { namespace transport {
 
 /**
- * 
+ *
  * This transport implements the Simple Authentication and Security Layer (SASL).
  * see: http://www.ietf.org/rfc/rfc2222.txt.  It is based on and depends
  * on the presence of the cyrus-sasl library.
@@ -122,9 +122,6 @@ class TSaslServerTransport : public TSaslTransport {
         new TSaslServerDefinition(mechanism,
             protocol, serverName, realm, flags, props, callbacks)));
   }
-
-  /* Set the server */
-  void setSaslServer(sasl::TSasl* saslServer);
 
   /**
    * Factory to ensure that a given underlying TTransport instance receives

@@ -62,24 +62,16 @@ TSaslServerTransport:: TSaslServerTransport(
 }
 
 /**
- * Set the server for this transport
+ * Performs the server side of the initial portion of the Thrift SASL protocol.
+ * Receives the initial response from the client, creates a SASL server using
+ * the mechanism requested by the client (if this server supports it), and
+ * sends the first challenge back to the client.
  */
-void TSaslServerTransport::setSaslServer(sasl::TSasl* saslServer) {
-  if (isClient_) {
-    throw TTransportException(
-        TTransportException::INTERNAL_ERROR, "Setting server in client transport");
-  }
-  sasl_.reset(saslServer);
-}
-
 void TSaslServerTransport::handleSaslStartMessage() {
-  uint32_t resLength;
+  uint32_t msgLength;
   NegotiationStatus status;
 
-  uint8_t* message = receiveSaslMessage(&status, &resLength);
-  // Message is a non-null terminated string; to use it like a
-  // C-string we have to copy it into a null-terminated buffer.
-  string message_str(reinterpret_cast<char*>(message), resLength);
+  uint8_t* message = receiveSaslMessage(&status, &msgLength);
 
   if (status != TSASL_START) {
     stringstream ss;
@@ -88,26 +80,40 @@ void TSaslServerTransport::handleSaslStartMessage() {
                     reinterpret_cast<const uint8_t*>(ss.str().c_str()), ss.str().size());
     throw TTransportException(ss.str());
   }
+
+  // Message is a non-null terminated string; to use it like a
+  // C-string we have to copy it into a null-terminated buffer.
+  // The first message should be the mechanism string.
+  string mechanism(reinterpret_cast<char*>(message), msgLength);
+
   map<string, TSaslServerDefinition*>::iterator defn =
-      TSaslServerTransport::serverDefinitionMap_.find(message_str);
+      TSaslServerTransport::serverDefinitionMap_.find(mechanism);
   if (defn == TSaslServerTransport::serverDefinitionMap_.end()) {
     stringstream ss;
-    ss << "Unsupported mechanism type " << message_str;
+    ss << "Unsupported mechanism type " << mechanism;
     sendSaslMessage(TSASL_BAD,
                     reinterpret_cast<const uint8_t*>(ss.str().c_str()), ss.str().size());
     throw TTransportException(TTransportException::BAD_ARGS, ss.str());
   }
 
   TSaslServerDefinition* serverDefinition = defn->second;
-  sasl_.reset(new TSaslServer(serverDefinition->protocol_,
+  sasl_.reset(new TSaslServer(mechanism, serverDefinition->protocol_,
                               serverDefinition->serverName_,
                               serverDefinition->realm_,
                               serverDefinition->flags_,
                               &serverDefinition->callbacks_[0]));
-  // First argument is interpreted as C-string
-  sasl_->evaluateChallengeOrResponse(
-      reinterpret_cast<const uint8_t*>(message_str.c_str()), resLength, &resLength);
 
+  uint32_t challengeLength;
+  uint8_t* challenge = sasl_->evaluateChallengeOrResponse(
+      reinterpret_cast<const uint8_t*>(mechanism.c_str()), msgLength, &challengeLength);
+  // TODO: this is necessary for DIGEST-MD5 but not for GSSAPI. There should be a more
+  // general way to do this rather than checking the challengeLength. For GSSAPI, this
+  // is zero, the server just authenticates. For DIGEST-MD5, this begins some back and
+  // forth to send additional information.
+  if (challengeLength != 0) {
+    sendSaslMessage(sasl_->isComplete() ? TSASL_COMPLETE : TSASL_OK,
+                    challenge, challengeLength);
+  }
 }
 
 shared_ptr<TTransport> TSaslServerTransport::Factory::getTransport(

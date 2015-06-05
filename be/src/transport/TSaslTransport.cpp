@@ -29,6 +29,8 @@
 #include <thrift/transport/TBufferTransports.h>
 #include "transport/TSaslTransport.h"
 
+#include "common/logging.h"
+
 using namespace std;
 
 // Default size, in bytes, for the memory buffer used to stage reads.
@@ -68,6 +70,10 @@ namespace apache { namespace thrift { namespace transport {
     return sasl_->getUsername();
   }
 
+  string TSaslTransport::getMechanismName() const {
+    return sasl_->getMechanismName();
+  }
+
   void TSaslTransport::sendSaslMessage(const NegotiationStatus status,
       const uint8_t* payload, const uint32_t length, bool flush) {
     uint8_t messageHeader[STATUS_BYTES + PAYLOAD_LENGTH_BYTES];
@@ -83,30 +89,46 @@ namespace apache { namespace thrift { namespace transport {
   }
 
   void TSaslTransport::open() {
-    NegotiationStatus status = TSASL_INVALID;
-    uint32_t resLength;
-
     // Only client should open the underlying transport.
-    if (isClient_ && !transport_->isOpen()) {
-      transport_->open();
-    }
+    if (isClient_ && !transport_->isOpen()) transport_->open();
 
     // initiate  SASL message
     handleSaslStartMessage();
 
+    // The number of messages received so far.
+    int numMessagesReceived = 0;
+    NegotiationStatus status = TSASL_INVALID;
+    uint32_t msgLength;
+
     // SASL connection handshake
     while (!sasl_->isComplete()) {
-      uint8_t* message = receiveSaslMessage(&status, &resLength);
-      if (status == TSASL_COMPLETE) {
-        if (isClient_) break; // handshake complete
-      } else if (status != TSASL_OK) {
+      uint8_t* message = receiveSaslMessage(&status, &msgLength);
+      ++numMessagesReceived;
+
+      if (status != TSASL_COMPLETE && status != TSASL_OK) {
         stringstream ss;
         ss << "Expected COMPLETE or OK, got " << status;
         throw TTransportException(ss.str());
       }
+
+      if (numMessagesReceived == 1 && msgLength == 0 &&
+          sasl_->getMechanismName() == "DIGEST-MD5") {
+        // TODO: this is a hack, not sure what the proper behavior is. These messages
+        // are optional and checking for QOP support.
+        // What's the general way to implement the protocol?
+        continue;
+      }
+
       uint32_t challengeLength;
       uint8_t* challenge = sasl_->evaluateChallengeOrResponse(
-          message, resLength, &challengeLength);
+          message, msgLength, &challengeLength);
+
+      if (status == TSASL_COMPLETE && isClient_) {
+        // If we are the client, and the server indicates COMPLETE, we don't need to
+        // send back any further response.
+        break;
+      }
+
       sendSaslMessage(sasl_->isComplete() ? TSASL_COMPLETE : TSASL_OK,
                       challenge, challengeLength);
     }
@@ -115,7 +137,7 @@ namespace apache { namespace thrift { namespace transport {
     // This will occur with ANONYMOUS auth, for example, where we send an
     // initial response and are immediately complete.
     if (isClient_ && (status == TSASL_INVALID || status == TSASL_OK)) {
-      receiveSaslMessage(&status, &resLength);
+      receiveSaslMessage(&status, &msgLength);
       if (status != TSASL_COMPLETE) {
         stringstream ss;
         ss << "Expected COMPLETE or OK, got " << status;
@@ -229,20 +251,20 @@ namespace apache { namespace thrift { namespace transport {
     transport_->flush();
   }
 
+  /**
+   * Read a complete Thrift SASL message.
+   *
+   * @return The SASL status and payload from this message.
+   * @throws TTransportException
+   *           Thrown if there is a failure reading from the underlying
+   *           transport, or if a status code of BAD or ERROR is encountered.
+   */
   uint8_t* TSaslTransport::receiveSaslMessage(NegotiationStatus* status,
                                               uint32_t* length) {
     uint8_t messageHeader[HEADER_LENGTH];
 
     // read header
     transport_->readAll(messageHeader, HEADER_LENGTH);
-
-    // get payload status
-    *status = (NegotiationStatus)messageHeader[0];
-    if ((*status < TSASL_START) || (*status > TSASL_COMPLETE)) {
-      throw TTransportException("invalid sasl status");
-    } else if (*status == TSASL_BAD || *status == TSASL_ERROR) {
-        throw TTransportException("sasl Peer indicated failure: ");
-    }
 
     // get the length
     *length = decodeInt(messageHeader, STATUS_BYTES);
@@ -251,6 +273,13 @@ namespace apache { namespace thrift { namespace transport {
     protoBuf_.reset(new uint8_t[*length]);
     transport_->readAll(protoBuf_.get(), *length);
 
+    // get payload status
+    *status = (NegotiationStatus)messageHeader[0];
+    if ((*status < TSASL_START) || (*status > TSASL_COMPLETE)) {
+      throw TTransportException("invalid sasl status");
+    } else if (*status == TSASL_BAD || *status == TSASL_ERROR) {
+        throw TTransportException("sasl Peer indicated failure: ");
+    }
     return protoBuf_.get();
   }
 }

@@ -169,6 +169,7 @@ set (SRC_FILES
   Results.thrift
   RuntimeProfile.thrift
   StatestoreService.thrift
+  TestService.thrift
   ${EXT_DATA_SRC_FILES}
 )
 

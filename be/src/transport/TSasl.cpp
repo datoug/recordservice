@@ -98,15 +98,17 @@ string TSasl::getUsername() {
 
 TSaslClient::TSaslClient(const string& mechanisms, const string& authenticationId,
     const string& protocol, const string& serverName, const map<string,string>& props,
-    sasl_callback_t* callbacks) {
-  conn = NULL;
+    sasl_callback_t* callbacks)
+  : clientStarted(false),
+    chosenMech(mechanisms),
+    mechList(mechanisms) {
   if (!props.empty()) {
     throw SaslServerImplException("Properties not yet supported");
   }
   int result = sasl_client_new(protocol.c_str(), serverName.c_str(),
       NULL, NULL, callbacks, 0, &conn);
   if (result != SASL_OK) {
-    if (conn) {
+    if (conn != NULL) {
       throw SaslServerImplException(sasl_errdetail(conn));
     } else {
       throw SaslServerImplException(sasl_errstring(result, NULL, NULL));
@@ -121,10 +123,6 @@ TSaslClient::TSaslClient(const string& mechanisms, const string& authenticationI
     result = sasl_setprop(conn, SASL_AUTH_EXTERNAL, authenticationId.c_str());
     */
   }
-
-  chosenMech = mechList = mechanisms;
-  authComplete = false;
-  clientStarted = false;
 }
 
 /* Evaluates the challenge data and generates a response. */
@@ -168,7 +166,7 @@ uint8_t* TSaslClient::evaluateChallengeOrResponse(
 }
 
 /* Returns the IANA-registered mechanism name of this SASL client. */
-string TSaslClient::getMechanismName() {
+string TSaslClient::getMechanismName() const {
   return chosenMech;
 }
 
@@ -183,10 +181,12 @@ bool TSaslClient::hasInitialResponse() {
   return true;
 }
 
-TSaslServer::TSaslServer(const string& service, const string& serverFQDN,
+TSaslServer::TSaslServer(const string& mechanism,
+                         const string& service, const string& serverFQDN,
                          const string& userRealm,
-                         unsigned flags, sasl_callback_t* callbacks) {
-  conn = NULL;
+                         unsigned flags, sasl_callback_t* callbacks)
+  : mechanism(mechanism),
+    serverStarted(false) {
   int result = sasl_server_new(service.c_str(),
       serverFQDN.size() == 0 ? NULL : serverFQDN.c_str(),
       userRealm.size() == 0 ? NULL :userRealm.c_str(),
@@ -198,9 +198,6 @@ TSaslServer::TSaslServer(const string& service, const string& serverFQDN,
       throw SaslServerImplException(sasl_errstring(result, NULL, NULL));
     }
   }
-
-  authComplete = false;
-  serverStarted = false;
 }
 
 uint8_t* TSaslServer::evaluateChallengeOrResponse(const uint8_t* response,
@@ -211,7 +208,7 @@ uint8_t* TSaslServer::evaluateChallengeOrResponse(const uint8_t* response,
 
   if (!serverStarted) {
     result = sasl_server_start(conn,
-        (const char *)response, NULL, 0, (const char **)&out, &outlen);
+        (const char*)response, NULL, 0, (const char**)&out, &outlen);
   } else {
     result = sasl_server_step(conn,
         (const char*)response, len, (const char**)&out, &outlen);

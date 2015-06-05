@@ -189,6 +189,10 @@ const string HS2_SERVER_NAME = "hiveserver2-frontend";
 const string RECORD_SERVICE_PLANNER_SERVER_NAME = "record-service-planner";
 const string RECORD_SERVICE_WORKER_SERVER_NAME = "record-service-worker";
 
+// Service to test authentication, not enabled in production.
+// TODO: add Echo() to one of the existing services?
+const string TEST_SERVICE_NAME = "test-service";
+
 const char* ImpalaServer::SQLSTATE_SYNTAX_ERROR_OR_ACCESS_VIOLATION = "42000";
 const char* ImpalaServer::SQLSTATE_GENERAL_ERROR = "HY000";
 const char* ImpalaServer::SQLSTATE_OPTIONAL_FEATURE_NOT_IMPLEMENTED = "HYC00";
@@ -2080,6 +2084,30 @@ void ImpalaServer::DetectNmFailures() {
     SleepForMs(2000);
   }
   freeaddrinfo(addr);
+}
+
+Status ImpalaServer::StartTestService(const shared_ptr<ImpalaServer>& server,
+    int port, ThriftServer** service) {
+  return CreateServer<TestServiceProcessor>(
+      server->exec_env_, server,
+      AuthManager::GetInstance()->GetExternalAuthProvider(),
+      port, TEST_SERVICE_NAME, service);
+}
+
+void ImpalaServer::Echo(string& return_val, const string& params) {
+  return_val = params;
+}
+
+// This RPC is only callable if connected via kerberos.
+void ImpalaServer::EchoOnlyKerberos(string& return_val, const string& params) {
+  const ThriftServer::ConnectionContext* ctx = ThriftServer::GetThreadConnectionContext();
+  if (ctx->mechanism_name != AuthManager::KERBEROS_MECHANISM) {
+    stringstream ss;
+    ss << "EchoOnlyKerberos() can only be called with a kerberos connection. "
+       << "Current connection mechanism is " << ctx->mechanism_name;
+    throw TException(ss.str());
+  }
+  return_val = params;
 }
 
 }

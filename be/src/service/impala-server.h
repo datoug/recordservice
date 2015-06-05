@@ -30,6 +30,7 @@
 #include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/RecordServicePlanner.h"
 #include "gen-cpp/RecordServiceWorker.h"
+#include "gen-cpp/TestService.h"
 #include "rpc/thrift-server.h"
 #include "common/status.h"
 #include "service/frontend.h"
@@ -88,7 +89,8 @@ class TGetExecSummaryReq;
 class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
                      public ThriftServer::ConnectionHandlerIf,
                      public recordservice::RecordServicePlannerIf,
-                     public recordservice::RecordServiceWorkerIf {
+                     public recordservice::RecordServiceWorkerIf,
+                     public TestServiceIf {
  public:
   ImpalaServer(ExecEnv* exec_env);
   ~ImpalaServer();
@@ -102,6 +104,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // Throws a recordservice::TRecordServiceException.
   static void ThrowRecordServiceException(const recordservice::TErrorCode::type& code,
     const string& msg, const string& detail = "");
+
+  // Starts up the test service on 'port'.
+  static Status StartTestService(const boost::shared_ptr<ImpalaServer>& server,
+      int port, ThriftServer** service);
 
   // ImpalaService rpcs: Beeswax API (implemented in impala-beeswax-server.cc)
   virtual void query(beeswax::QueryHandle& query_handle, const beeswax::Query& query);
@@ -246,6 +252,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       const TReportExecStatusParams& params);
   void TransmitData(TTransmitDataResult& return_val,
       const TTransmitDataParams& params);
+
+  // TestService implementations (implemented in impala-server.cc)
+  void Echo(std::string& return_val, const std::string& params);
+  void EchoOnlyKerberos(std::string& return_val, const std::string& params);
 
   // Generates a unique id for this query and sets it in the given query context.
   // Prepares the given query context by populating fields required for evaluating

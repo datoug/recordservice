@@ -213,6 +213,7 @@ void* ThriftServer::ThriftServerEventProcessor::createContext(shared_ptr<TProtoc
 
     // Get the username from the transport.
     connection_ptr->username = sasl_transport->getUsername();
+    connection_ptr->mechanism_name = sasl_transport->getMechanismName();
     socket = static_cast<TSocket*>(sasl_transport->getUnderlyingTransport().get());
   }
 

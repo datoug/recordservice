@@ -90,6 +90,8 @@ set(SRC_FILES
   StatestoreSubscriber.cpp
   Status_constants.cpp
   Status_types.cpp
+  TestService.cpp
+  TestService_types.cpp
   Types_constants.cpp
   Types_types.cpp
 )

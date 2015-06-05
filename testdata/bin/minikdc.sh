@@ -104,7 +104,7 @@ start_minikdc() {
     fi
 
     # But it takes a little while to become available
-    TRIES=15
+    TRIES=30
     STARTUPDONE=0
     while [ ${TRIES} -gt 0 ]; do
         if grep -q "^Standalone MiniKdc Running" ${MINIKDC_LOG}; then

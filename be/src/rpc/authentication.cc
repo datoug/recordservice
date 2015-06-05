@@ -105,14 +105,16 @@ namespace impala {
 static sasl_callback_t GENERAL_CALLBACKS[5];        // Applies to all connections
 static vector<sasl_callback_t> KERB_INT_CALLBACKS;  // Internal kerberos connections
 static vector<sasl_callback_t> KERB_EXT_CALLBACKS;  // External kerberos connections
+static vector<sasl_callback_t> DIGEST_EXT_CALLBACKS;// External sasl-digest connections
 static vector<sasl_callback_t> LDAP_EXT_CALLBACKS;  // External LDAP connections
 
 // Pattern for hostname substitution.
 static const string HOSTNAME_PATTERN = "_HOST";
 
-// Constants for the two Sasl mechanisms we support
-static const string KERBEROS_MECHANISM = "GSSAPI";
-static const string PLAIN_MECHANISM = "PLAIN";
+// Constants for the three Sasl mechanisms we support
+const string AuthManager::KERBEROS_MECHANISM = "GSSAPI";
+const string AuthManager::DIGEST_MECHANISM = "DIGEST-MD5";
+const string AuthManager::PLAIN_MECHANISM = "PLAIN";
 
 // Required prefixes for ldap URIs:
 static const string LDAP_URI_PREFIX = "ldap://";
@@ -304,8 +306,17 @@ static void ImpalaAuxpropLookup(void* glob_context, sasl_server_params_t* sparam
   // this flag set.  We only want to log this message once, so only log it when
   // the flag is clear.
   if ((flags & SASL_AUXPROP_AUTHZID) == 0) {
-    string ustr(user, ulen);
-    VLOG(2) << "Attempting to authenticate user \"" << ustr << "\"";
+    string user_str(user, ulen);
+    VLOG(2) << "Attempting to authenticate user \"" << user_str << "\"";
+
+    // TODO (DELEGATION): This is our chance to set the expected password. This
+    // should retrieve the token for 'user' and populated it here. Currently
+    // it's hard-coded to admin for all users.
+    int result = prop_set(sparams->propctx, SASL_AUX_PASSWORD, "admin", -1);
+    if (result != SASL_OK) {
+      LOG(WARNING) << "Could not set password for user: "
+                   << user_str << " result=" << result;
+    }
   }
 }
 
@@ -405,6 +416,29 @@ static int SaslAuthorizeExternal(sasl_conn_t* conn, void* context,
     struct propctx* propctx) {
   LOG(INFO) << "Successfully authenticated client user \""
             << string(requested_user, rlen) << "\"";
+  return SASL_OK;
+}
+
+// Callback used by SASL DIGEST-MD5 to canonicalize user names.
+// TODO (DELEGATION): I don't think we need to do anything here. This is
+// our chance to change the user name, typically from 'user' -> 'user'@'something'.
+// Since we (and Hadoop) always use 'default' as the realm, we always will end up
+// seeing 'user'@default, which seems fine.
+static int SaslDigestCanonicalizeUsernameCb(sasl_conn_t *conn,
+    void* context,      // not used
+    const char* user,   // the username
+    unsigned user_len,  // its length
+    unsigned flags,     // not used
+    const char* user_realm,
+    char* out,          // the output buffer
+    unsigned out_max, unsigned* out_len) {
+  *out_len = user_len;
+  if (*out_len > out_max) {
+    LOG(WARNING) << "Canonicalized user len is larger than max len. "
+                 << *out_len << " > " << out_max;
+    return SASL_BADPROT;
+  }
+  memcpy(out, user, *out_len);
   return SASL_OK;
 }
 
@@ -551,6 +585,19 @@ Status InitAuth(const string& appname) {
       KERB_EXT_CALLBACKS[1].context = NULL;
 
       KERB_EXT_CALLBACKS[2].id = SASL_CB_LIST_END;
+
+      // Our externally facing callbacks for SASL-Digest communication
+      DIGEST_EXT_CALLBACKS.resize(3);
+
+      DIGEST_EXT_CALLBACKS[0].id = SASL_CB_LOG;
+      DIGEST_EXT_CALLBACKS[0].proc = (int (*)())&SaslLogCallback;
+      DIGEST_EXT_CALLBACKS[0].context = ((void *)"Sasl Digest");
+
+      DIGEST_EXT_CALLBACKS[1].id = SASL_CB_CANON_USER;
+      DIGEST_EXT_CALLBACKS[1].proc = (int (*)())&SaslDigestCanonicalizeUsernameCb;
+      DIGEST_EXT_CALLBACKS[1].context = NULL;
+
+      DIGEST_EXT_CALLBACKS[2].id = SASL_CB_LIST_END;
     }
 
     if (FLAGS_enable_ldap_auth) {
@@ -818,14 +865,19 @@ Status SaslAuthProvider::GetServerTransportFactory(
 
     if(!principal_.empty()) {
       // Tell it about Kerberos:
-      sst_factory->addServerDefinition(KERBEROS_MECHANISM, service_name_,
+      sst_factory->addServerDefinition(AuthManager::KERBEROS_MECHANISM, service_name_,
           hostname_, realm_, 0, sasl_props,
           is_internal_ ? KERB_INT_CALLBACKS : KERB_EXT_CALLBACKS);
+
+      map<string, string> digest_props;
+      // Tell it about SASL-DIGEST
+      sst_factory->addServerDefinition(AuthManager::DIGEST_MECHANISM, service_name_,
+          "", "default", 0, digest_props, DIGEST_EXT_CALLBACKS);
     }
 
     if (has_ldap_) {
       // Tell it about LDAP:
-      sst_factory->addServerDefinition(PLAIN_MECHANISM, "LDAP", hostname_,
+      sst_factory->addServerDefinition(AuthManager::PLAIN_MECHANISM, "LDAP", hostname_,
           "", 0, sasl_props, LDAP_EXT_CALLBACKS);
     }
 
@@ -853,10 +905,10 @@ Status SaslAuthProvider::WrapClientTransport(const string& hostname,
 
   DCHECK(!has_ldap_);
 
-  // Since the daemons are never LDAP clients, we go straight to Kerberos
+  // Since the daemons are never LDAP or DIGEST-MD5 clients, we go straight to Kerberos
   try {
     const string& service = service_name.empty() ? service_name_ : service_name;
-    sasl_client.reset(new sasl::TSaslClient(KERBEROS_MECHANISM, auth_id,
+    sasl_client.reset(new sasl::TSaslClient(AuthManager::KERBEROS_MECHANISM, auth_id,
         service, hostname, props, &KERB_INT_CALLBACKS[0]));
   } catch (sasl::SaslClientImplException& e) {
     LOG(ERROR) << "Failed to create a GSSAPI/SASL client: " << e.what();

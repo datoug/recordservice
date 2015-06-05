@@ -58,6 +58,10 @@ DECLARE_int32(recordservice_worker_port);
 // FIXME: remove this flag when recordserviced is ready.
 DEFINE_bool(start_recordservice, true, "Start RecordService services");
 
+// Start a test thrift service. This service is used to test authentication and should
+// not be on for production.
+DEFINE_int32(test_service_port, 0, "Port to start test service on. 0 to not start.");
+
 int main(int argc, char** argv) {
   InitCommonRuntime(argc, argv, true);
 
@@ -79,6 +83,8 @@ int main(int argc, char** argv) {
   ThriftServer* recordservice_planner = NULL;
   ThriftServer* recordservice_worker = NULL;
 
+  ThriftServer* test_server = NULL;
+
   shared_ptr<ImpalaServer> server;
   EXIT_IF_ERROR(CreateImpalaServer(&exec_env, FLAGS_beeswax_port, FLAGS_hs2_port,
       FLAGS_be_port, &beeswax_server, &hs2_server, &be_server,
@@ -88,6 +94,10 @@ int main(int argc, char** argv) {
     EXIT_IF_ERROR(ImpalaServer::StartRecordServiceServices(&exec_env, server,
         FLAGS_recordservice_planner_port, FLAGS_recordservice_worker_port,
         &recordservice_planner, &recordservice_worker));
+  }
+  if (FLAGS_test_service_port != 0) {
+    EXIT_IF_ERROR(ImpalaServer::StartTestService(
+        server, FLAGS_test_service_port, &test_server));
   }
 
   EXIT_IF_ERROR(be_server->Start());
@@ -111,6 +121,7 @@ int main(int argc, char** argv) {
     EXIT_IF_ERROR(recordservice_worker->Start());
     RecordServiceMetrics::RUNNING_WORKER->set_value(true);
   }
+  if (test_server != NULL) EXIT_IF_ERROR(test_server->Start());
 
   ImpaladMetrics::IMPALA_SERVER_READY->set_value(true);
   LOG(INFO) << "Impala has started.";
@@ -119,6 +130,7 @@ int main(int argc, char** argv) {
   hs2_server->Join();
   if (recordservice_planner != NULL) recordservice_planner->Join();
   if (recordservice_worker != NULL) recordservice_worker->Join();
+  if (test_server != NULL) test_server->Join();
 
   delete be_server;
   delete beeswax_server;

@@ -57,9 +57,6 @@ class TSaslTransport : public TVirtualTransport<TSaslTransport> {
  public:
   /**
    * Constructs a new TSaslTransport to act as a server.
-   * SetSaslServer must be called later to initialize the SASL endpoint underlying this
-   * transport.
-   *
    */
   TSaslTransport(boost::shared_ptr<TTransport> transport);
 
@@ -143,6 +140,13 @@ class TSaslTransport : public TVirtualTransport<TSaslTransport> {
    * @throws TTransportException if an error occurs
    */
   std::string getUsername();
+
+  /**
+   * Returns the mechanism associated with the underlying sasl connection.
+   *
+   * @throws TTransportException if an error occurs
+   */
+  std::string getMechanismName() const;
 
  protected:
   // Underlying transport

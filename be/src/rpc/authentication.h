@@ -54,6 +54,11 @@ class AuthManager {
   // Returns the unsecure auth provider.
   AuthProvider* GetNoAuthProvider();
 
+  // SASL mechanisms that we support.
+  static const std::string KERBEROS_MECHANISM;
+  static const std::string DIGEST_MECHANISM;
+  static const std::string PLAIN_MECHANISM;
+
  private:
   static AuthManager* auth_manager_;
 

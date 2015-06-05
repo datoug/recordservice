@@ -54,8 +54,10 @@ class SaslException : public TTransportException {
  */
 class TSasl {
   public:
+   TSasl() : authComplete(false), conn(NULL) {}
+
    virtual ~TSasl() {
-    sasl_dispose(&conn);
+     sasl_dispose(&conn);
    }
 
   /*
@@ -97,7 +99,7 @@ class TSasl {
                   const uint32_t len, uint32_t* outLen);
 
   /* Returns the IANA-registered mechanism name. */
-  virtual std::string getMechanismName() {  return NULL; }
+  virtual std::string getMechanismName() const {  return NULL; }
 
   /* Determines whether this mechanism has an optional initial response. */
   virtual bool hasInitialResponse() { return false; }
@@ -138,10 +140,10 @@ class TSaslClient : public sasl::TSasl {
                                          const uint32_t len, uint32_t* outLen);
 
     /* Returns the IANA-registered mechanism name of this SASL client. */
-    virtual std::string getMechanismName();
+    virtual std::string getMechanismName() const;
 
     /* Retrieves the negotiated property */
-    std::string     getNegotiatedProperty(const std::string& propName);
+    std::string getNegotiatedProperty(const std::string& propName);
 
     /* Determines whether this mechanism has an optional initial response. */
     virtual bool hasInitialResponse();
@@ -167,7 +169,8 @@ class SaslServerImplException : public SaslException {
 /* Server sasl implementation class. */
 class TSaslServer : public sasl::TSasl {
  public:
-  TSaslServer(const std::string& service, const std::string& serverFQDN,
+  TSaslServer(const std::string& mechanism, const std::string& service,
+              const std::string& serverFQDN,
               const std::string& userRealm, unsigned flags, sasl_callback_t* callbacks);
 
   /*
@@ -183,7 +186,13 @@ class TSaslServer : public sasl::TSasl {
   /* Evaluates the response data and generates a challenge. */
   virtual uint8_t* evaluateChallengeOrResponse(const uint8_t* challenge,
                                                const uint32_t len, uint32_t* resLen);
+
+  /* Returns the IANA-registered mechanism name. */
+  virtual std::string getMechanismName() const { return mechanism; }
+
  private:
+  const std::string mechanism;
+
   /* true if sasl_server_start has been called. */
   bool serverStarted;
 };

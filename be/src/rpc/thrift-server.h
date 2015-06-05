@@ -47,6 +47,9 @@ class ThriftServer {
     Username username;
     TNetworkAddress network_address;
     std::string server_name;
+
+    // Set if this is a SASL connection.
+    std::string mechanism_name;
   };
 
   // Interface class for receiving connection creation / termination events.
