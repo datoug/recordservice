@@ -154,7 +154,7 @@ static int SaslLogCallback(void* context, int level, const char* message) {
     LOG(INFO) << "SASL message (" << authctx << "): " << message;
     break;
   case SASL_LOG_DEBUG: // "More verbose than NOTE"
-    VLOG(1) << "SASL message (" << authctx << "): " << message;
+    VLOG(2) << "SASL message (" << authctx << "): " << message;
     break;
   case SASL_LOG_TRACE: // "Traces of internal protocols"
   default:
@@ -213,7 +213,7 @@ int SaslLdapCheckPass(sasl_conn_t* conn, void* context, const char* user,
       ldap_unbind_ext(ld, NULL, NULL);
       return SASL_FAIL;
     }
-    VLOG(2) << "Started TLS connection with LDAP server: " << FLAGS_ldap_uri;
+    VLOG(1) << "Started TLS connection with LDAP server: " << FLAGS_ldap_uri;
   }
 
   // Map the user string into an acceptable LDAP "DN" (distinguished name)
@@ -235,7 +235,7 @@ int SaslLdapCheckPass(sasl_conn_t* conn, void* context, const char* user,
   cred.bv_val = const_cast<char*>(pass);
   cred.bv_len = passlen;
 
-  VLOG_QUERY << "Trying simple LDAP bind for: " << user_str;
+  VLOG_REQUEST << "Trying simple LDAP bind for: " << user_str;
 
   rc = ldap_sasl_bind_s(ld, user_str.c_str(), LDAP_SASL_SIMPLE, &cred,
       NULL, NULL, NULL);
@@ -248,7 +248,6 @@ int SaslLdapCheckPass(sasl_conn_t* conn, void* context, const char* user,
   }
 
   VLOG_QUERY << "LDAP bind successful";
-
   return SASL_OK;
 }
 
@@ -378,10 +377,10 @@ static int SaslAuthorizeInternal(sasl_conn_t* conn, void* context,
     const char* auth_identity, unsigned alen,
     const char* def_realm, unsigned urlen,
     struct propctx* propctx) {
-  // We say "principal" here becase this is for internal communication, and hence
+  // We say "principal" here because this is for internal communication, and hence
   // ought always be --principal or --be_principal
-  VLOG(1) << "Successfully authenticated principal \"" << string(requested_user, rlen)
-          << "\" on an internal connection";
+  VLOG_REQUEST << "Successfully authenticated principal \""
+               << string(requested_user, rlen) << "\" on an internal connection";
   return SASL_OK;
 }
 
@@ -870,7 +869,7 @@ Status SaslAuthProvider::WrapClientTransport(const string& hostname,
   // can be used to log an "I'm beginning authentication for this principal"
   // message.  Unfortunately, there are no hooks for us at this level to say
   // that we successfully authenticated as a client.
-  VLOG_RPC << "Initiating client connection using principal " << principal_;
+  VLOG_REQUEST << "Initiating client connection using principal " << principal_;
 
   return Status::OK;
 }

@@ -168,7 +168,7 @@ class ImpalaServer::AsciiQueryResultSet : public ImpalaServer::QueryResultSet {
 };
 
 void ImpalaServer::query(QueryHandle& query_handle, const Query& query) {
-  VLOG_QUERY << "query(): query=" << query.query;
+  VLOG_REQUEST << "query(): query=" << query.query;
   ScopedSessionState session_handle(this);
   shared_ptr<SessionState> session;
   RAISE_IF_ERROR(
@@ -200,7 +200,7 @@ void ImpalaServer::query(QueryHandle& query_handle, const Query& query) {
 
 void ImpalaServer::executeAndWait(QueryHandle& query_handle, const Query& query,
     const LogContextId& client_ctx) {
-  VLOG_QUERY << "executeAndWait(): query=" << query.query;
+  VLOG_REQUEST << "executeAndWait(): query=" << query.query;
   ScopedSessionState session_handle(this);
   shared_ptr<SessionState> session;
   RAISE_IF_ERROR(
@@ -252,7 +252,7 @@ void ImpalaServer::executeAndWait(QueryHandle& query_handle, const Query& query,
 void ImpalaServer::explain(QueryExplanation& query_explanation, const Query& query) {
   // Translate Beeswax Query to Impala's QueryRequest and then set the explain plan bool
   // before shipping to FE
-  VLOG_QUERY << "explain(): query=" << query.query;
+  VLOG_REQUEST << "explain(): query=" << query.query;
   ScopedSessionState session_handle(this);
   RAISE_IF_ERROR(session_handle.WithSession(ThriftServer::GetThreadConnectionId()),
       SQLSTATE_GENERAL_ERROR);
@@ -303,7 +303,7 @@ void ImpalaServer::get_results_metadata(ResultsMetadata& results_metadata,
   // Convert QueryHandle to TUniqueId and get the query exec state.
   TUniqueId query_id;
   QueryHandleToTUniqueId(handle, &query_id);
-  VLOG_QUERY << "get_results_metadata(): query_id=" << PrintId(query_id);
+  VLOG_REQUEST << "get_results_metadata(): query_id=" << PrintId(query_id);
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, true);
   if (exec_state.get() == NULL) {
     RaiseBeeswaxException("Invalid query handle", SQLSTATE_GENERAL_ERROR);
@@ -345,7 +345,7 @@ void ImpalaServer::close(const QueryHandle& handle) {
       SQLSTATE_GENERAL_ERROR);
   TUniqueId query_id;
   QueryHandleToTUniqueId(handle, &query_id);
-  VLOG_QUERY << "close(): query_id=" << PrintId(query_id);
+  VLOG_REQUEST << "close(): query_id=" << PrintId(query_id);
   // TODO: do we need to raise an exception if the query state is EXCEPTION?
   // TODO: use timeout to get rid of unwanted exec_state.
   RAISE_IF_ERROR(UnregisterQuery(query_id, true), SQLSTATE_GENERAL_ERROR);
@@ -364,7 +364,7 @@ QueryState::type ImpalaServer::get_state(const QueryHandle& handle) {
   if (entry != query_exec_state_map_.end()) {
     return entry->second->query_state();
   } else {
-    VLOG_QUERY << "ImpalaServer::get_state invalid handle";
+    VLOG_REQUEST << "ImpalaServer::get_state invalid handle";
     RaiseBeeswaxException("Invalid query handle", SQLSTATE_GENERAL_ERROR);
   }
   // dummy to keep compiler happy
@@ -450,7 +450,7 @@ void ImpalaServer::CloseInsert(TInsertResult& insert_result,
       SQLSTATE_GENERAL_ERROR);
   TUniqueId query_id;
   QueryHandleToTUniqueId(query_handle, &query_id);
-  VLOG_QUERY << "CloseInsert(): query_id=" << PrintId(query_id);
+  VLOG_REQUEST << "CloseInsert(): query_id=" << PrintId(query_id);
 
   Status status = CloseInsertInternal(query_id, &insert_result);
   if (!status.ok()) {

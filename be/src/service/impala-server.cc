@@ -830,6 +830,7 @@ Status ImpalaServer::RegisterQuery(shared_ptr<SessionState> session_state,
   // The session may have been closed after it was checked out.
   if (session_state->closed) return Status("Session has been closed, ignoring query.");
   const TUniqueId& query_id = exec_state->query_id();
+  VLOG_REQUEST << "RegisterQuery(): query_id=" << exec_state->query_id();
   {
     lock_guard<mutex> l(query_exec_state_map_lock_);
     QueryExecStateMap::iterator entry = query_exec_state_map_.find(query_id);
@@ -878,7 +879,7 @@ Status ImpalaServer::SetQueryInflight(shared_ptr<SessionState> session_state,
 
 Status ImpalaServer::UnregisterQuery(const TUniqueId& query_id, bool check_inflight,
     const Status* cause) {
-  VLOG_QUERY << "UnregisterQuery(): query_id=" << query_id;
+  VLOG_REQUEST << "UnregisterQuery(): query_id=" << query_id;
 
   RETURN_IF_ERROR(CancelInternal(query_id, check_inflight, cause));
 
@@ -947,7 +948,8 @@ Status ImpalaServer::UpdateCatalogMetrics() {
 
 Status ImpalaServer::CancelInternal(const TUniqueId& query_id, bool check_inflight,
     const Status* cause) {
-  VLOG_QUERY << "Cancel(): query_id=" << PrintId(query_id);
+  VLOG_QUERY << "Cancel(): query_id=" << PrintId(query_id)
+               << " cause=" << (cause != NULL ? cause->GetDetail() : "user cancelled.");
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, true);
   if (exec_state == NULL) return Status("Invalid or unknown query handle");
   lock_guard<mutex> l(*exec_state->lock(), adopt_lock_t());
@@ -1007,7 +1009,7 @@ Status ImpalaServer::CloseSessionInternal(const TUniqueId& session_id,
         session_state->inflight_queries.end());
   }
   // Unregister all open queries from this session.
-  Status status("Session closed");
+  Status status = Status::Expected("Session closed");
   BOOST_FOREACH(const TUniqueId& query_id, inflight_queries) {
     UnregisterQuery(query_id, false, &status);
   }
@@ -1342,8 +1344,8 @@ Status ImpalaServer::ProcessCatalogUpdateResult(
 
   // Wait for the update to be processed locally.
   // TODO: What about query cancellation?
-  VLOG_QUERY << "Waiting for catalog version: " << min_req_catalog_version
-             << " current version: " << catalog_update_info_.catalog_version;
+  VLOG_METADATA_UPDATE << "Waiting for catalog version: " << min_req_catalog_version
+                       << " current version: " << catalog_update_info_.catalog_version;
   while (catalog_update_info_.catalog_version < min_req_catalog_version &&
          catalog_update_info_.catalog_service_id == catalog_service_id) {
     catalog_version_update_cv_.wait(unique_lock);
@@ -1387,7 +1389,7 @@ void ImpalaServer::MembershipCallback(
       Status status = DeserializeThriftMsg(reinterpret_cast<const uint8_t*>(
           item.value.data()), &len, false, &backend_descriptor);
       if (!status.ok()) {
-        VLOG(2) << "Error deserializing topic item with key: " << item.key;
+        LOG(WARNING) << "Error deserializing topic item with key: " << item.key;
         continue;
       }
       // This is a new item - add it to the map of known backends.
@@ -1493,7 +1495,7 @@ void ImpalaServer::RecordServiceMembershipCallback(
       Status status = DeserializeThriftMsg(reinterpret_cast<const uint8_t*>(
           item.value.data()), &len, false, &backend_descriptor);
       if (!status.ok()) {
-        VLOG(2) << "Error deserializing topic item with key: " << item.key;
+        LOG(WARNING) << "Error deserializing topic item with key: " << item.key;
         continue;
       }
       // This is a new item - add it to the map of known services.
@@ -1512,8 +1514,6 @@ void ImpalaServer::RecordServiceMembershipCallback(
         continue;
       }
 
-      VLOG(1) << "Registering local " << (planner_topic ? "planner" : "worker")
-              << " with statestored.";
       subscriber_topic_updates->push_back(TTopicDelta());
       TTopicDelta& update = subscriber_topic_updates->back();
       update.topic_name = (planner_topic ?
@@ -1538,7 +1538,8 @@ void ImpalaServer::RecordServiceMembershipCallback(
         subscriber_topic_updates->pop_back();
         continue;
       }
-      LOG(INFO) << "Registering server with statestore using hostname=" << hostname
+      LOG(INFO) << "Registering local " << (planner_topic ? "planner" : "worker")
+                << " with statestore using hostname=" << hostname
                 << " ipaddress=" << ipaddress;
 
       TBackendDescriptor service_descriptor;
@@ -1660,6 +1661,9 @@ void ImpalaServer::ConnectionStart(
       session_state->connected_user = connection_context.username;
     }
 
+    LOG(INFO) << "New connection from client " << connection_context.network_address
+              << " service=" << connection_context.server_name
+              << " user=" << session_state->connected_user;
     {
       lock_guard<mutex> l(session_state_map_lock_);
       bool success =
@@ -1801,9 +1805,10 @@ void ImpalaServer::ExpireQueries() {
           }
         } else if (!query_state->is_active()) {
           // Otherwise time to expire this query
-          VLOG_QUERY << "Expiring query due to client inactivity: "
-                     << expiration_event->second << ", last activity was at: "
-                     << TimestampValue(query_state->last_active()).DebugString();
+          VLOG_REQUEST << "Expiring query id=" << query_state->query_id()
+                       << " due to client inactivity: "
+                       << expiration_event->second << ", last activity was at: "
+                       << TimestampValue(query_state->last_active()).DebugString();
           const string& err_msg = Substitute(
               "Query $0 expired due to client inactivity (timeout is $1)",
               PrintId(expiration_event->second),

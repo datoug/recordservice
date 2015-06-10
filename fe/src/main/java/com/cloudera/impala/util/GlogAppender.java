@@ -47,7 +47,7 @@ public class GlogAppender extends AppenderSkeleton {
     // strangeness with equality testing.
     if (level.equals(Level.TRACE)) return TLogLevel.VLOG_3;
     if (level.equals(Level.ALL)) return TLogLevel.VLOG_3;
-    if (level.equals(Level.DEBUG)) return TLogLevel.VLOG;
+    if (level.equals(Level.DEBUG)) return TLogLevel.VLOG_2;
     if (level.equals(Level.ERROR)) return TLogLevel.ERROR;
     if (level.equals(Level.FATAL)) return TLogLevel.FATAL;
     if (level.equals(Level.INFO)) return TLogLevel.INFO;

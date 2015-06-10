@@ -232,8 +232,9 @@ void RuntimeState::ReportFileErrors(const std::string& file_name, int num_errors
 
 bool RuntimeState::LogError(const ErrorMsg& message) {
   ScopedSpinLock l(&error_log_lock_);
-  // All errors go to the log, unreported_error_count_ is counted independently of the size of the
-  // error_log to account for errors that were already reported to the coordninator
+  // All errors go to the log, unreported_error_count_ is counted independently of the
+  // size of the error_log to account for errors that were already reported to the
+  // coordinator
   VLOG_QUERY << "Error from query " << query_id() << ": " << message.msg();
   if (ErrorCount(error_log_) < query_options().max_errors) {
     AppendError(&error_log_, message);

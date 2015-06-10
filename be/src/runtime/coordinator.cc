@@ -476,8 +476,8 @@ Status Coordinator::UpdateStatus(const Status& status, const TUniqueId* instance
 
   // Log the id of the fragment that first failed so we can track it down easier.
   if (instance_id != NULL) {
-    VLOG_QUERY << "Query id=" << query_id_ << " failed because fragment id="
-               << *instance_id << " failed.";
+    LOG(WARNING) << "Query id=" << query_id_ << " failed because fragment id="
+                 << *instance_id << " failed.";
   }
 
   return query_status_;

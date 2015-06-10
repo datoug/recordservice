@@ -75,6 +75,8 @@ namespace impala {
 void ImpalaServer::ThrowRecordServiceException(
     const recordservice::TErrorCode::type& code,
     const string& msg, const string& detail) {
+  LOG(INFO) << "RecordService request failed. code=" << code
+            << " msg=" << msg << " detail=" << detail;
   recordservice::TRecordServiceException ex;
   ex.code = code;
   ex.message = msg;
@@ -86,17 +88,19 @@ inline void ThrowFetchException(const Status& status) {
   DCHECK(!status.ok());
   recordservice::TRecordServiceException ex;
   if (status.IsCancelled()) {
-    ex.code = recordservice::TErrorCode::CANCELLED;
-    ex.message = "Task failed because it was cancelled.";
+    ImpalaServer::ThrowRecordServiceException(recordservice::TErrorCode::CANCELLED,
+        "Task failed because it was cancelled.",
+        status.msg().GetFullMessageDetails());
   } else if (status.IsMemLimitExceeded()) {
-    ex.code = recordservice::TErrorCode::OUT_OF_MEMORY;
-    ex.message = "Task failed because it ran out of memory.";
+    ImpalaServer::ThrowRecordServiceException(recordservice::TErrorCode::OUT_OF_MEMORY,
+        "Task failed because it ran out of memory.",
+        status.msg().GetFullMessageDetails());
+    // FIXME: make sure this contains the mem tracker dump.
   } else {
-    ex.code = recordservice::TErrorCode::INTERNAL_ERROR;
-    ex.message = "Task failed due to an internal error.";
+    ImpalaServer::ThrowRecordServiceException(recordservice::TErrorCode::INTERNAL_ERROR,
+        "Task failed due to an internal error.",
+        status.msg().GetFullMessageDetails());
   }
-  ex.__set_detail(status.msg().GetFullMessageDetails());
-  throw ex;
 }
 
 // Base class for test result set serializations. The functions in here and
@@ -514,7 +518,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
           "Unsupported request types. Supported request types are: SQL");
   }
 
-  LOG(ERROR) << "RecordService::PlanRequest: " << query_ctx.request.stmt;
+  VLOG_REQUEST << "RecordService::PlanRequest: " << query_ctx.request.stmt;
 
   // Populate session information. This includes, among other things, the user
   // information.
@@ -816,8 +820,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
-    LOG(INFO) << "RecordService::ExecRequest: query plan " <<
-            exec_req.query_exec_request.query_plan;
+    VLOG_QUERY << "RecordService::ExecRequest: query plan "
+               << exec_req.query_exec_request.query_plan;
 
     task_state->fetch_size = DEFAULT_FETCH_SIZE;
     if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;

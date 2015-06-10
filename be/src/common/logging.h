@@ -50,21 +50,26 @@
   #endif
 #endif
 
-// Define verbose logging levels.  Per-row logging is more verbase than per-file /
+// Define verbose logging levels.  Per-row logging is more verbose than per-file /
 // per-rpc logging which is more verbose than per-connection / per-query logging.
+// The default level is 1.
 #define VLOG_CONNECTION VLOG(1)
 #define VLOG_RPC        VLOG(2)
-#define VLOG_QUERY      VLOG(1)
-#define VLOG_FILE       VLOG(2)
-#define VLOG_ROW        VLOG(3)
-#define VLOG_PROGRESS   VLOG(2)
+#define VLOG_REQUEST    VLOG(1)
+#define VLOG_QUERY      VLOG(2)
+#define VLOG_FILE       VLOG(3)
+#define VLOG_ROW        VLOG(4)
+#define VLOG_PROGRESS   VLOG(3)
+#define VLOG_METADATA_UPDATE VLOG(1)
 
 #define VLOG_CONNECTION_IS_ON VLOG_IS_ON(1)
 #define VLOG_RPC_IS_ON VLOG_IS_ON(2)
-#define VLOG_QUERY_IS_ON VLOG_IS_ON(1)
-#define VLOG_FILE_IS_ON VLOG_IS_ON(2)
-#define VLOG_ROW_IS_ON VLOG_IS_ON(3)
-#define VLOG_PROGRESS_IS_ON VLOG_IS_ON(2)
+#define VLOG_REQUEST_IS_ON VLOG_IS_ON(1)
+#define VLOG_QUERY_IS_ON VLOG_IS_ON(2)
+#define VLOG_FILE_IS_ON VLOG_IS_ON(3)
+#define VLOG_ROW_IS_ON VLOG_IS_ON(4)
+#define VLOG_PROGRESS_IS_ON VLOG_IS_ON(3)
+#define VLOG_METADATA_UPDATE_IS_ON VLOG_IS_ON(1)
 
 // IR modules don't use these methods, and can't see the google namespace used in
 // GetFullLogFilename()'s prototype.

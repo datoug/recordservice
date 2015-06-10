@@ -244,7 +244,7 @@ void HiveUdfCall::Close(RuntimeState* state, ExprContext* ctx,
       env->DeleteGlobalRef(jni_ctx->executor);
       // Clear any exceptions. Not much we can do about them here.
       Status status = JniUtil::GetJniExceptionMsg(env);
-      if (!status.ok()) VLOG_QUERY << status.GetDetail();
+      if (!status.ok()) LOG(WARNING) << status.GetDetail();
     }
     if (jni_ctx->input_values_buffer != NULL) {
       delete[] jni_ctx->input_values_buffer;

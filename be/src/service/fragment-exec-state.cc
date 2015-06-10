@@ -119,7 +119,7 @@ void FragmentMgr::FragmentExecState::ReportStatusCb(
   } catch (TException& e) {
     stringstream msg;
     msg << "ReportExecStatus() to " << coord_address() << " failed:\n" << e.what();
-    VLOG_QUERY << msg.str();
+    LOG(WARNING) << msg.str();
     rpc_status = Status(ErrorMsg(TErrorCode::INTERNAL_ERROR, msg.str()));
   }
 

@@ -33,10 +33,12 @@ DEFINE_int32(log_mem_usage_interval, 0, "If non-zero, impalad will output memory
     "every log_mem_usage_interval'th fragment completion.");
 
 Status FragmentMgr::ExecPlanFragment(const TExecPlanFragmentParams& exec_params) {
-  VLOG_QUERY << "ExecPlanFragment() instance_id="
-             << exec_params.fragment_instance_ctx.fragment_instance_id
-             << " coord=" << exec_params.fragment_instance_ctx.query_ctx.coord_address
-             << " backend#=" << exec_params.fragment_instance_ctx.backend_num;
+  VLOG_REQUEST << "ExecPlanFragment() "
+               << "query_id=" << exec_params.fragment_instance_ctx.query_ctx.query_id
+               << " instance_id="
+               << exec_params.fragment_instance_ctx.fragment_instance_id
+               << " coord=" << exec_params.fragment_instance_ctx.query_ctx.coord_address
+               << " backend#=" << exec_params.fragment_instance_ctx.backend_num;
 
   if (!exec_params.fragment.__isset.output_sink) {
     return Status("missing sink in plan fragment");
@@ -118,7 +120,8 @@ void FragmentMgr::CancelPlanFragment(TCancelPlanFragmentResult& return_val,
   shared_ptr<FragmentExecState> exec_state =
       GetFragmentExecState(params.fragment_instance_id);
   if (exec_state.get() == NULL) {
-    Status status(ErrorMsg(TErrorCode::INTERNAL_ERROR, Substitute("Unknown fragment id: $0",
+    Status status(ErrorMsg(TErrorCode::INTERNAL_ERROR, Substitute(
+        "Unknown fragment id: $0",
         lexical_cast<string>(params.fragment_instance_id))));
     status.SetTStatus(&return_val);
     return;

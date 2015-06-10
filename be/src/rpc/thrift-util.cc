@@ -130,7 +130,7 @@ Status WaitForServer(const string& host, int port, int num_retries,
       socket.close();
       return Status::OK;
     } catch (const TException& e) {
-      VLOG_QUERY << "Connection failed: " << e.what();
+      LOG(INFO) << "Connection to " << host << ":" << port << "failed: " << e.what();
     }
     ++retry_count;
     VLOG_QUERY << "Waiting " << retry_interval_ms << "ms for Thrift server at "
@@ -139,6 +139,7 @@ Status WaitForServer(const string& host, int port, int num_retries,
                << " of " << num_retries;
     SleepForMs(retry_interval_ms);
   }
+  LOG(ERROR) << "Failed to connect to " << host << ":" << port;
   return Status("Server did not come up");
 }
 
