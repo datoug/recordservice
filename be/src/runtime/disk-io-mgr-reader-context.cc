@@ -14,6 +14,8 @@
 
 #include "runtime/disk-io-mgr-internal.h"
 
+#include "common/query-logging.h"
+
 using namespace boost;
 using namespace impala;
 using namespace std;
@@ -137,7 +139,7 @@ DiskIoMgr::RequestContext::RequestContext(DiskIoMgr* parent, int num_disks)
 }
 
 // Resets this object.
-void DiskIoMgr::RequestContext::Reset(MemTracker* tracker) {
+void DiskIoMgr::RequestContext::Reset(MemTracker* tracker, const Logger* logger) {
   DCHECK_EQ(state_, Inactive);
   status_ = Status::OK;
 
@@ -148,6 +150,7 @@ void DiskIoMgr::RequestContext::Reset(MemTracker* tracker) {
 
   state_ = Active;
   mem_tracker_ = tracker;
+  logger_ = (logger == NULL ? Logger::NullLogger() : logger);
 
   num_unstarted_scan_ranges_ = 0;
   num_disks_with_ranges_ = 0;

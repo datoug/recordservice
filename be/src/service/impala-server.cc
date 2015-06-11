@@ -706,7 +706,7 @@ Status ImpalaServer::Execute(TQueryCtx* query_ctx,
   Status status = PreExecute(&request, *query_ctx, session_state,
       &registered_exec_state, true, exec_state);
   if (status.ok()) {
-    status = ExecuteInternal(&request, exec_state);
+    status = ExecuteInternal(&request, exec_state->get());
   }
   if (!status.ok() && registered_exec_state) {
     UnregisterQuery((*exec_state)->query_id(), false, &status);
@@ -724,7 +724,7 @@ Status ImpalaServer::ExecuteRecordServiceRequest(TQueryCtx* query_ctx,
   Status status = PreExecute(request, *query_ctx, session_state,
       &registered_exec_state, false, exec_state);
   if (status.ok()) {
-    status = ExecuteInternal(request, exec_state);
+    status = ExecuteInternal(request, exec_state->get());
   }
   if (!status.ok() && registered_exec_state) {
     UnregisterQuery((*exec_state)->query_id(), false, &status);
@@ -785,28 +785,29 @@ Status ImpalaServer::PreExecute(
 
 Status ImpalaServer::ExecuteInternal(
     TExecRequest* request,
-    shared_ptr<QueryExecState>* exec_state) {
-  VLOG(2) << "Execution request: " << ThriftDebugString(*(request));
+    QueryExecState* exec_state) {
+  QUERY_VLOG_FRAGMENT(exec_state->logger()) << ThriftDebugString(*(request));
   if (IsAuditEventLoggingEnabled()) {
-    LogAuditRecord(*(exec_state->get()), *(request));
+    LogAuditRecord(*exec_state, *(request));
   }
 
   // start execution of query; also starts fragment status reports
-  RETURN_IF_ERROR((*exec_state)->Exec(request));
+  RETURN_IF_ERROR(exec_state->Exec(request));
   if (request->stmt_type == TStmtType::DDL) {
     Status status = UpdateCatalogMetrics();
     if (!status.ok()) {
-      VLOG_QUERY << "Couldn't update catalog metrics: " << status.GetDetail();
+      QUERY_VLOG_FRAGMENT(exec_state->logger())
+          << "Couldn't update catalog metrics: " << status.GetDetail();
     }
   }
 
-  if ((*exec_state)->coord() != NULL) {
+  if (exec_state->coord() != NULL) {
     const unordered_set<TNetworkAddress>& unique_hosts =
-        (*exec_state)->schedule()->unique_hosts();
+        exec_state->schedule()->unique_hosts();
     if (!unique_hosts.empty()) {
       lock_guard<mutex> l(query_locations_lock_);
       BOOST_FOREACH(const TNetworkAddress& port, unique_hosts) {
-        query_locations_[port].insert((*exec_state)->query_id());
+        query_locations_[port].insert(exec_state->query_id());
       }
     }
   }
@@ -874,9 +875,9 @@ Status ImpalaServer::SetQueryInflight(shared_ptr<SessionState> session_state,
   }
   if (timeout_s > 0) {
     lock_guard<mutex> l2(query_expiration_lock_);
-    VLOG_QUERY << "Query " << PrintId(query_id) << " has timeout of "
-               << PrettyPrinter::Print(timeout_s * 1000L * 1000L * 1000L,
-                     TUnit::TIME_NS);
+    QUERY_VLOG_FRAGMENT(exec_state->logger())
+        << "Query has timeout of "
+        << PrettyPrinter::Print(timeout_s * 1000L * 1000L * 1000L, TUnit::TIME_NS);
     queries_by_timestamp_.insert(
         make_pair(UnixMillis() + (1000L * timeout_s), query_id));
   }
@@ -954,10 +955,10 @@ Status ImpalaServer::UpdateCatalogMetrics() {
 
 Status ImpalaServer::CancelInternal(const TUniqueId& query_id, bool check_inflight,
     const Status* cause) {
-  VLOG_QUERY << "Cancel(): query_id=" << PrintId(query_id)
-               << " cause=" << (cause != NULL ? cause->GetDetail() : "user cancelled.");
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(query_id, true);
   if (exec_state == NULL) return Status("Invalid or unknown query handle");
+  QUERY_VLOG_FRAGMENT(exec_state->logger())
+      << "Cancel(): cause=" << (cause != NULL ? cause->GetDetail() : "user cancelled.");
   lock_guard<mutex> l(*exec_state->lock(), adopt_lock_t());
   if (check_inflight) {
     lock_guard<mutex> l2(exec_state->session()->lock);
@@ -1049,20 +1050,16 @@ Status ImpalaServer::GetSessionState(const TUniqueId& session_id,
 
 void ImpalaServer::ReportExecStatus(
     TReportExecStatusResult& return_val, const TReportExecStatusParams& params) {
-  VLOG_FILE << "ReportExecStatus() query_id=" << params.query_id
-            << " backend#=" << params.backend_num
-            << " instance_id=" << params.fragment_instance_id
-            << " done=" << (params.done ? "true" : "false");
   // TODO: implement something more efficient here, we're currently
   // acquiring/releasing the map lock and doing a map lookup for
   // every report (assign each query a local int32_t id and use that to index into a
   // vector of QueryExecStates, w/o lookup or locking?)
   shared_ptr<QueryExecState> exec_state = GetQueryExecState(params.query_id, false);
-  // TODO: This is expected occasionally (since a report RPC might be in flight while
-  // cancellation is happening), but repeated instances for the same query are a bug
-  // (which we have occasionally seen). Consider keeping query exec states around for a
-  // little longer (until all reports have been received).
   if (exec_state.get() == NULL) {
+    // TODO: This is expected occasionally (since a report RPC might be in flight while
+    // cancellation is happening), but repeated instances for the same query are a bug
+    // (which we have occasionally seen). Consider keeping query exec states around for a
+    // little longer (until all reports have been received).
     return_val.status.__set_status_code(TErrorCode::INTERNAL_ERROR);
     const string& err = Substitute("ReportExecStatus(): Received report for unknown "
         "query ID (probably closed or cancelled). (query_id: $0, backend: $1, instance:"
@@ -1072,6 +1069,10 @@ void ImpalaServer::ReportExecStatus(
     VLOG_QUERY << err;
     return;
   }
+  QUERY_VLOG_BUFFER(exec_state->logger())
+      << "ReportExecStatus() backend#=" << params.backend_num
+      << " instance_id=" << params.fragment_instance_id
+      << " done=" << (params.done ? "true" : "false");
   exec_state->coord()->UpdateFragmentExecStatus(params).SetTStatus(&return_val);
 }
 

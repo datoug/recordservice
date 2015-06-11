@@ -334,10 +334,10 @@ Status DiskIoMgr::Init(MemTracker* process_mem_tracker) {
 }
 
 Status DiskIoMgr::RegisterContext(RequestContext** request_context,
-    MemTracker* mem_tracker) {
+    MemTracker* mem_tracker, const Logger* logger) {
   DCHECK(request_context_cache_.get() != NULL) << "Must call Init() first.";
   *request_context = request_context_cache_->GetNewContext();
-  (*request_context)->Reset(mem_tracker);
+  (*request_context)->Reset(mem_tracker, logger);
   return Status::OK;
 }
 
@@ -777,7 +777,7 @@ bool DiskIoMgr::GetNextRequestRange(DiskQueue* disk_queue, RequestRange** range,
 
     unique_lock<mutex> request_lock((*request_context)->lock_);
     VLOG_FILE << "Disk (id=" << disk_id << ") reading for "
-        << (*request_context)->DebugString();
+              << (*request_context)->DebugString();
 
     // Check if reader has been cancelled
     if ((*request_context)->state_ == RequestContext::Cancelled) {

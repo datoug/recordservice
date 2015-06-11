@@ -74,7 +74,8 @@ RuntimeState::RuntimeState(const TPlanFragmentInstanceCtx& fragment_instance_ctx
         "Fragment " + PrintId(fragment_instance_ctx_.fragment_instance_id)),
     is_cancelled_(false),
     query_resource_mgr_(NULL),
-    root_node_id_(-1) {
+    root_node_id_(-1),
+    logger_(lexical_cast<string>(query_id()) + ": ", query_options().logging_level) {
   Status status = Init(exec_env);
   DCHECK(status.ok()) << status.GetDetail();
 }
@@ -87,7 +88,8 @@ RuntimeState::RuntimeState(const TQueryCtx& query_ctx)
     profile_(obj_pool_.get(), "<unnamed>"),
     is_cancelled_(false),
     query_resource_mgr_(NULL),
-    root_node_id_(-1) {
+    root_node_id_(-1),
+    logger_(lexical_cast<string>(query_id()) + ": ", query_options().logging_level) {
   fragment_instance_ctx_.__set_query_ctx(query_ctx);
   fragment_instance_ctx_.query_ctx.request.query_options.__set_batch_size(
       DEFAULT_BATCH_SIZE);

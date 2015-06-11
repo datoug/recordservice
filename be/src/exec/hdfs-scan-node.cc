@@ -145,6 +145,8 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
   Status status = GetNextInternal(state, row_batch, eos);
   if (status.IsMemLimitExceeded()) state->SetMemLimitExceeded();
   if (!status.ok() || *eos) StopAndFinalizeCounters();
+  QUERY_VLOG_BATCH(runtime_state_->logger()) << "Node " << id()
+      << " GetNext() returned " << row_batch->num_rows() << " rows eos=" << *eos;
   return status;
 }
 
@@ -316,8 +318,9 @@ void HdfsScanNode::TransferToScanNodePool(MemPool* pool) {
 }
 
 Status HdfsScanNode::Prepare(RuntimeState* state) {
-  SCOPED_TIMER(runtime_profile_->total_time_counter());
   runtime_state_ = state;
+  SCOPED_TIMER(runtime_profile_->total_time_counter());
+  QUERY_VLOG_FRAGMENT(runtime_state_->logger()) << "Node " << id() << " Prepare()";
   RETURN_IF_ERROR(ScanNode::Prepare(state));
 
   tuple_desc_ = state->desc_tbl().GetTupleDescriptor(tuple_id_);
@@ -527,6 +530,7 @@ Status HdfsScanNode::Prepare(RuntimeState* state) {
 // threads. The scanner subclasses are passed the initial splits.  Scanners are expected
 // to queue up a non-zero number of those splits to the io mgr (via the ScanNode).
 Status HdfsScanNode::Open(RuntimeState* state) {
+  QUERY_VLOG_FRAGMENT(runtime_state_->logger()) << "Node " << id() << " Open()";
   RETURN_IF_ERROR(ExecNode::Open(state));
 
   if (!runtime_state_->is_record_service_request()) {
@@ -564,7 +568,7 @@ Status HdfsScanNode::Open(RuntimeState* state) {
   Expr::Open(conjunct_ctxs_, state);
 
   RETURN_IF_ERROR(runtime_state_->io_mgr()->RegisterContext(
-      &reader_context_, mem_tracker()));
+      &reader_context_, mem_tracker(), runtime_state_->logger()));
 
   // Initialize HdfsScanNode specific counters
   read_timer_ = ADD_TIMER(runtime_profile(), TOTAL_HDFS_READ_TIMER);
@@ -636,6 +640,7 @@ Status HdfsScanNode::Open(RuntimeState* state) {
 
 void HdfsScanNode::Close(RuntimeState* state) {
   if (is_closed()) return;
+  QUERY_VLOG_FRAGMENT(runtime_state_->logger()) << "Node " << id() << " Close()";
   SetDone();
 
   if (!state->is_record_service_request()) {
@@ -818,6 +823,8 @@ void HdfsScanNode::ThreadTokenAvailableCb(ThreadResourceMgr::ResourcePool* pool)
 void HdfsScanNode::ScannerThread() {
   SCOPED_THREAD_COUNTER_MEASUREMENT(scanner_thread_counters());
   SCOPED_TIMER(runtime_state_->total_cpu_timer());
+  QUERY_VLOG_FILE(runtime_state_->logger()) << "Node " << id()
+      << " starting new scanner thread";
 
   while (!done_) {
     if (!runtime_state_->is_record_service_request()) {
@@ -942,6 +949,9 @@ void HdfsScanNode::ScannerThread() {
     }
     runtime_state_->resource_pool()->ReleaseThreadToken(false);
   }
+
+  QUERY_VLOG_FILE(runtime_state_->logger()) << "Node " << id()
+      << " exiting scanner thread";
 }
 
 void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
@@ -953,6 +963,8 @@ void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
 
 void HdfsScanNode::RangeComplete(const THdfsFileFormat::type& file_type,
     const vector<THdfsCompression::type>& compression_types) {
+  QUERY_VLOG_FILE(runtime_state_->logger()) << "Node " << id()
+      << " finished file.";
   scan_ranges_complete_counter()->Add(1);
   progress_.Update(1);
 

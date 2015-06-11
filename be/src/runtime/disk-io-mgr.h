@@ -37,6 +37,7 @@
 
 namespace impala {
 
+class Logger;
 class MemTracker;
 
 // Manager object that schedules IO for all queries on all disks and remote filesystems
@@ -499,8 +500,9 @@ class DiskIoMgr {
   //    used for this reader will be tracked by this. If the limit is exceeded
   //    the reader will be cancelled and MEM_LIMIT_EXCEEDED will be returned via
   //    GetNext().
+  // logger: If non-NULL, the logger to use to log additional debug info.
   Status RegisterContext(RequestContext** request_context,
-      MemTracker* reader_mem_tracker = NULL);
+      MemTracker* reader_mem_tracker = NULL, const Logger* logger = NULL);
 
   // Unregisters context from the disk IoMgr. This must be called for every
   // RegisterContext() regardless of cancellation and must be called in the

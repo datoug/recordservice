@@ -14,6 +14,8 @@
 
 #include "runtime/disk-io-mgr.h"
 #include "runtime/disk-io-mgr-internal.h"
+
+#include "common/query-logging.h"
 #include "util/error-util.h"
 #include "util/hdfs-util.h"
 
@@ -257,14 +259,15 @@ Status DiskIoMgr::ScanRange::Open() {
     // TODO: is there much overhead opening hdfs files?  Should we try to preserve
     // the handle across multiple scan ranges of a file?
     hdfs_file_ = hdfsOpenFile(fs_, file(), O_RDONLY, 0, 0, 0);
-    VLOG_FILE << "hdfsOpenFile() file=" << file();
+    QUERY_VLOG_FILE(reader_->logger()) << "hdfsOpenFile() file=" << file();
     if (hdfs_file_ == NULL) {
       return Status(GetHdfsErrorMsg("Failed to open HDFS file ", file_));
     }
 
+    QUERY_VLOG_FILE(reader_->logger()) << "hdfsSeek() offset=" << offset_;
     if (hdfsSeek(fs_, hdfs_file_, offset_) != 0) {
       hdfsCloseFile(fs_, hdfs_file_);
-      VLOG_FILE << "hdfsCloseFile() (error) file=" << file();
+      QUERY_VLOG_FILE(reader_->logger()) << "hdfsCloseFile() (error) file=" << file();
       hdfs_file_ = NULL;
       string error_msg = GetHdfsErrorMsg("");
       stringstream ss;
@@ -314,9 +317,10 @@ void DiskIoMgr::ScanRange::Close() {
           if (expected_local_) {
             int remote_bytes = stats->totalBytesRead - stats->totalLocalBytesRead;
             reader_->unexpected_remote_bytes_ += remote_bytes;
-            VLOG_FILE << "Unexpected remote HDFS read of "
-                      << PrettyPrinter::Print(remote_bytes, TUnit::BYTES)
-                      << " for file '" << file_ << "'";
+            QUERY_VLOG_FILE(reader_->logger())
+                << "Unexpected remote HDFS read of "
+                << PrettyPrinter::Print(remote_bytes, TUnit::BYTES)
+                << " for file '" << file_ << "'" << " with offset " << offset_;
           }
         }
         hdfsFileFreeReadStatistics(stats);
@@ -327,7 +331,7 @@ void DiskIoMgr::ScanRange::Close() {
       cached_buffer_ = NULL;
     }
     hdfsCloseFile(fs_, hdfs_file_);
-    VLOG_FILE << "hdfsCloseFile() file=" << file();
+    QUERY_VLOG_FILE(reader_->logger()) << "hdfsCloseFile() file=" << file();
     hdfs_file_ = NULL;
   } else {
     if (local_file_ == NULL) return;
@@ -394,6 +398,8 @@ Status DiskIoMgr::ScanRange::Read(char* buffer, int64_t* bytes_read, bool* eosr)
       return Status(ss.str());
     }
   }
+  QUERY_VLOG_BUFFER(reader_->logger())
+      << "Read " << *bytes_read << " bytes from '" << file() << "'";
   bytes_read_ += *bytes_read;
   DCHECK_LE(bytes_read_, len_);
   if (bytes_read_ == len_) *eosr = true;
@@ -419,7 +425,11 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
     cached_buffer_ = hadoopReadZero(hdfs_file_, io_mgr_->cached_read_options_, len());
 
     // Data was not cached, caller will fall back to normal read path.
-    if (cached_buffer_ == NULL) return Status::OK;
+    if (cached_buffer_ == NULL) {
+      QUERY_VLOG_FILE(reader_->logger())
+          << "File '" << file() << "' expected to be cached but was not.";
+      return Status::OK;
+    }
   }
 
   // Cached read succeeded.
@@ -443,5 +453,7 @@ Status DiskIoMgr::ScanRange::ReadFromCache(bool* read_succeeded) {
   }
   *read_succeeded = true;
   ++reader_->num_used_buffers_;
+  QUERY_VLOG_BUFFER(reader_->logger())
+      << "Read " << bytes_read << " bytes from cache for '" << file() << "'";
   return Status::OK;
 }

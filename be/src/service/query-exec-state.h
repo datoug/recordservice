@@ -15,6 +15,7 @@
 #ifndef IMPALA_SERVICE_QUERY_EXEC_STATE_H
 #define IMPALA_SERVICE_QUERY_EXEC_STATE_H
 
+#include "common/query-logging.h"
 #include "common/status.h"
 #include "exec/catalog-op-executor.h"
 #include "util/runtime-profile.h"
@@ -203,8 +204,13 @@ class ImpalaServer::QueryExecState {
     return record_service_task_state_.get();
   }
 
+  const Logger* logger() const { return &logger_; }
+
  private:
   const TQueryCtx query_ctx_;
+
+  // Logging object for this query.
+  const Logger logger_;
 
   // Ensures single-threaded execution of FetchRows(). Callers of FetchRows() are
   // responsible for acquiring this lock. To avoid deadlocks, callers must not hold lock_

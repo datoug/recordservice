@@ -159,6 +159,9 @@ void impala::TQueryOptionsToMap(const TQueryOptions& query_options,
       case TImpalaQueryOptions::USE_RECORD_SERVICE:
         val << query_options.use_record_service;
         break;
+      case TImpalaQueryOptions::LOGGING_LEVEL:
+        val << query_options.logging_level;
+        break;
       default:
         // We hit this DCHECK(false) if we forgot to add the corresponding entry here
         // when we add a new query option.
@@ -334,6 +337,9 @@ Status impala::SetQueryOption(const string& key, const string& value,
       case TImpalaQueryOptions::USE_RECORD_SERVICE:
         query_options->__set_use_record_service(
             iequals(value, "true") || iequals(value, "1"));
+        break;
+      case TImpalaQueryOptions::LOGGING_LEVEL:
+        query_options->__set_logging_level(atoi(value.c_str()));
         break;
       default:
         // We hit this DCHECK(false) if we forgot to add the corresponding entry here

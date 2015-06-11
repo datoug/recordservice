@@ -26,6 +26,7 @@
 // stringstream is a typedef, so can't forward declare it.
 #include <sstream>
 
+#include "common/query-logging.h"
 #include "statestore/query-resource-mgr.h"
 #include "runtime/exec-env.h"
 #include "runtime/descriptors.h"  // for PlanNodeId
@@ -144,6 +145,9 @@ class RuntimeState {
 
   FileMoveMap* hdfs_files_to_move() { return &hdfs_files_to_move_; }
   std::vector<DiskIoMgr::RequestContext*>* reader_contexts() { return &reader_contexts_; }
+
+  // Returns the logger to use for this query.
+  const Logger* logger() const { return &logger_; }
 
   void set_fragment_root_id(PlanNodeId id) {
     DCHECK_EQ(root_node_id_, -1) << "Should not set this twice.";
@@ -377,6 +381,10 @@ class RuntimeState {
   // Bitmap filter on the hash for 'SlotId'. If bitmap[hash(slot]] is unset, this
   // value can be filtered out. These filters are generated during the query execution.
   boost::unordered_map<SlotId, Bitmap*> slot_bitmap_filters_;
+
+  // Logger to use for this query.
+  // TODO: this should really come from the plan-fragment-executor/query-exec-state
+  Logger logger_;
 
   // prohibit copies
   RuntimeState(const RuntimeState&);

@@ -820,6 +820,8 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
+    VLOG_REQUEST << "RecordService::ExecRequest: "
+                 << exec_req.query_exec_request.query_ctx.request.stmt;
     VLOG_QUERY << "RecordService::ExecRequest: query plan "
                << exec_req.query_exec_request.query_plan;
 
@@ -913,6 +915,7 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
       ThrowRecordServiceException(recordservice::TErrorCode::INVALID_HANDLE,
           "Invalid handle");
     }
+    QUERY_VLOG_BATCH(exec_state->logger()) << "Fetch()";
 
     RecordServiceTaskState* task_state = exec_state->record_service_task_state();
     exec_state->BlockOnWait();
@@ -958,6 +961,8 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
 
     task_state->results->FinalizeResult();
     RecordServiceMetrics::NUM_ROWS_FETCHED->Increment(return_val.num_records);
+    QUERY_VLOG_BATCH(exec_state->logger())
+        << "Fetched " << return_val.num_records << " records. Eos=" << return_val.done;
   } catch (const recordservice::TRecordServiceException& e) {
     RecordServiceMetrics::NUM_FAILED_FETCH_REQUESTS->Increment(1);
     throw e;

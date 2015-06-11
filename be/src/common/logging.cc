@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "common/logging.h"
+#include "common/query-logging.h"
 
 #include <boost/foreach.hpp>
 #include <boost/thread/mutex.hpp>
@@ -48,6 +49,8 @@ bool logging_initialized = false;
 using namespace boost;
 using namespace std;
 using namespace boost::uuids;
+
+const impala::Logger NULL_LOGGER("NULL", -1);
 
 mutex logging_mutex;
 
@@ -199,3 +202,8 @@ void impala::CheckAndRotateLogFiles(int max_log_files) {
     }
   }
 }
+
+const impala::Logger* impala::Logger::NullLogger() {
+  return &NULL_LOGGER;
+}
+

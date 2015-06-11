@@ -58,6 +58,7 @@ ImpalaServer::QueryExecState::QueryExecState(
     const TQueryCtx& query_ctx, ExecEnv* exec_env, Frontend* frontend,
     ImpalaServer* server, shared_ptr<SessionState> session)
   : query_ctx_(query_ctx),
+    logger_(lexical_cast<string>(query_id()) + ": ", query_options().logging_level),
     last_active_time_(numeric_limits<int64_t>::max()),
     ref_count_(0L),
     exec_env_(exec_env),
@@ -349,7 +350,9 @@ Status ImpalaServer::QueryExecState::ExecQueryOrDmlRequest(
     plan_ss << "\n----------------\n"
             << query_exec_request.query_plan
             << "----------------";
-    summary_profile_.AddInfoString("Plan", plan_ss.str());
+    const string plan_str = plan_ss.str();
+    summary_profile_.AddInfoString("Plan", plan_str);
+    QUERY_VLOG_FRAGMENT(logger()) << plan_str;
   }
   // Add info strings consumed by CM: Estimated mem/vcores and tables missing stats.
   if (query_exec_request.__isset.per_host_mem_req) {
@@ -816,15 +819,15 @@ Status ImpalaServer::QueryExecState::UpdateCatalog() {
     catalog_update.__set_header(TCatalogServiceRequestHeader());
     catalog_update.header.__set_requesting_user(effective_user());
     if (!coord()->PrepareCatalogUpdate(&catalog_update)) {
-      VLOG_QUERY << "No partitions altered, not updating metastore (query id: "
-                 << query_id() << ")";
+      QUERY_VLOG_FRAGMENT(logger()) << "No partitions altered, not updating metastore";
     } else {
       // TODO: We track partitions written to, not created, which means
       // that we do more work than is necessary, because written-to
       // partitions don't always require a metastore change.
-      VLOG_QUERY << "Updating metastore with " << catalog_update.created_partitions.size()
-                 << " altered partitions ("
-                 << join (catalog_update.created_partitions, ", ") << ")";
+      QUERY_VLOG_FRAGMENT(logger())
+          << "Updating metastore with " << catalog_update.created_partitions.size()
+          << " altered partitions ("
+          << join (catalog_update.created_partitions, ", ") << ")";
 
       catalog_update.target_table = finalize_params.table_name;
       catalog_update.db_name = finalize_params.table_db;
@@ -836,7 +839,7 @@ Status ImpalaServer::QueryExecState::UpdateCatalog() {
           exec_env_->catalogd_client_cache(), address, &cnxn_status);
       RETURN_IF_ERROR(cnxn_status);
 
-      VLOG_QUERY << "Executing FinalizeDml() using CatalogService";
+      QUERY_VLOG_FRAGMENT(logger()) << "Executing FinalizeDml() using CatalogService";
       TUpdateCatalogResponse resp;
       try {
         client->UpdateCatalog(resp, catalog_update);
@@ -933,7 +936,7 @@ void ImpalaServer::QueryExecState::SetCreateTableAsSelectResultSet() {
     }
   }
   const string& summary_msg = Substitute("Inserted $0 row(s)", total_num_rows_inserted);
-  VLOG_QUERY << summary_msg;
+  QUERY_VLOG_FRAGMENT(logger()) << summary_msg;
   vector<string> results(1, summary_msg);
   SetResultSet(results);
 }

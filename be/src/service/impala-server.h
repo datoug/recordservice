@@ -402,7 +402,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // Implements Execute() logic, but doesn't unregister query on error.
   Status ExecuteInternal(TExecRequest* request,
-                         boost::shared_ptr<QueryExecState>* exec_state);
+                         QueryExecState* exec_state);
 
   // Registers the query exec state with query_exec_state_map_ using the globally
   // unique query_id and add the query id to session state's open query list.

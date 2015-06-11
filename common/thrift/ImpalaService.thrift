@@ -168,6 +168,9 @@ enum TImpalaQueryOptions {
 
   // If true, scanners should use the record service instead.
   USE_RECORD_SERVICE
+
+  // Logging level to use for this query.
+  LOGGING_LEVEL
 }
 
 // The summary of an insert.

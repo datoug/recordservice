@@ -39,6 +39,9 @@ ScannerContext::ScannerContext(RuntimeState* state, HdfsScanNode* scan_node,
     scan_node_(scan_node),
     partition_desc_(partition_desc),
     num_completed_io_buffers_(0) {
+  QUERY_VLOG_FILE(state_->logger()) << "Node " << scan_node_->id()
+      << " Starting to process " << scan_range->file()
+      << "@" << scan_range->offset() << ":" << scan_range->len();
   AddStream(scan_range);
 }
 
@@ -46,7 +49,12 @@ void ScannerContext::ReleaseCompletedResources(RowBatch* batch, bool done) {
   for (int i = 0; i < streams_.size(); ++i) {
     streams_[i]->ReleaseCompletedResources(batch, done);
   }
-  if (done) streams_.clear();
+  if (done) {
+    DCHECK_GT(streams_.size(), 0);
+    QUERY_VLOG_FILE(state_->logger()) << "Node " << scan_node_->id()
+        << " Finished processing " << streams_[0]->scan_range_->file();
+    streams_.clear();
+  }
 }
 
 ScannerContext::Stream::Stream(ScannerContext* parent)

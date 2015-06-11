@@ -138,7 +138,7 @@ class DiskIoMgr::RequestContext {
   RequestContext(DiskIoMgr* parent, int num_disks);
 
   // Resets this object.
-  void Reset(MemTracker* tracker);
+  void Reset(MemTracker* tracker, const Logger* logger);
 
   // Decrements the number of active disks for this reader.  If the disk count
   // goes to 0, the disk complete condition variable is signaled.
@@ -187,6 +187,8 @@ class DiskIoMgr::RequestContext {
   // Dumps out reader information.  Lock should be taken by caller
   std::string DebugString() const;
 
+  const Logger* logger() const { return logger_; }
+
  private:
   friend class DiskIoMgr;
   class PerDiskState;
@@ -196,6 +198,9 @@ class DiskIoMgr::RequestContext {
 
   // Memory used for this reader.  This is unowned by this object.
   MemTracker* mem_tracker_;
+
+  // Logger used for this read. Unowned. Never NULL.
+  Logger const* logger_;
 
   // Total bytes read for this reader
   RuntimeProfile::Counter* bytes_read_counter_;

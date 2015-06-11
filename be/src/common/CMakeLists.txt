@@ -33,3 +33,4 @@ add_library(GlobalFlags
 add_dependencies(GlobalFlags thrift-cpp)
 
 ADD_BE_TEST(atomic-test)
+ADD_BE_TEST(query-logging-test)

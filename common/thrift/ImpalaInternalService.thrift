@@ -114,6 +114,10 @@ struct TQueryOptions {
 
   // If true, uses the record service scanner instead of HDFS scan nodes.
   32: optional bool use_record_service = false
+
+  // Logging level to use for this query.
+  // FIXME: enum?
+  33: optional i32 logging_level
 }
 
 enum TSessionType {
