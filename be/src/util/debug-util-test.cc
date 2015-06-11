@@ -17,7 +17,9 @@
 #include <iostream>
 
 #include <gtest/gtest.h>
+#include "common/logging.h"
 #include "util/debug-util.h"
+#include "util/minidump.h"
 
 using namespace std;
 
@@ -84,6 +86,20 @@ TEST(DebugUtil, PreCDH5QueryIdParsing) {
 
   // Hex but with a space separator
   EXPECT_FALSE(ParseId("aaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaa", &id));
+}
+
+TEST(DebugUtil, MinidumpQueryLog) {
+  int64_t idx = minidump::QUERY_LOG.LogEntry("test", "select 1");
+  EXPECT_EQ(idx, 1);
+  LOG(ERROR) << minidump::QUERY_LOG.DumpLog();
+  minidump::QUERY_LOG.LogEntry("test", "select 2");
+  minidump::QUERY_LOG.QueryDone(idx);
+  LOG(ERROR) << minidump::QUERY_LOG.DumpLog();
+
+  for (int i = 0; i < 5000; ++i) {
+    int64_t idx = minidump::QUERY_LOG.LogEntry("test", "select");
+    EXPECT_EQ(idx, i + 3);
+  }
 }
 
 }

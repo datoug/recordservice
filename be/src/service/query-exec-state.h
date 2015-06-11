@@ -212,6 +212,9 @@ class ImpalaServer::QueryExecState {
   // Logging object for this query.
   const Logger logger_;
 
+  // index into the per process query log. Used to indicate when a query is done.
+  int64_t query_log_idx_;
+
   // Ensures single-threaded execution of FetchRows(). Callers of FetchRows() are
   // responsible for acquiring this lock. To avoid deadlocks, callers must not hold lock_
   // while acquiring this lock (since FetchRows() will release and re-acquire lock_ during

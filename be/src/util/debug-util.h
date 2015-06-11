@@ -83,6 +83,9 @@ std::string GetVersionString(bool compact = false);
 // for recursive calls.
 std::string GetStackTrace();
 
+// Causes the daemon to crash.
+void CrashForTesting();
+
 }
 
 #endif

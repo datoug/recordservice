@@ -247,4 +247,10 @@ string GetStackTrace() {
   return s;
 }
 
+void CrashForTesting() {
+  volatile int* a = (int*)NULL;
+  *a = 1;
 }
+
+}
+

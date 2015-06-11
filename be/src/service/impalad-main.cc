@@ -38,6 +38,7 @@
 #include "service/fe-support.h"
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaInternalService.h"
+#include "util/minidump.h"
 #include "util/impalad-metrics.h"
 #include "util/thread.h"
 
@@ -62,7 +63,11 @@ DEFINE_bool(start_recordservice, true, "Start RecordService services");
 // not be on for production.
 DEFINE_int32(test_service_port, 0, "Port to start test service on. 0 to not start.");
 
+DEFINE_string(minidump_path, "/tmp/minidumps",
+    "Directory to output minidumps on crash. If empty, minidumps is disabled.");
+
 int main(int argc, char** argv) {
+  if (FLAGS_minidump_path.size() > 0) RegisterMinidump(FLAGS_minidump_path.c_str());
   InitCommonRuntime(argc, argv, true);
 
   LlvmCodeGen::InitializeLlvm();

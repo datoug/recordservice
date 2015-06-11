@@ -58,6 +58,7 @@ if (IMPALA_TOOLCHAIN)
   # set_dep_root(PACKAGE) ->
   #   PACKAGE_ROOT set to $ENV{IMPALA_TOOLCHAIN}/PACKAGE-$ENV{IMPALA_PACKAGE_VERSION}
   set_dep_root(AVRO)
+  set_dep_root(BREAKPAD)
   set_dep_root(BZIP2)
   set_dep_root(CYRUS_SASL)
   set_dep_root(GFLAGS)
@@ -231,6 +232,13 @@ include_directories(${RE2_INCLUDE_DIR})
 set(LIBS ${LIBS} ${RE2_LIBRARIES})
 message(STATUS "Re2 include dir: " ${RE2_INCLUDE_DIR})
 message(STATUS "Re2 library: " ${RE2_STATIC_LIB})
+
+# find breakpad headers and libs
+find_package(Breakpad REQUIRED)
+include_directories(${BREAKPAD_INCLUDE_DIR})
+set(LIBS ${LIBS} ${BREAKPAD_LIBRARIES})
+message(STATUS "Breakpad include dir: " ${BREAKPAD_INCLUDE_DIR})
+message(STATUS "Breakpad library: " ${BREAKPAD_STATIC_LIB})
 
 # find rapidjson headers
 find_package(RapidJson REQUIRED)

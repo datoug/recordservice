@@ -26,6 +26,7 @@
 #include "service/query-options.h"
 #include "util/debug-util.h"
 #include "util/impalad-metrics.h"
+#include "util/minidump.h"
 #include "util/time.h"
 
 #include "gen-cpp/CatalogService.h"
@@ -106,6 +107,9 @@ ImpalaServer::QueryExecState::QueryExecState(
   summary_profile_.AddInfoString("Sql Statement", query_ctx_.request.stmt);
   summary_profile_.AddInfoString("Coordinator",
       TNetworkAddressToString(exec_env->backend_address()));
+
+  query_log_idx_ = minidump::QUERY_LOG.LogEntry(
+      effective_user(), query_ctx_.request.stmt);
 }
 
 ImpalaServer::QueryExecState::~QueryExecState() {
@@ -512,6 +516,7 @@ void ImpalaServer::QueryExecState::Done() {
 
   // Update result set cache metrics, and update mem limit accounting.
   ClearResultCache();
+  minidump::QUERY_LOG.QueryDone(query_log_idx_);
 }
 
 Status ImpalaServer::QueryExecState::Exec(const TMetadataOpRequest& exec_request) {
