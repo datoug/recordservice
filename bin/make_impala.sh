@@ -114,6 +114,9 @@ $IMPALA_HOME/bin/gen_build_version.py --noclean
 cd $IMPALA_HOME/common/function-registry
 make
 
+cd $IMPALA_HOME/common/thrift
+make
+
 cd $IMPALA_BE_DIR
 # TODO: we need to figure out how to use CMake dependencies properly
 python src/codegen/gen_ir_descriptions.py --noclean
