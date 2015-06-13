@@ -35,6 +35,8 @@ class Thread;
 // clients wrap a pre-provided transport)
 class AuthProvider {
  public:
+  virtual ~AuthProvider() {}
+
   // Initialises any state required to perform authentication using this provider.
   virtual Status Start() = 0;
 

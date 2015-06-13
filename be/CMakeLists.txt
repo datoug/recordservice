@@ -43,11 +43,12 @@ SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 
 if (IMPALA_TOOLCHAIN)
   SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -static-libstdc++")
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -static-libgcc")
-  add_library(gcc_eh STATIC IMPORTED)
-  set(GCC_EH_LOCATION
-    "$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/lib/gcc/x86_64-unknown-linux-gnu/4.9.2/libgcc_eh.a")
-  set_target_properties(gcc_eh PROPERTIES IMPORTED_LOCATION ${GCC_EH_LOCATION})
+# TODO: this doesn't work as the loaded IR files can't resolve the symbols in libgcc.
+#  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -static-libgcc")
+#   add_library(gcc_eh STATIC IMPORTED)
+#   set(GCC_EH_LOCATION
+#     "$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/lib/gcc/x86_64-unknown-linux-gnu/4.9.2/libgcc_eh.a")
+#   set_target_properties(gcc_eh PROPERTIES IMPORTED_LOCATION ${GCC_EH_LOCATION})
 endif()
 
 # For any clang builds (currently only ASAN):

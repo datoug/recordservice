@@ -291,16 +291,19 @@ MAKE_IMPALA_ARGS="${MAKE_IMPALA_ARGS} -build_type=${TARGET_BUILD_TYPE}"
 echo "Calling make_impala.sh ${MAKE_IMPALA_ARGS}"
 $IMPALA_HOME/bin/make_impala.sh ${MAKE_IMPALA_ARGS}
 
-if [ -e $IMPALA_LZO ]
-then
-  cd $IMPALA_LZO
-  if [[ -n "$IMPALA_TOOLCHAIN" ]]; then
-    cmake -DCMAKE_TOOLCHAIN_FILE=./cmake_modules/toolchain.cmake
-  else
-    cmake .
-  fi
-  make
-fi
+# FIXME: think about how we want to handle this. We probably don't want to ship our 
+# version of lzo.so but then we need to be able to run with the CDH/Impala version.
+# Disable for now until we have the toolchain fix.
+#if [ -e $IMPALA_LZO ]
+#then
+#  cd $IMPALA_LZO
+#  if [[ -n "$IMPALA_TOOLCHAIN" ]]; then
+#    cmake -DCMAKE_TOOLCHAIN_FILE=./cmake_modules/toolchain.cmake
+#  else
+#    cmake .
+#  fi
+#  make
+#fi
 
 # build the external data source API
 cd ${IMPALA_HOME}/ext-data-source

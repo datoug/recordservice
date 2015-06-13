@@ -10,6 +10,7 @@ cscope.po.out
 org.eclipse.jdt.core.prefs
 org.eclipse.jdt.ui.prefs
 *benchmark_results.csv*
+benchmark_results.json
 load-*-generated.sql
 bin/version.info
 
