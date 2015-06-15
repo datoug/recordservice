@@ -338,15 +338,23 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
     BuildArgumentMap(request_info->query_string, &arguments);
   }
 
+  // At most one of these two will be set.
+  const UrlHandler* url_handler = NULL;
+  const RawUrlCallback* raw_callback = NULL;
+
   shared_lock<shared_mutex> lock(url_handlers_lock_);
   UrlHandlerMap::const_iterator it = url_handlers_.find(request_info->uri);
   ResponseCode response = OK;
   ContentType content_type = HTML;
-  const UrlHandler* url_handler = NULL;
   if (it == url_handlers_.end()) {
-    response = NOT_FOUND;
-    arguments[ERROR_KEY] = Substitute("No URI handler for '$0'", request_info->uri);
-    url_handler = &error_handler_;
+    RawUrlHandlerMap::const_iterator raw_it = raw_url_handlers_.find(request_info->uri);
+    if (raw_it == raw_url_handlers_.end()) {
+      response = NOT_FOUND;
+      arguments[ERROR_KEY] = Substitute("No URI handler for '$0'", request_info->uri);
+      url_handler = &error_handler_;
+    } else {
+      raw_callback = &raw_it->second;
+    }
   } else {
     url_handler = &it->second;
   }
@@ -354,42 +362,45 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
   MonotonicStopWatch sw;
   sw.Start();
 
-  Document document;
-  document.SetObject();
-  GetCommonJson(&document);
-
-  // The output of this page is accumulated into this stringstream.
   stringstream output;
-  bool raw_json = (arguments.find("json") != arguments.end());
-  url_handler->callback()(arguments, &document);
-  if (raw_json) {
-    // Callbacks may optionally be rendered as a text-only, pretty-printed Json document
-    // (mostly for debugging or integration with third-party tools).
-    StringBuffer strbuf;
-    PrettyWriter<StringBuffer> writer(strbuf);
-    document.Accept(writer);
-    output << strbuf.GetString();
-    content_type = PLAIN;
+  if (raw_callback != NULL) {
+    (*raw_callback)(arguments, &output);
   } else {
-    if (arguments.find("raw") != arguments.end()) {
-      document.AddMember(ENABLE_RAW_JSON_KEY, "true", document.GetAllocator());
-    }
-    if (document.HasMember(ENABLE_RAW_JSON_KEY)) {
-      content_type = PLAIN;
-    }
-
-    const string& full_template_path =
-        Substitute("$0/$1/$2", FLAGS_webserver_doc_root, DOC_FOLDER,
-            url_handler->template_filename());
-    ifstream tmpl(full_template_path.c_str());
-    if (!tmpl.is_open()) {
-      output << "Could not open template: " << full_template_path;
+    Document document;
+    document.SetObject();
+    GetCommonJson(&document);
+    // The output of this page is accumulated into this stringstream.
+    bool raw_json = (arguments.find("json") != arguments.end());
+    url_handler->callback()(arguments, &document);
+    if (raw_json) {
+      // Callbacks may optionally be rendered as a text-only, pretty-printed Json document
+      // (mostly for debugging or integration with third-party tools).
+      StringBuffer strbuf;
+      PrettyWriter<StringBuffer> writer(strbuf);
+      document.Accept(writer);
+      output << strbuf.GetString();
       content_type = PLAIN;
     } else {
-      stringstream buffer;
-      buffer << tmpl.rdbuf();
-      RenderTemplate(buffer.str(), Substitute("$0/", FLAGS_webserver_doc_root), document,
-          &output);
+      if (arguments.find("raw") != arguments.end()) {
+        document.AddMember(ENABLE_RAW_JSON_KEY, "true", document.GetAllocator());
+      }
+      if (document.HasMember(ENABLE_RAW_JSON_KEY)) {
+        content_type = PLAIN;
+      }
+
+      const string& full_template_path =
+          Substitute("$0/$1/$2", FLAGS_webserver_doc_root, DOC_FOLDER,
+              url_handler->template_filename());
+      ifstream tmpl(full_template_path.c_str());
+      if (!tmpl.is_open()) {
+        output << "Could not open template: " << full_template_path;
+        content_type = PLAIN;
+      } else {
+        stringstream buffer;
+        buffer << tmpl.rdbuf();
+        RenderTemplate(buffer.str(),
+            Substitute("$0/", FLAGS_webserver_doc_root), document, &output);
+      }
     }
   }
 
@@ -397,8 +408,10 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
           << PrettyPrinter::Print(sw.ElapsedTime(), TUnit::CPU_TICKS);
 
   const string& str = output.str();
-  const string& headers = BuildHeaderString(response, content_type);
-  sq_printf(connection, headers.c_str(), (int)str.length());
+  if (url_handler != NULL) {
+    const string& headers = BuildHeaderString(response, content_type);
+    sq_printf(connection, headers.c_str(), (int)str.length());
+  }
 
   // Make sure to use sq_write for printing the body; sq_printf truncates at 8kb
   sq_write(connection, str.c_str(), str.length());
@@ -411,9 +424,21 @@ void Webserver::RegisterUrlCallback(const string& path,
   upgrade_to_unique_lock<shared_mutex> writer_lock(lock);
   DCHECK(url_handlers_.find(path) == url_handlers_.end())
       << "Duplicate Url handler for: " << path;
+  DCHECK(raw_url_handlers_.find(path) == raw_url_handlers_.end())
+      << "Duplicate Url handler for: " << path;
 
   url_handlers_.insert(
       make_pair(path, UrlHandler(callback, template_filename, is_on_nav_bar)));
+}
+
+void Webserver::RegisterUrlCallback(const string& path, const RawUrlCallback& callback) {
+  upgrade_lock<shared_mutex> lock(url_handlers_lock_);
+  upgrade_to_unique_lock<shared_mutex> writer_lock(lock);
+  DCHECK(url_handlers_.find(path) == url_handlers_.end())
+      << "Duplicate Url handler for: " << path;
+  DCHECK(raw_url_handlers_.find(path) == raw_url_handlers_.end())
+      << "Duplicate Url handler for: " << path;
+  raw_url_handlers_.insert(make_pair(path, callback));
 }
 
 }

@@ -37,6 +37,10 @@ class Webserver {
   typedef boost::function<void (const ArgumentMap& args, rapidjson::Document* json)>
       UrlCallback;
 
+  // Url callback which does not any styling or use json. Typically, output is for tools.
+  typedef boost::function<void (const ArgumentMap& args, std::stringstream* out)>
+      RawUrlCallback;
+
   // Any callback may add a member to their Json output with key ENABLE_RAW_JSON_KEY; this
   // causes the result of the template rendering process to be sent to the browser as
   // text, not HTML.
@@ -68,6 +72,10 @@ class Webserver {
   // root.
   void RegisterUrlCallback(const std::string& path, const std::string& template_filename,
       const UrlCallback& callback, bool is_on_nav_bar = true);
+
+  // Registers a url callback that directly populates the result with no modifications
+  // of any kind.
+  void RegisterUrlCallback(const std::string& path, const RawUrlCallback& callback);
 
   const TNetworkAddress& http_address() { return http_address_; }
 
@@ -129,7 +137,7 @@ class Webserver {
   // to read (e.g. the names of links to write to the navbar).
   void GetCommonJson(rapidjson::Document* document);
 
-  // Lock guarding the path_handlers_ map
+  // Lock guarding the url_handlers_ and raw_url_handlers_ maps
   boost::shared_mutex url_handlers_lock_;
 
   // Map of path to a UrlHandler containing a list of handlers for that
@@ -137,6 +145,9 @@ class Webserver {
   // components may contribute to a single page.
   typedef std::map<std::string, UrlHandler> UrlHandlerMap;
   UrlHandlerMap url_handlers_;
+
+  typedef std::map<std::string, RawUrlCallback> RawUrlHandlerMap;
+  RawUrlHandlerMap raw_url_handlers_;
 
   // The address of the interface on which to run this webserver.
   TNetworkAddress http_address_;
