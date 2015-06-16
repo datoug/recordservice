@@ -56,6 +56,9 @@ const char* GetDefaultDocumentRoot();
 DEFINE_int32(webserver_port, 25000, "Port to start debug webserver on");
 DEFINE_int32(recordservice_webserver_port, 35000,
     "Port to start RecordService debug webserver on");
+DEFINE_int32(webserver_max_post_length_bytes, 1024 * 1024,
+    "The maximum length of a POST request that will be accepted by "
+    "the embedded web server.");
 
 DEFINE_string(webserver_interface, "",
     "Interface to start debug webserver on. If blank, webserver binds to 0.0.0.0");
@@ -125,7 +128,7 @@ enum ContentType {
 string BuildHeaderString(ResponseCode response, ContentType content_type) {
   static const string RESPONSE_TEMPLATE = "HTTP/1.1 $0 $1\r\n"
       "Content-Type: text/$2\r\n"
-      "Content-Length: %d\r\n"
+      "Content-Length: %zd\r\n"
       "\r\n";
 
   return Substitute(RESPONSE_TEMPLATE, response, response == OK ? "OK" : "Not found",
@@ -333,9 +336,41 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
     }
   }
 
-  map<string, string> arguments;
+  WebRequest req;
   if (request_info->query_string != NULL) {
-    BuildArgumentMap(request_info->query_string, &arguments);
+    BuildArgumentMap(request_info->query_string, &req.args);
+  }
+
+  req.request_method = request_info->request_method;
+  if (req.request_method == "POST") {
+    const char* content_len_str = sq_get_header(connection, "Content-Length");
+    int32_t content_len = 0;
+    if (content_len_str == NULL ||
+        !safe_strto32(content_len_str, &content_len)) {
+      sq_printf(connection, "HTTP/1.1 411 Length Required\r\n");
+      return 1;
+    }
+    if (content_len > FLAGS_webserver_max_post_length_bytes) {
+      // TODO: for this and other HTTP requests, we should log the remote IP, etc.
+      LOG(WARNING) << "Rejected POST with content length " << content_len;
+      sq_printf(connection, "HTTP/1.1 413 Request Entity Too Large\r\n");
+      return 1;
+    }
+
+    char buf[8192];
+    int rem = content_len;
+    while (rem > 0) {
+      int n = sq_read(connection, buf, std::min<int>(sizeof(buf), rem));
+      if (n <= 0) {
+        LOG(WARNING) << "error reading POST data: expected "
+                     << content_len << " bytes but only read "
+                     << req.post_data.size();
+        sq_printf(connection, "HTTP/1.1 500 Internal Server Error\r\n");
+        return 1;
+      }
+      req.post_data.append(buf, n);
+      rem -= n;
+    }
   }
 
   // At most one of these two will be set.
@@ -350,7 +385,7 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
     RawUrlHandlerMap::const_iterator raw_it = raw_url_handlers_.find(request_info->uri);
     if (raw_it == raw_url_handlers_.end()) {
       response = NOT_FOUND;
-      arguments[ERROR_KEY] = Substitute("No URI handler for '$0'", request_info->uri);
+      req.args[ERROR_KEY] = Substitute("No URI handler for '$0'", request_info->uri);
       url_handler = &error_handler_;
     } else {
       raw_callback = &raw_it->second;
@@ -364,14 +399,15 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
 
   stringstream output;
   if (raw_callback != NULL) {
-    (*raw_callback)(arguments, &output);
+    (*raw_callback)(req, &output);
+    content_type = PLAIN;
   } else {
     Document document;
     document.SetObject();
     GetCommonJson(&document);
     // The output of this page is accumulated into this stringstream.
-    bool raw_json = (arguments.find("json") != arguments.end());
-    url_handler->callback()(arguments, &document);
+    bool raw_json = (req.args.find("json") != req.args.end());
+    url_handler->callback()(req.args, &document);
     if (raw_json) {
       // Callbacks may optionally be rendered as a text-only, pretty-printed Json document
       // (mostly for debugging or integration with third-party tools).
@@ -381,7 +417,7 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
       output << strbuf.GetString();
       content_type = PLAIN;
     } else {
-      if (arguments.find("raw") != arguments.end()) {
+      if (req.args.find("raw") != req.args.end()) {
         document.AddMember(ENABLE_RAW_JSON_KEY, "true", document.GetAllocator());
       }
       if (document.HasMember(ENABLE_RAW_JSON_KEY)) {
@@ -408,10 +444,8 @@ int Webserver::BeginRequestCallback(struct sq_connection* connection,
           << PrettyPrinter::Print(sw.ElapsedTime(), TUnit::CPU_TICKS);
 
   const string& str = output.str();
-  if (url_handler != NULL) {
-    const string& headers = BuildHeaderString(response, content_type);
-    sq_printf(connection, headers.c_str(), (int)str.length());
-  }
+  const string& headers = BuildHeaderString(response, content_type);
+  sq_printf(connection, headers.c_str(), str.length());
 
   // Make sure to use sq_write for printing the body; sq_printf truncates at 8kb
   sq_write(connection, str.c_str(), str.length());

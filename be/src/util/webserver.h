@@ -34,11 +34,23 @@ namespace impala {
 class Webserver {
  public:
   typedef std::map<std::string, std::string> ArgumentMap;
+
+  struct WebRequest {
+    // The query string, parsed into key/value argument pairs.
+    ArgumentMap args;
+
+    // The method (POST/GET/etc).
+    std::string request_method;
+
+    // In the case of a POST, the posted data.
+    std::string post_data;
+  };
+
   typedef boost::function<void (const ArgumentMap& args, rapidjson::Document* json)>
       UrlCallback;
 
   // Url callback which does not any styling or use json. Typically, output is for tools.
-  typedef boost::function<void (const ArgumentMap& args, std::stringstream* out)>
+  typedef boost::function<void (const WebRequest& args, std::stringstream* out)>
       RawUrlCallback;
 
   // Any callback may add a member to their Json output with key ENABLE_RAW_JSON_KEY; this
