@@ -187,6 +187,10 @@ class HdfsPartitionDescriptor {
   }
   int block_size() const { return block_size_; }
   const std::string& location() const { return location_; }
+  const std::string& serde_class_name() const { return serde_class_name_; }
+  const std::map<std::string, std::string>& serde_properties() const {
+    return serde_properties_;
+  }
   int64_t id() const { return id_; }
 
   // Calls Prepare()/Open()/Close() on all partition key exprs. Idempotent (this is
@@ -205,6 +209,8 @@ class HdfsPartitionDescriptor {
   int block_size_;
   std::string location_;
   int64_t id_;
+  std::string serde_class_name_;
+  std::map<std::string, std::string> serde_properties_;
 
   // True if PrepareExprs has been called, to prevent repeating expensive codegen
   bool exprs_prepared_;

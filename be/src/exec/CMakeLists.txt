@@ -30,6 +30,7 @@ add_library(Exec
   catalog-op-executor.cc
   cross-join-node.cc
   data-sink.cc
+  data-source-row-converter.cc
   data-source-scan-node.cc
   delimited-text-parser.cc
   empty-set-node.cc

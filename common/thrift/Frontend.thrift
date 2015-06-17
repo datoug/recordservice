@@ -64,12 +64,32 @@ struct THiveUdfExecutorCtorParams {
   7: required i64 output_buffer_ptr
 }
 
+// Arguments for initializing the frontend HiveSerDeExecutor class.
+// In order to initialize the actual Hive SerDe class backing it, we'll need
+// to pass in the SerDe class name and related properties.
+struct TSerDeInit {
+  // The full class name for the Hive SerDe class used to parse rows from
+  // the input data
+  1: required string serde_class_name
+
+  // A map of serde properties. For instance, columns, columns.types,
+  // input.regex, output.format.string, etc.
+  2: required map<string, string> serde_properties
+
+  // A list of booleans. If set to false, it indicates the corresponding
+  // slot is not materialized, and should not be included in the result row batch.
+  3: required list<bool> is_materialized
+}
+
 struct TSerDeInput {
   // Byte buffer to store the rows to parse
   1: required binary data
 
-  // A list of lengths for each row
-  2: required list<i32> lengths
+  // A list of offsets for the start position of each row in 'data'
+  2: required list<i32> row_start_offsets
+
+  // A list of offsets for the end position of each row in 'data'
+  3: required list<i32> row_end_offsets
 }
 
 struct TSerDeOutput {

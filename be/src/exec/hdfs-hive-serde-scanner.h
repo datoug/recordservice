@@ -22,6 +22,7 @@
 namespace impala {
 
 class DelimitedTextParser;
+class DataSourceRowConverter;
 struct HdfsFileDesc;
 
 // HdfsScanner implementation that calls Hive serde classes to parse
@@ -65,9 +66,6 @@ class HdfsHiveSerdeScanner : public HdfsScanner {
   // no more bytes ready.
   virtual Status FillByteBuffer(bool* eosr);
 
-  // Write a single string row returned from the JNI call into the input tuple
-  void MaterializeRecord(Tuple* tuple, MemPool* pool, const string& row);
-
   // Current position in the buffer returned from ScannerContext
   char* byte_buffer_ptr_;
 
@@ -91,6 +89,9 @@ class HdfsHiveSerdeScanner : public HdfsScanner {
 
   // Helper class for picking rows from delimited text
   boost::scoped_ptr<DelimitedTextParser> delimited_text_parser_;
+
+  // Helper class for parsing rows from external data source
+  boost::scoped_ptr<DataSourceRowConverter> row_converter_;
 
   // Return field locations from the delimited text parser.
   // Not needed for this class, just to keep the parser happy.

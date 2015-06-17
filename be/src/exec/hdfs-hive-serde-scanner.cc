@@ -17,6 +17,7 @@
 #include <jni.h>
 #include <string>
 
+#include "exec/data-source-row-converter.h"
 #include "exec/delimited-text-parser.h"
 #include "exec/delimited-text-parser.inline.h"
 #include "exec/external-data-source-executor.h"
@@ -39,7 +40,7 @@ using namespace std;
 
 const char* HdfsHiveSerdeScanner::EXECUTOR_CLASS =
     "com/cloudera/impala/hive/serde/HiveSerDeExecutor";
-const char* HdfsHiveSerdeScanner::EXECUTOR_CTOR_SIG = "()V";
+const char* HdfsHiveSerdeScanner::EXECUTOR_CTOR_SIG = "([B)V";
 const char* HdfsHiveSerdeScanner::EXECUTOR_DESERIALIZE_SIG = "([B)[B";
 const char* HdfsHiveSerdeScanner::EXECUTOR_DESERIALIZE_NAME = "deserialize";
 
@@ -70,6 +71,29 @@ Status HdfsHiveSerdeScanner::InitNewRange() {
   delimited_text_parser_.reset(new DelimitedTextParser(
       1, 0, &is_materialized_col, hdfs_partition->line_delim()));
 
+  // Initialize the HiveSerDeExecutor
+  TSerDeInit init_params;
+  init_params.serde_class_name = hdfs_partition->serde_class_name();
+  init_params.serde_properties = hdfs_partition->serde_properties();
+  for (int i = scan_node_->num_partition_keys();
+       i < scan_node_->hdfs_table()->num_cols(); ++i) {
+    init_params.is_materialized.push_back(scan_node_->is_materialized_col()[i]);
+  }
+
+  JNIEnv* env = getJNIEnv();
+  JniLocalFrame jni_frame;
+  RETURN_IF_ERROR(jni_frame.push(env));
+
+  jbyteArray init_params_bytes;
+  RETURN_IF_ERROR(SerializeThriftMsg(env, &init_params, &init_params_bytes));
+
+  // Create the java executor object with the serde class name
+  // and properties associated with this HDFS partition
+  executor_ = env->NewObject(executor_class_, executor_ctor_id_, init_params_bytes);
+  RETURN_ERROR_IF_EXC(env);
+  executor_ = env->NewGlobalRef(executor_);
+  RETURN_ERROR_IF_EXC(env);
+
   return Status::OK;
 }
 
@@ -88,6 +112,8 @@ Status HdfsHiveSerdeScanner::Prepare(ScannerContext* context) {
 
   field_locations_.resize(state_->batch_size());
   row_end_locations_.resize(state_->batch_size());
+  row_converter_.reset(new DataSourceRowConverter(
+      scan_node_->tuple_desc(), template_tuple_, scan_node_->materialized_slots()));
 
   JNIEnv* env = getJNIEnv();
   JniLocalFrame jni_frame;
@@ -99,12 +125,6 @@ Status HdfsHiveSerdeScanner::Prepare(ScannerContext* context) {
   RETURN_ERROR_IF_EXC(env);
   executor_deser_id_ = env->GetMethodID(
       executor_class_, EXECUTOR_DESERIALIZE_NAME, EXECUTOR_DESERIALIZE_SIG);
-  RETURN_ERROR_IF_EXC(env);
-
-  // Create the java executor object
-  executor_ = env->NewObject(executor_class_, executor_ctor_id_);
-  RETURN_ERROR_IF_EXC(env);
-  executor_ = env->NewGlobalRef(executor_);
   RETURN_ERROR_IF_EXC(env);
 
   return Status::OK;
@@ -143,22 +163,19 @@ Status HdfsHiveSerdeScanner::ProcessRange() {
         &row_end_locations_[0], &field_locations_[0], &num_tuples,
         &num_fields, &col_start));
 
-    // Construct a TSerDeInput which consists of the byte buffer and
-    // a list of lengths for each row in the buffer.
+    // Construct a TSerDeInput which consists of the byte buffer,
+    // a list of start position offsets, and a list of end position offsets
+    // for each row in the buffer.
     TSerDeInput input;
 
-    // Find out each row's length. We also need to take count
-    // of the row delimiter.
     for (int i = 0; i < num_tuples; ++i) {
-      int len = row_end_locations_[i] -
-          (i == 0 ? buffer_start : (row_end_locations_[i-1] + 1));
-      input.lengths.push_back(len);
+      input.row_start_offsets.push_back(field_locations_[i].start - buffer_start);
+      input.row_end_offsets.push_back(row_end_locations_[i] - buffer_start);
     }
 
     // Pass a string (ByteBuffer on the Java side) through thrift.
     // TODO: optimize this further
-    input.data = string(buffer_start,
-        row_end_locations_[num_tuples - 1] - buffer_start + 1);
+    input.data = string(buffer_start, row_end_locations_[num_tuples - 1] - buffer_start);
 
     // Call the FE side Java serde executor
     JNIEnv* env = getJNIEnv();
@@ -175,12 +192,11 @@ Status HdfsHiveSerdeScanner::ProcessRange() {
     // The output from the executor call is a RowBatch.
     TSerDeOutput output;
     RETURN_IF_ERROR(DeserializeThriftMsg(env, output_bytes, &output));
-    const vector<TColumnData>& cols = output.batch.cols;
-    // TODO: remove this check once the serde class is working
-    DCHECK_EQ(cols.size(), 1);
 
-    for (int i = 0; i < output.batch.num_rows; ++i) {
-      MaterializeRecord(tuple_, pool, cols[0].string_vals[i]);
+    // Don't need to verify here since we trust our FE code.
+    RETURN_IF_ERROR(row_converter_->ResetRowBatch(&output.batch, false));
+    while (row_converter_->HasNextRow()) {
+      RETURN_IF_ERROR(row_converter_->MaterializeNextRow(tuple_, pool));
       tuple_row->SetTuple(scan_node_->tuple_idx(), tuple_);
       if (EvalConjuncts(tuple_row)) {
         ++num_commit;
@@ -198,27 +214,6 @@ Status HdfsHiveSerdeScanner::ProcessRange() {
   }
 
   return Status::OK;
-}
-
-void HdfsHiveSerdeScanner::MaterializeRecord(Tuple* tuple, MemPool* pool,
-                                               const string& row) {
-  InitTuple(template_tuple_, tuple);
-
-  // TODO: better to move this logic and the for loop above into
-  // data-source-scan-node
-  for (int i = 0; i < scan_node_->materialized_slots().size(); ++i) {
-    SlotDescriptor* desc = scan_node_->materialized_slots()[i];
-    if (i == 0) {
-      StringValue* slot = reinterpret_cast<StringValue*>(
-          tuple->GetSlot(desc->tuple_offset()));
-      slot->len = row.length();
-      slot->ptr = reinterpret_cast<char*>(pool->Allocate(slot->len + 1));
-      memcpy(slot->ptr, row.c_str(), slot->len + 1);
-    } else {
-      // TODO: fill the rest of the slots once hive serde is working
-      tuple->SetNull(desc->null_indicator_offset());
-    }
-  }
 }
 
 Status HdfsHiveSerdeScanner::FillByteBuffer(bool* eosr) {

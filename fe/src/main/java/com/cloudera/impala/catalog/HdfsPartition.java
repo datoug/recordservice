@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.lang.ArrayUtils;
@@ -531,12 +532,24 @@ public class HdfsPartition implements Comparable<HdfsPartition> {
     fileFormatDescriptor_ = fileFormatDescriptor;
     id_ = id;
     accessLevel_ = accessLevel;
+
+    Properties properties;
     if (msPartition != null && msPartition.getParameters() != null) {
+      // This uses msPartition's StorageDescriptor
       isMarkedCached_ = HdfsCachingUtil.getCacheDirectiveId(
           msPartition.getParameters()) != null;
       hmsParameters_ = msPartition.getParameters();
+      properties = org.apache.hadoop.hive.metastore.MetaStoreUtils.getSchema(
+        msPartition, table.getMetaStoreTable());
     } else {
       hmsParameters_ = Maps.newHashMap();
+      properties = org.apache.hadoop.hive.metastore.MetaStoreUtils.getTableMetadata(
+        table.getMetaStoreTable());
+    }
+
+    // Add all the schema properties
+    for (Map.Entry<Object, Object> entry : properties.entrySet()) {
+      hmsParameters_.put((String)entry.getKey(), (String)entry.getValue());
     }
 
     // TODO: instead of raising an exception, we should consider marking this partition

@@ -19,6 +19,7 @@
 #include <string>
 #include <boost/scoped_ptr.hpp>
 
+#include "exec/data-source-row-converter.h"
 #include "exec/scan-node.h"
 #include "exec/external-data-source-executor.h"
 #include "runtime/descriptors.h"
@@ -85,33 +86,16 @@ class DataSourceScanNode : public ScanNode {
   // thrift representation of the rows.
   boost::scoped_ptr<extdatasource::TGetNextResult> input_batch_;
 
-  // The number of rows in input_batch_->rows. The data source should have set
-  // TRowBatch.num_rows, but we compute it just in case they haven't.
-  int num_rows_;
-
-  // The index of the next row in input_batch_,
-  // i.e. the index into TColumnData.is_null.
-  size_t next_row_idx_;
-
-  // The indexes of the next non-null value in the row batch, per column. Should always
-  // contain materialized_slots_.size() integers. All values are reset to 0 when getting
-  // the next row batch.
-  std::vector<int> cols_next_val_idx_;
-
-  // Materializes the next row (next_row_idx_) into tuple_.
-  Status MaterializeNextRow(MemPool* mem_pool);
+  // A utility class used to materialize rows in a TRowBatch to tuples.
+  boost::scoped_ptr<DataSourceRowConverter> row_converter_;
 
   // Gets the next batch from the data source, stored in input_batch_.
   Status GetNextInputBatch();
 
-  // Validate row_batch_ contains the correct number of columns and that columns
-  // contain the same number of rows.
-  Status ValidateRowBatchSize();
-
   // True if input_batch_ has more rows.
   bool InputBatchHasNext() {
     if (!input_batch_->__isset.rows) return false;
-    return next_row_idx_ < num_rows_;
+    return row_converter_->HasNextRow();
   }
 };
 
