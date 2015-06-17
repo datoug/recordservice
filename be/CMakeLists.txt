@@ -159,7 +159,17 @@ include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # resolve includes of generated code
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/generated-sources)
 
+set(CLANG_INCLUDE_FLAGS)
+if (IMPALA_TOOLCHAIN)
+  set(CLANG_INCLUDE_FLAGS "${CLANG_INCLUDE_FLAGS}"
+    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2"
+    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2/backward"
+    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2/x86_64-unknown-linux-gnu"
+  )
+endif()
+
 set(CLANG_INCLUDE_FLAGS
+  "${CLANG_INCLUDE_FLAGS}"
   "-I${CMAKE_CURRENT_SOURCE_DIR}/src"
   "-I${CMAKE_CURRENT_SOURCE_DIR}/generated-sources"
   "-I${THRIFT_INCLUDE_DIR}"
