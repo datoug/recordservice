@@ -82,17 +82,6 @@ class RecordServiceScanNode : public ScanNode {
   std::vector<SlotDescriptor*> materialized_slots_;
   std::vector<std::string> materialized_col_names_;
 
-  boost::scoped_ptr<ThriftClient<recordservice::RecordServiceWorkerClient> > rsw_client_;
-
-  struct TaskState {
-    std::string task;
-    recordservice::TUniqueId handle;
-    bool connected;
-
-    TaskState() : connected(false) {}
-    TaskState(const std::string& task) : task(task), connected(false) {}
-  };
-
   // Threads that have been started. Each task is picked up by a different thread.
   ThreadGroup scanner_threads_;
 
@@ -110,7 +99,7 @@ class RecordServiceScanNode : public ScanNode {
   boost::scoped_ptr<RowBatchQueue> materialized_row_batches_;
 
   // All the tasks (aka splits)
-  std::vector<TaskState> tasks_;
+  std::vector<std::string> tasks_;
 
   // current task we're on (starts at 0)
   int task_id_;

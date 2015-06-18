@@ -981,6 +981,9 @@ Status AuthManager::Init() {
   // Set up the internal auth provider as per above.  Since there's no LDAP on
   // the client side, this is just a check for the "back end" kerberos
   // principal.
+  //
+  // FIXME: we need to add additional auth_providers for the RecordService services.
+  // They shouldn't use the impala principal but RecordService specific principals.
   if (!kerberos_internal_principal.empty()) {
     SaslAuthProvider* sap = NULL;
     internal_auth_provider_.reset(sap = new SaslAuthProvider(true));

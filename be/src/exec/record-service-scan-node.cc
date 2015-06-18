@@ -26,6 +26,7 @@
 #include "runtime/runtime-state.h"
 #include "runtime/tuple.h"
 #include "runtime/tuple-row.h"
+#include "service/impala-server.h"
 #include "util/codec.h"
 
 using namespace boost;
@@ -77,9 +78,12 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   DCHECK(tuple_desc_->table_desc() != NULL);
   hdfs_table_ = static_cast<const HdfsTableDescriptor*>(tuple_desc_->table_desc());
   const vector<SlotDescriptor*>& slots = tuple_desc_->slots();
+  if (slots.size() == 0) {
+    // TODO: handle count(*)
+    return Status("count(*) is not currently supported.");
+  }
   stringstream stmt;
   stmt << "SELECT ";
-  // TODO: handle count(*)
   for (size_t i = 0; i < slots.size(); ++i) {
     if (!slots[i]->is_materialized()) continue;
     int col_idx = slots[i]->col_pos();
@@ -94,8 +98,12 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   stmt << " FROM " << hdfs_table_->database() << "." << hdfs_table_->name();
 
-  ThriftClient<recordservice::RecordServicePlannerClient>
-      planner("localhost", FLAGS_recordservice_planner_port);
+  // TODO: change impala -> "record-service-planner" when we've got kerberos working
+  // right.
+  ThriftClient<recordservice::RecordServicePlannerClient> planner(
+      FLAGS_hostname, FLAGS_recordservice_planner_port,
+      "impala",
+      AuthManager::GetInstance()->GetExternalAuthProvider());
   RETURN_IF_ERROR(planner.Open());
 
   // Call the RecordServicePlanner to plan the request and the filter out the
@@ -150,12 +158,6 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 Status RecordServiceScanNode::Open(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   RETURN_IF_ERROR(ExecNode::Open(state));
-
-  // Connect to the local RecordService worker
-  rsw_client_.reset(
-      new ThriftClient<recordservice::RecordServiceWorkerClient>("localhost",
-          FLAGS_recordservice_worker_port));
-  RETURN_IF_ERROR(rsw_client_->Open());
 
   num_scanner_threads_started_counter_ =
       ADD_COUNTER(runtime_profile(), NUM_SCANNER_THREADS_STARTED, TUnit::UNIT);
@@ -241,8 +243,12 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
 
   // Connect to the local RecordService worker. Thrift clients are not thread safe.
   // TODO: pool these.
-  ThriftClient<recordservice::RecordServiceWorkerClient> client("localhost",
-      FLAGS_recordservice_worker_port);
+  // TODO: change impala -> "record-service-worker" when we've got kerberos working
+  // right.
+  ThriftClient<recordservice::RecordServiceWorkerClient> client(
+      FLAGS_hostname, FLAGS_recordservice_worker_port,
+      "impala",
+      AuthManager::GetInstance()->GetExternalAuthProvider());
 
   while (true) {
     if (status.ok()) status = client.Open();
@@ -282,13 +288,26 @@ done:
   }
 }
 
+struct ScopedTask {
+  ScopedTask(ThriftClient<recordservice::RecordServiceWorkerClient>* client,
+      const recordservice::TUniqueId& handle)
+    : client_(client), handle_(handle) {
+  }
+
+  ~ScopedTask() {
+    client_->iface()->CloseTask(handle_);
+  }
+
+ private:
+  ThriftClient<recordservice::RecordServiceWorkerClient>* client_;
+  const recordservice::TUniqueId handle_;
+};
+
 Status RecordServiceScanNode::ProcessTask(
     ThriftClient<recordservice::RecordServiceWorkerClient>* client, int task_id,
     const vector<ExprContext*>& conjunct_ctxs) {
-  DCHECK(!tasks_[task_id].connected);
-
   recordservice::TExecTaskParams params;
-  params.task = tasks_[task_id].task;
+  params.task = tasks_[task_id];
   recordservice::TExecTaskResult result;
 
   try {
@@ -299,12 +318,12 @@ Status RecordServiceScanNode::ProcessTask(
     return Status(e.what());
   }
 
-  tasks_[task_id].handle = result.handle;
-  tasks_[task_id].connected = true;
+  // Add a scoped cleanup.
+  ScopedTask task_cleanup(client, result.handle);
 
   recordservice::TFetchResult fetch_result;
   recordservice::TFetchParams fetch_params;
-  fetch_params.handle = tasks_[task_id].handle;
+  fetch_params.handle = result.handle;
 
   // keep fetching batches
   while (!done_) {
@@ -421,9 +440,6 @@ Status RecordServiceScanNode::ProcessTask(
     if (fetch_result.done) break;
   }
 
-  client->iface()->CloseTask(tasks_[task_id].handle);
-  tasks_[task_id].connected = false;
-
   return Status::OK;
 }
 
@@ -437,19 +453,6 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
 
   scanner_threads_.JoinAll();
   DCHECK_EQ(num_active_scanners_, 0);
-
-  for (int i = 0; i < tasks_.size(); ++i) {
-    if (tasks_[i].connected) {
-      try {
-        rsw_client_->iface()->CloseTask(tasks_[i].handle);
-        tasks_[i].connected = false;
-      } catch (const recordservice::TRecordServiceException& e) {
-        state->LogError(ErrorMsg(TErrorCode::GENERAL, e.message));
-      } catch (const std::exception& e) {
-        state->LogError(ErrorMsg(TErrorCode::GENERAL, e.what()));
-      }
-    }
-  }
 
   ScanNode::Close(state);
 }
