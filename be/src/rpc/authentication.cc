@@ -852,7 +852,6 @@ Status SaslAuthProvider::WrapClientTransport(const string& hostname,
   const string auth_id; // Empty; unused by thrift
 
   DCHECK(!has_ldap_);
-  DCHECK(is_internal_);
 
   // Since the daemons are never LDAP clients, we go straight to Kerberos
   try {
