@@ -37,6 +37,7 @@ using namespace strings;
 
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
+DECLARE_bool(recordservice_allow_kerberized_worker);
 
 namespace impala {
   // Minimal implementation of < for set lookup.
@@ -245,10 +246,13 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
   // TODO: pool these.
   // TODO: change impala -> "record-service-worker" when we've got kerberos working
   // right.
+  AuthProvider* auth_provider = AuthManager::GetInstance()->GetExternalAuthProvider();
+  if (!FLAGS_recordservice_allow_kerberized_worker) {
+    auth_provider = AuthManager::GetInstance()->GetNoAuthProvider();
+  }
   ThriftClient<recordservice::RecordServiceWorkerClient> client(
       FLAGS_hostname, FLAGS_recordservice_worker_port,
-      "impala",
-      AuthManager::GetInstance()->GetExternalAuthProvider());
+      "impala", auth_provider);
 
   while (true) {
     if (status.ok()) status = client.Open();

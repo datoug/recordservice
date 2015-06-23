@@ -164,7 +164,7 @@ DEFINE_int32(recordservice_worker_port, 40100, "Port to run RecordService worker
 // It's very likely that we can't run MR jobs with kerberized workers without
 // delegation tokens and it requires keytabs to be distributed. For now, we can
 // just kerberize the planner service.
-DEFINE_bool(recordservice_allow_kerberized_worker, true,
+DEFINE_bool(recordservice_allow_kerberized_worker, false,
     "If false, worker service is never kerberized.");
 
 namespace impala {
