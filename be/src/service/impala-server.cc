@@ -707,9 +707,9 @@ Status ImpalaServer::Execute(TQueryCtx* query_ctx,
       &registered_exec_state, true, exec_state);
   if (status.ok()) {
     status = ExecuteInternal(&request, exec_state);
-    if (!status.ok() && registered_exec_state) {
-      UnregisterQuery((*exec_state)->query_id(), false, &status);
-    }
+  }
+  if (!status.ok() && registered_exec_state) {
+    UnregisterQuery((*exec_state)->query_id(), false, &status);
   }
   return status;
 }
@@ -725,9 +725,9 @@ Status ImpalaServer::ExecuteRecordServiceRequest(TQueryCtx* query_ctx,
       &registered_exec_state, false, exec_state);
   if (status.ok()) {
     status = ExecuteInternal(request, exec_state);
-    if (!status.ok() && registered_exec_state) {
-      UnregisterQuery((*exec_state)->query_id(), false, &status);
-    }
+  }
+  if (!status.ok() && registered_exec_state) {
+    UnregisterQuery((*exec_state)->query_id(), false, &status);
   }
   return status;
 }
