@@ -1016,6 +1016,9 @@ Status AuthManager::Init() {
   }
   RETURN_IF_ERROR(external_auth_provider_->Start());
 
+  no_auth_provider_.reset(new NoAuthProvider());
+  RETURN_IF_ERROR(no_auth_provider_->Start());
+
   return Status::OK;
 }
 
@@ -1027,6 +1030,12 @@ AuthProvider* AuthManager::GetExternalAuthProvider() {
 AuthProvider* AuthManager::GetInternalAuthProvider() {
   DCHECK(internal_auth_provider_.get() != NULL);
   return internal_auth_provider_.get();
+}
+
+// Returns the unsecure auth provider.
+AuthProvider* AuthManager::GetNoAuthProvider() {
+  DCHECK(no_auth_provider_.get() != NULL);
+  return no_auth_provider_.get();
 }
 
 }

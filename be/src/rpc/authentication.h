@@ -51,6 +51,9 @@ class AuthManager {
   // connection this applies to would be backend <-> statestore.
   AuthProvider* GetInternalAuthProvider();
 
+  // Returns the unsecure auth provider.
+  AuthProvider* GetNoAuthProvider();
+
  private:
   static AuthManager* auth_manager_;
 
@@ -58,6 +61,7 @@ class AuthManager {
   // don't have to check the auth flags to figure out which auth provider to use.
   boost::scoped_ptr<AuthProvider> internal_auth_provider_;
   boost::scoped_ptr<AuthProvider> external_auth_provider_;
+  boost::scoped_ptr<AuthProvider> no_auth_provider_;
 };
 
 
