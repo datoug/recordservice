@@ -820,29 +820,50 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
-    VLOG_REQUEST << "RecordService::ExecRequest: "
-                 << exec_req.query_exec_request.query_ctx.request.stmt;
-    VLOG_QUERY << "RecordService::ExecRequest: query plan "
-               << exec_req.query_exec_request.query_plan;
+    TQueryExecRequest& query_request = exec_req.query_exec_request;
 
-    task_state->fetch_size = DEFAULT_FETCH_SIZE;
-    if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
-    exec_req.query_exec_request.
-        query_ctx.request.query_options.__set_batch_size(task_state->fetch_size);
-    if (req.__isset.mem_limit) {
-      // FIXME: this needs much more testing.
-      exec_req.query_exec_request.query_ctx.
-        request.query_options.__set_mem_limit(req.mem_limit);
+    VLOG_REQUEST << "RecordService::ExecRequest: "
+                 << query_request.query_ctx.request.stmt;
+    VLOG_QUERY << "RecordService::ExecRequest: query plan " << query_request.query_plan;
+
+    // Verify the task as something we can run. We want to verify to support upgrade
+    // scenarios more gracefully.
+    if (query_request.fragments.size() != 1) {
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
+          "Only single fragment tasks are supported.");
+    }
+    TPlan& plan = query_request.fragments[0].plan;
+    bool valid_task = true;
+    if (plan.nodes.size() == 1) {
+      // FIXME: support hbase too.
+      if (plan.nodes[0].node_type != TPlanNodeType::HDFS_SCAN_NODE) valid_task = false;
+    } else if (plan.nodes.size() == 2) {
+      // Allow aggregation for count(*)
+      if (plan.nodes[0].node_type != TPlanNodeType::AGGREGATION_NODE) valid_task = false;
+    } else {
+      valid_task = false;
+    }
+    if (!valid_task) {
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
+          "Only HDFS scan requests and count(*) are supported.");
     }
 
-    // FIXME: this needs to verify that the contains only contains HDFS scans.
-    // The current counters depend on this too.
+    // Set the options for this task by modifying the plan and setting query options.
+    TPlanNode& plan_node = plan.nodes[0];
+    task_state->fetch_size = DEFAULT_FETCH_SIZE;
+    if (req.__isset.limit) plan_node.limit = req.limit;
+    if (req.__isset.fetch_size) task_state->fetch_size = req.fetch_size;
+    query_request.query_ctx.request.query_options.__set_batch_size(
+        task_state->fetch_size);
+    if (req.__isset.mem_limit) {
+      // FIXME: this needs much more testing.
+      query_request.query_ctx.request.query_options.__set_mem_limit(req.mem_limit);
+    }
     if (req.__isset.offset && req.offset != 0) task_state->offset = req.offset;
 
     shared_ptr<QueryExecState> exec_state;
-    status = ExecuteRecordServiceRequest(
-            &exec_req.query_exec_request.query_ctx,
-            &exec_req, session_handle.get(), &exec_state);
+    status = ExecuteRecordServiceRequest(&query_request.query_ctx,
+        &exec_req, session_handle.get(), &exec_state);
     if (!status.ok()) {
       ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Could not execute task.",
