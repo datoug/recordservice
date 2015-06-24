@@ -39,6 +39,7 @@ import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.OpenCSVSerde;
 import org.apache.hadoop.hive.serde2.RegexSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
+import org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
@@ -58,7 +59,6 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 
 // Unit tests for HiveSerDeExecutor.
-// TODO: cover more serdes, e.g., lazy serdes.
 // TODO: test binary when we can handle more serdes (currently RegexSerDe
 // doesn't support binary, and OpenCSVSerDe only support string).
 
@@ -72,6 +72,8 @@ public class HiveSerDeExecutorTest extends TestCase {
       "org.apache.hadoop.hive.serde2.RegexSerDe";
   private final static String OPENCSV_SERDE =
       "org.apache.hadoop.hive.serde2.OpenCSVSerde";
+  private final static String LAZYSIMPLE_SERDE =
+      "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
 
   private Map<String, String> propertyMap_;
   private Configuration conf_;
@@ -145,23 +147,23 @@ public class HiveSerDeExecutorTest extends TestCase {
     TypeInfo typeInfo = TypeInfoUtils.getTypeInfoFromObjectInspector(oi);
 
     Object actual;
-    if (typeInfo.equals(booleanTypeInfo))
+    if (typeInfo.equals(booleanTypeInfo)) {
       actual = columnData.getBool_vals().get(rowIdx);
-    else if (typeInfo.equals(byteTypeInfo))
+    } else if (typeInfo.equals(byteTypeInfo)) {
       actual = columnData.getByte_vals().get(rowIdx);
-    else if (typeInfo.equals(shortTypeInfo))
+    } else if (typeInfo.equals(shortTypeInfo)) {
       actual = columnData.getShort_vals().get(rowIdx);
-    else if (typeInfo.equals(intTypeInfo))
+    } else if (typeInfo.equals(intTypeInfo)) {
       actual = columnData.getInt_vals().get(rowIdx);
-    else if (typeInfo.equals(longTypeInfo))
+    } else if (typeInfo.equals(longTypeInfo)) {
       actual = columnData.getLong_vals().get(rowIdx);
-    else if (typeInfo.equals(floatTypeInfo))
+    } else if (typeInfo.equals(floatTypeInfo)) {
       actual = columnData.getDouble_vals().get(rowIdx);
-    else if (typeInfo.equals(doubleTypeInfo))
+    } else if (typeInfo.equals(doubleTypeInfo)) {
       actual = columnData.getDouble_vals().get(rowIdx);
-    else if (typeInfo.equals(stringTypeInfo))
+    } else if (typeInfo.equals(stringTypeInfo)) {
       actual = columnData.getString_vals().get(rowIdx);
-    else {
+    } else {
       assertTrue("Unhandled type: " + typeInfo.getTypeName(), false);
       return;
     }
@@ -213,7 +215,7 @@ public class HiveSerDeExecutorTest extends TestCase {
     propertyMap_.put(RegexSerDe.INPUT_REGEX_CASE_SENSITIVE, "true");
     propertyMap_.put(serdeConstants.LIST_COLUMNS, "v1,v2,v3,v4,v5,v6,v7,v8");
     propertyMap_.put(serdeConstants.LIST_COLUMN_TYPES,
-        "boolean:tinyint:smallint:int:bigint:float:double:string:timestamp");
+        "boolean:tinyint:smallint:int:bigint:float:double:string");
     propertyMap_.put("columns.comments", "\0\0\0\0\0\0\0");
     propertyMap_.put(serdeConstants.SERIALIZATION_NULL_FORMAT, "NULL");
 
@@ -303,5 +305,54 @@ public class HiveSerDeExecutorTest extends TestCase {
     list2 = Arrays.asList((Object)"true", "28", "479");
 
     testHiveSerDe(input, Arrays.asList(list1, list2));
+  }
+
+  // This uses the same set of tests as testRegexSerDe.
+  @SuppressWarnings({"deprecation", "unchecked"})
+  public void testLazySerDe() throws SerDeException, TException, ImpalaException {
+    propertyMap_.clear();
+    propertyMap_.put(serdeConstants.LIST_COLUMNS, "v1,v2,v3,v4,v5,v6,v7,v8");
+    propertyMap_.put(serdeConstants.LIST_COLUMN_TYPES,
+        "boolean:tinyint:smallint:int:bigint:float:double:string");
+    propertyMap_.put(serdeConstants.FIELD_DELIM, "\t");
+
+    serde_ = new LazySimpleSerDe();
+    serde_.initialize(conf_, convertMapToProperties());
+
+    // 1. Test a 2-row input with full-projection. With nulls
+    materialized_ = Arrays.asList(true, true, true, true, true, true, true, true);
+    executor_ = createSerDeExecutor(LAZYSIMPLE_SERDE);
+
+    byte[] input = createSerDeInput(
+        "false\t3\t42\t134\t3000000000\t3.1415926\t3.1415926\tabc",
+        "true\t4\t28\t479\t4000000000\t2.414\t2.414\tdef",
+        "false\t5\t17\t3525\t5000000000\t9.147\t9.147\tABC");
+
+    List<Object> list1 = Arrays.asList((Object)false, (byte)3,
+        (short)42, 134, 3000000000l, 3.141592502593994, 3.1415926, "abc");
+    List<Object> list2 = Arrays.asList((Object)true, (byte)4,
+        (short)28, 479, 4000000000l, 2.4140000343322754, 2.414, "def");
+    List<Object> list3 = Arrays.asList((Object)false, (byte)5,
+        (short)17, 3525, 5000000000l, 9.147000312805176, 9.147, "ABC");
+
+    testHiveSerDe(input, Arrays.asList(list1, list2, list3));
+
+    // 2. Test a 3-row input with projection on a subset of rows. No nulls.
+    materialized_ = Arrays.asList(true, false, true, true, false, false, false, false);
+    executor_ = createSerDeExecutor(LAZYSIMPLE_SERDE);
+
+    list1 = Arrays.asList((Object)false, (short)42, 134);
+    list2 = Arrays.asList((Object)true, (short)28, 479);
+    list3 = Arrays.asList((Object)false, (short)17, 3525);
+
+    testHiveSerDe(input, Arrays.asList(list1, list2, list3));
+
+    // 3. Test a 1-row input with the same executor as above.
+    input = createSerDeInput(
+        "true\t4\t28\t479\t4000000000\t2.414\t2.414\tdef");
+
+    List<Object> list4 = Arrays.asList((Object)true, (short)28, 479);
+
+    testHiveSerDe(input, Arrays.asList(list4));
   }
 }

@@ -38,6 +38,18 @@ import java.util.Properties;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
+import org.apache.hadoop.hive.serde2.lazy.LazyBinary;
+import org.apache.hadoop.hive.serde2.lazy.LazyBoolean;
+import org.apache.hadoop.hive.serde2.lazy.LazyByte;
+import org.apache.hadoop.hive.serde2.lazy.LazyDouble;
+import org.apache.hadoop.hive.serde2.lazy.LazyFloat;
+import org.apache.hadoop.hive.serde2.lazy.LazyHiveDecimal;
+import org.apache.hadoop.hive.serde2.lazy.LazyInteger;
+import org.apache.hadoop.hive.serde2.lazy.LazyLong;
+import org.apache.hadoop.hive.serde2.lazy.LazyPrimitive;
+import org.apache.hadoop.hive.serde2.lazy.LazyShort;
+import org.apache.hadoop.hive.serde2.lazy.LazyString;
+import org.apache.hadoop.hive.serde2.lazy.LazyTimestamp;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
@@ -65,7 +77,6 @@ import com.cloudera.impala.thrift.TSerDeOutput;
 // in the specific serde class and a set of properties that are necessary for
 // initializing the object. For instance, Hive RegexSerDe needs to know 'columns,
 // 'columns.types', 'input.regex', and so on.
-// TODO: handle lazy serdes
 public class HiveSerDeExecutor {
   private static final Logger LOG = Logger.getLogger(HiveSerDeExecutor.class);
 
@@ -234,7 +245,7 @@ public class HiveSerDeExecutor {
    * @throws ImpalaException thrown when deserializing input failed
    * @throws TException thrown when serializing output failed
    **/
-  @SuppressWarnings("unchecked")
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public byte[] deserialize(byte[] thriftParams)
       throws ImpalaException, TException, SerDeException {
     TSerDeInput request = new TSerDeInput();
@@ -261,10 +272,13 @@ public class HiveSerDeExecutor {
           Object val = soi_.getStructFieldData(row, sf);
           isNullCols_.get(j).add(val == null);
           if (val == null) continue;
-          if (val instanceof Timestamp)
+          if (val instanceof LazyPrimitive) val = getFromLazy((LazyPrimitive) val);
+          if (val instanceof Timestamp) {
             val = SerializationUtils.encodeTimestamp((Timestamp)val);
           // TODO: use sun.misc.FloatingDecimal to exclude extra bits?
-          else if (val instanceof Float) val = ((Float)val).doubleValue();
+          } else if (val instanceof Float) {
+            val = ((Float)val).doubleValue();
+          }
           ((List<Object>) valCols_.get(j)).add(val);
         }
       } catch (Exception e) {
@@ -275,5 +289,37 @@ public class HiveSerDeExecutor {
 
     result.setBatch(new TRowBatch().setCols(cols_).setNum_rows(numRows));
     return new TSerializer(protocolFactory).serialize(result);
+  }
+
+  // This handles the case when a field value is a LazyPrimitive object, which
+  // is possible if the serde is, for instance, LazySimpleSerDe. It gets the
+  // corresponding Java object from the lazy object.
+  @SuppressWarnings("rawtypes")
+  private Object getFromLazy(LazyPrimitive val) throws ImpalaException {
+    if (val instanceof LazyBoolean) {
+      return ((LazyBoolean) val).getWritableObject().get();
+    } else if (val instanceof LazyByte) {
+      return ((LazyByte) val).getWritableObject().get();
+    } else if (val instanceof LazyShort) {
+      return ((LazyShort) val).getWritableObject().get();
+    } else if (val instanceof LazyInteger) {
+      return ((LazyInteger) val).getWritableObject().get();
+    } else if (val instanceof LazyLong) {
+      return ((LazyLong) val).getWritableObject().get();
+    } else if (val instanceof LazyFloat) {
+      return ((LazyFloat) val).getWritableObject().get();
+    } else if (val instanceof LazyDouble) {
+      return ((LazyDouble) val).getWritableObject().get();
+    } else if (val instanceof LazyString) {
+      return ((LazyString) val).getWritableObject().toString();
+    } else if (val instanceof LazyBinary) {
+      return ByteBuffer.wrap(((LazyBinary) val).getWritableObject().getBytes());
+    } else if (val instanceof LazyHiveDecimal) {
+      return ((LazyHiveDecimal) val).getWritableObject().getHiveDecimal();
+    } else if (val instanceof LazyTimestamp) {
+      return ((LazyTimestamp) val).getWritableObject().getTimestamp();
+    } else {
+      throw new ImpalaRuntimeException("Unhandled lazy type: " + val.getClass());
+    }
   }
 }
