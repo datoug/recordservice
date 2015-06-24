@@ -28,7 +28,6 @@ add_library(Exec
   base-sequence-scanner.cc
   blocking-join-node.cc
   catalog-op-executor.cc
-  cross-join-node.cc
   data-sink.cc
   data-source-row-converter.cc
   data-source-scan-node.cc
@@ -63,6 +62,7 @@ add_library(Exec
   hbase-scan-node.cc
   hbase-table-scanner.cc
   incr-stats-util.cc
+  nested-loop-join-node.cc
   partitioned-aggregation-node.cc
   partitioned-aggregation-node-ir.cc
   partitioned-hash-join-node.cc
