@@ -41,7 +41,7 @@ add_library(fesupport SHARED
 )
 add_dependencies(fesupport thrift-cpp)
 
-target_link_libraries(fesupport ${IMPALA_LINK_LIBS_DYNAMIC_HDFS})
+target_link_libraries(fesupport ${IMPALA_LINK_LIBS_DYNAMIC_TARGETS})
 
 add_executable(impalad impalad-main.cc)
 add_executable(recordserviced recordserviced-main.cc)
