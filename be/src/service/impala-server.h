@@ -226,6 +226,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   virtual recordservice::TProtocolVersion::type GetProtocolVersion();
   virtual void GetMetric(recordservice::TMetricResponse& return_val,
       const std::string& key);
+  virtual void GetDelegationToken(std::string& token,
+      const std::string& user, const std::string& renewer);
+  virtual void CancelDelegationToken(const std::string& token);
+  virtual void RenewDelegationToken(const std::string& token);
 
   // RecordService worker rpcs.
   virtual void ExecTask(recordservice::TExecTaskResult& return_val,

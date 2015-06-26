@@ -718,3 +718,20 @@ struct TGetAllHadoopConfigsResponse {
 struct TStartupOptions {
   1: optional bool compute_lineage
 }
+
+struct TGetDelegationTokenRequest {
+  1: required string user
+  2: required string renewer
+}
+
+struct TGetDelegationTokenResponse {
+  1: required binary token
+}
+
+struct TCancelDelegationTokenRequest {
+  1: required binary token
+}
+
+struct TRenewDelegationTokenRequest {
+  1: required binary token
+}

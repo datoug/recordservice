@@ -58,6 +58,7 @@ import com.cloudera.impala.common.FileSystemUtil;
 import com.cloudera.impala.common.ImpalaException;
 import com.cloudera.impala.common.InternalException;
 import com.cloudera.impala.common.JniUtil;
+import com.cloudera.impala.thrift.TCancelDelegationTokenRequest;
 import com.cloudera.impala.thrift.TCatalogObject;
 import com.cloudera.impala.thrift.TDescribeTableParams;
 import com.cloudera.impala.thrift.TDescribeTableResult;
@@ -67,6 +68,7 @@ import com.cloudera.impala.thrift.TGetDataSrcsParams;
 import com.cloudera.impala.thrift.TGetDataSrcsResult;
 import com.cloudera.impala.thrift.TGetDbsParams;
 import com.cloudera.impala.thrift.TGetDbsResult;
+import com.cloudera.impala.thrift.TGetDelegationTokenRequest;
 import com.cloudera.impala.thrift.TGetFunctionsParams;
 import com.cloudera.impala.thrift.TGetFunctionsResult;
 import com.cloudera.impala.thrift.TGetHadoopConfigRequest;
@@ -78,6 +80,7 @@ import com.cloudera.impala.thrift.TLoadDataResp;
 import com.cloudera.impala.thrift.TLogLevel;
 import com.cloudera.impala.thrift.TMetadataOpRequest;
 import com.cloudera.impala.thrift.TQueryCtx;
+import com.cloudera.impala.thrift.TRenewDelegationTokenRequest;
 import com.cloudera.impala.thrift.TResultSet;
 import com.cloudera.impala.thrift.TShowFilesParams;
 import com.cloudera.impala.thrift.TShowGrantRoleParams;
@@ -531,6 +534,24 @@ public class JniFrontend {
     } catch (TException e) {
       throw new InternalException(e.getMessage());
     }
+  }
+
+  public byte[] getDelegationToken(byte[] serializedRequest) throws ImpalaException {
+    TGetDelegationTokenRequest request = new TGetDelegationTokenRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    throw new InternalException("Not yet implemented.");
+  }
+
+  public void cancelDelegationToken(byte[] serializedRequest) throws ImpalaException {
+    TCancelDelegationTokenRequest request = new TCancelDelegationTokenRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    throw new InternalException("Not yet implemented.");
+  }
+
+  public void renewDelegationToken(byte[] serializedRequest) throws ImpalaException {
+    TRenewDelegationTokenRequest request = new TRenewDelegationTokenRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    throw new InternalException("Not yet implemented.");
   }
 
   public class CdhVersion implements Comparable<CdhVersion> {

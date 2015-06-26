@@ -74,7 +74,11 @@ Frontend::Frontend() {
     {"execHiveServer2MetadataOp", "([B)[B", &exec_hs2_metadata_op_id_},
     {"setCatalogInitialized", "()V", &set_catalog_initialized_id_},
     {"loadTableData", "([B)[B", &load_table_data_id_},
-    {"getTableFiles", "([B)[B", &get_table_files_id_}};
+    {"getTableFiles", "([B)[B", &get_table_files_id_},
+    {"getDelegationToken", "([B)[B", &get_delegation_token_id_},
+    {"cancelDelegationToken", "([B)V", &cancel_delegation_token_id_},
+    {"renewDelegationToken", "([B)V", &renew_delegation_token_id_},
+  };
 
   JNIEnv* jni_env = getJNIEnv();
   // create instance of java class JniFrontend
@@ -224,6 +228,22 @@ Status Frontend::GetHadoopConfig(const TGetHadoopConfigRequest& request,
 
 Status Frontend::LoadData(const TLoadDataReq& request, TLoadDataResp* response) {
   return JniUtil::CallJniMethod(fe_, load_table_data_id_, request, response);
+}
+
+// Get/Create delegation token for user.
+Status Frontend::GetDelegationToken(const TGetDelegationTokenRequest& params,
+    TGetDelegationTokenResponse* result) {
+  return JniUtil::CallJniMethod(fe_, get_delegation_token_id_, params, result);
+}
+
+// Cancels the token.
+Status Frontend::CancelDelegationToken(const TCancelDelegationTokenRequest& params) {
+  return JniUtil::CallJniMethod(fe_, cancel_delegation_token_id_, params);
+}
+
+// Renews the token.
+Status Frontend::RenewDelegationToken(const TRenewDelegationTokenRequest& params) {
+  return JniUtil::CallJniMethod(fe_, renew_delegation_token_id_, params);
 }
 
 bool Frontend::IsAuthorizationError(const Status& status) {

@@ -157,6 +157,16 @@ class Frontend {
   // Call FE to get files info for a table or partition.
   Status GetTableFiles(const TShowFilesParams& params, TResultSet* result);
 
+  // Get/Create delegation token for user.
+  Status GetDelegationToken(const TGetDelegationTokenRequest& params,
+      TGetDelegationTokenResponse* result);
+
+  // Cancels the token.
+  Status CancelDelegationToken(const TCancelDelegationTokenRequest& params);
+
+  // Renews the token.
+  Status RenewDelegationToken(const TRenewDelegationTokenRequest& params);
+
  private:
   // Descriptor of Java Frontend class itself, used to create a new instance.
   jclass fe_class_;
@@ -183,6 +193,9 @@ class Frontend {
   jmethodID load_table_data_id_; // JniFrontend.loadTableData
   jmethodID set_catalog_initialized_id_; // JniFrontend.setCatalogInitialized
   jmethodID get_table_files_id_; // JniFrontend.getTableFiles
+  jmethodID get_delegation_token_id_; // JniFrontend.getDelegationToken
+  jmethodID cancel_delegation_token_id_; // JniFrontend.cancelDelegationToken
+  jmethodID renew_delegation_token_id_; // JniFrontend.renewDelegationToken
   jmethodID fe_ctor_;
 };
 
