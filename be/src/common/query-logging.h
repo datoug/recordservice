@@ -37,22 +37,28 @@
 // LOGGER should be a pointer to a Logger object.
 
 // Logs that warn something a continuable error has occurred.
-#define QUERY_VLOG_WARNING(LOGGER) QUERY_VLOG(LOGGER, 1)
-
+#define QUERY_VLOG_WARNING_LEVEL 1
 // Logs that happen a fixed number of times per fragment. e.g. depends only on the plan
-#define QUERY_VLOG_FRAGMENT(LOGGER) QUERY_VLOG(LOGGER, 2)
-
+#define QUERY_VLOG_FRAGMENT_LEVEL 2
 // Logs that happen at a frequency based on the number of files.
-#define QUERY_VLOG_FILE(LOGGER) QUERY_VLOG(LOGGER, 3)
-
+#define QUERY_VLOG_FILE_LEVEL 3
 // Logs that happen at the frequency of a (IO) buffer
-#define QUERY_VLOG_BUFFER(LOGGER) QUERY_VLOG(LOGGER, 4)
-
+#define QUERY_VLOG_BUFFER_LEVEL 4
 // Logs that happen at the frequency of a row batch
-#define QUERY_VLOG_BATCH(LOGGER) QUERY_VLOG(LOGGER, 5)
-
+#define QUERY_VLOG_BATCH_LEVEL 5
 // Logs that happen at a frequency of each row.
-#define QUERY_VLOG_ROW(LOGGER) QUERY_VLOG(LOGGER, 6)
+#define QUERY_VLOG_ROW_LEVEL 6
+
+#define QUERY_VLOG_WARNING(LOGGER) QUERY_VLOG(LOGGER, QUERY_VLOG_WARNING_LEVEL)
+#define QUERY_VLOG_FRAGMENT(LOGGER) QUERY_VLOG(LOGGER, QUERY_VLOG_FRAGMENT_LEVEL)
+#define QUERY_VLOG_FILE(LOGGER) QUERY_VLOG(LOGGER, QUERY_VLOG_FILE_LEVEL)
+#define QUERY_VLOG_BUFFER(LOGGER) QUERY_VLOG(LOGGER, QUERY_VLOG_BUFFER_LEVEL)
+#define QUERY_VLOG_BATCH(LOGGER) QUERY_VLOG(LOGGER, QUERY_VLOG_BATCH_LEVEL)
+#define QUERY_VLOG_ROW(LOGGER) \
+  if ((LOGGER)->should_log_row()) \
+    google::LogMessage( \
+        __FILE__, __LINE__, google::GLOG_INFO, (LOGGER)->rows_logged(),\
+        &google::LogMessage::SendToLog).stream() << (LOGGER)->prefix()
 
 namespace impala {
 
@@ -63,7 +69,8 @@ class Logger {
   // are logged, prepended with prefix.
   Logger(const std::string& prefix, int level)
     : prefix_(prefix),
-      max_level_(level) {
+      max_level_(level),
+      rows_logged_(0) {
   }
 
   const std::string& prefix() const { return prefix_; }
@@ -71,12 +78,24 @@ class Logger {
   // Returns true if logs at this level should be enabled.
   const bool Enabled(int level) const { return level <= max_level_; }
 
+  // The maximum number of per-row log messages.
+  // TODO: make this configuration?
+  const int max_rows() const { return 1024; }
+  const int rows_logged() const { return rows_logged_; }
+
+  bool should_log_row() const {
+    if (!Enabled(QUERY_VLOG_ROW_LEVEL) || rows_logged_ > max_rows()) return false;
+    ++rows_logged_;
+    return true;
+  }
+
   // Returns a logger that never logs.
   static const Logger* NullLogger();
 
  private:
   const std::string prefix_;
   const int max_level_;
+  mutable int rows_logged_;
 };
 
 }

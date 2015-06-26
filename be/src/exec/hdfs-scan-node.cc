@@ -116,6 +116,16 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
     // been generated (e.g. probe side bitmap filters).
     // TODO: we could do dynamic partition pruning here as well.
     initial_ranges_issued_ = true;
+
+    if (state->logger()->Enabled(QUERY_VLOG_FILE_LEVEL)) {
+      for (FileFormatsMap::const_iterator it = per_type_files_.begin();
+          it != per_type_files_.end(); ++it) {
+        if (it->second.empty()) continue;
+        QUERY_VLOG_FILE(state->logger()) << "File type:"
+            << it->first << " Num Initial Ranges: " << it->second.size();
+      }
+    }
+
     // Issue initial ranges for all file types.
     RETURN_IF_ERROR(HdfsTextScanner::IssueInitialRanges(this,
         per_type_files_[THdfsFileFormat::TEXT]));
@@ -129,8 +139,8 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
         per_type_files_[THdfsFileFormat::PARQUET]));
     RETURN_IF_ERROR(HdfsHiveSerdeScanner::IssueInitialRanges(this,
         per_type_files_[THdfsFileFormat::HIVE_SERDE]));
-    if (progress_.done()) SetDone();
 
+    if (progress_.done()) SetDone();
     // For the RecordService, we always start up a single scanner thread. This bypasses
     // the more complex thread token mgr.
     if (state->is_record_service_request()) {
@@ -147,6 +157,7 @@ Status HdfsScanNode::GetNext(RuntimeState* state, RowBatch* row_batch, bool* eos
   if (!status.ok() || *eos) StopAndFinalizeCounters();
   QUERY_VLOG_BATCH(runtime_state_->logger()) << "Node " << id()
       << " GetNext() returned " << row_batch->num_rows() << " rows eos=" << *eos;
+  if (status.ok()) LOG_ROW_BATCH_ROWS(row_batch, state->logger());
   return status;
 }
 
@@ -696,14 +707,8 @@ Status HdfsScanNode::AddDiskIoRanges(const vector<DiskIoMgr::ScanRange*>& ranges
 }
 
 Status HdfsScanNode::AddDiskIoRanges(const HdfsFileDesc* desc) {
-  const vector<DiskIoMgr::ScanRange*>& ranges = desc->splits;
-  RETURN_IF_ERROR(
-      runtime_state_->io_mgr()->AddScanRanges(reader_context_, ranges));
   MarkFileDescIssued(desc);
-  if (!runtime_state_->is_record_service_request()) {
-    ThreadTokenAvailableCb(runtime_state_->resource_pool());
-  }
-  return Status::OK;
+  return AddDiskIoRanges(desc->splits);
 }
 
 void HdfsScanNode::MarkFileDescIssued(const HdfsFileDesc* desc) {

@@ -29,6 +29,7 @@
 namespace impala {
 
 class BufferedTupleStream;
+class Logger;
 class MemTracker;
 class TRowBatch;
 class Tuple;
@@ -137,7 +138,7 @@ class RowBatch {
   // auxiliary (i.e. the smallest footprint for the row batch).
   int TotalByteSize();
 
-  TupleRow* GetRow(int row_idx) {
+  TupleRow* GetRow(int row_idx) const {
     DCHECK(tuple_ptrs_ != NULL);
     DCHECK_GE(row_idx, 0);
     DCHECK_LT(row_idx, num_rows_ + (has_in_flight_row_ ? 1 : 0));
@@ -269,6 +270,15 @@ class RowBatch {
   // allocated to the right size.
   std::string compression_scratch_;
 };
+
+// Prints the content of the row batch at VLOG_QUERY_ROW level. This is a macro so
+// the line numbers are from the calling site.
+#define LOG_ROW_BATCH_ROWS(batch, logger)\
+  if (logger->Enabled(QUERY_VLOG_ROW_LEVEL)) { \
+    for (int i = 0; i < (batch)->num_rows(); ++i) {\
+      QUERY_VLOG_ROW(logger) << PrintRow((batch)->GetRow(i), (batch)->row_desc());\
+    }\
+  }
 
 }
 

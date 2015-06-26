@@ -205,8 +205,13 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
     *eos = true;
   }
 
-  unique_lock<mutex> l(lock_);
-  return status_;
+  Status status;
+  {
+    unique_lock<mutex> l(lock_);
+    status = status_;
+  }
+  if (status.ok()) LOG_ROW_BATCH_ROWS(row_batch, state->logger());
+  return status;
 }
 
 void RecordServiceScanNode::ThreadTokenAvailableCb(
