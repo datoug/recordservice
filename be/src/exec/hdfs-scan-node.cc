@@ -707,8 +707,10 @@ Status HdfsScanNode::AddDiskIoRanges(const vector<DiskIoMgr::ScanRange*>& ranges
 }
 
 Status HdfsScanNode::AddDiskIoRanges(const HdfsFileDesc* desc) {
+  // We need to add io ranges for this file before mark it as issued.
+  Status status = AddDiskIoRanges(desc->splits);
   MarkFileDescIssued(desc);
-  return AddDiskIoRanges(desc->splits);
+  return status;
 }
 
 void HdfsScanNode::MarkFileDescIssued(const HdfsFileDesc* desc) {

@@ -65,6 +65,13 @@ HdfsTextScanner::~HdfsTextScanner() {
 
 Status HdfsTextScanner::IssueInitialRanges(HdfsScanNode* scan_node,
     const vector<HdfsFileDesc*>& files) {
+  return HdfsTextScanner::IssueInitialRangesInternal(
+      THdfsFileFormat::TEXT, scan_node, files);
+}
+
+Status HdfsTextScanner::IssueInitialRangesInternal(
+    const THdfsFileFormat::type file_format,
+    HdfsScanNode* scan_node, const vector<HdfsFileDesc*>& files) {
   vector<DiskIoMgr::ScanRange*> compressed_text_scan_ranges;
   vector<HdfsFileDesc*> lzo_text_files;
   bool warning_written = false;
@@ -104,7 +111,7 @@ Status HdfsTextScanner::IssueInitialRanges(HdfsScanNode* scan_node,
             }
             // We assign the entire file to one scan range, so mark all but one split
             // (i.e. the first split) as complete.
-            scan_node->RangeComplete(THdfsFileFormat::TEXT, compression);
+            scan_node->RangeComplete(file_format, compression);
             continue;
           }
 
@@ -193,7 +200,7 @@ void HdfsTextScanner::Close() {
   AddFinalRowBatch();
   if (!only_parsing_header_) {
     scan_node_->RangeComplete(
-        THdfsFileFormat::TEXT, stream_->file_desc()->file_compression);
+        GetTHdfsFileFormat(), stream_->file_desc()->file_compression);
   }
   HdfsScanner::Close();
 }
@@ -244,8 +251,10 @@ Status HdfsTextScanner::ResetScanner() {
       Tuple::Create(scan_node_->tuple_desc()->byte_size(), boundary_pool_.get());
 
   // Initialize codegen fn
+  // TODO: does the scanner name matter? For subclasses this would
+  // not be accurate.
   RETURN_IF_ERROR(InitializeWriteTuplesFn(
-    context_->partition_descriptor(), THdfsFileFormat::TEXT, "HdfsTextScanner"));
+    context_->partition_descriptor(), GetTHdfsFileFormat(), "HdfsTextScanner"));
   return Status::OK;
 }
 
@@ -294,6 +303,7 @@ Status HdfsTextScanner::FinishScanRange() {
         int num_tuples = WriteFields(pool, tuple_row_mem, num_fields, 1);
         DCHECK_LE(num_tuples, 1);
         DCHECK_GE(num_tuples, 0);
+        RETURN_IF_ERROR(parse_status_);
         COUNTER_ADD(scan_node_->rows_read_counter(), num_tuples);
         RETURN_IF_ERROR(CommitRows(num_tuples));
       } else if (delimited_text_parser_->HasUnfinishedTuple() &&

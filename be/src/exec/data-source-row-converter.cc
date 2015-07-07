@@ -49,6 +49,7 @@ DataSourceRowConverter::DataSourceRowConverter(
     : next_row_idx_(0), num_rows_(0), tuple_desc_(tuple_desc),
       template_tuple_(template_tuple),
       materialized_slots_(materialized_slots), row_batch_(NULL) {
+  cols_next_val_idx_.resize(materialized_slots_.size(), 0);
 }
 
 // Sets the decimal value in the slot. Inline method to avoid nested switch statements.
@@ -82,7 +83,8 @@ inline Status SetDecimalVal(const ColumnType& type, char* bytes, int len,
 Status DataSourceRowConverter::ResetRowBatch(
     const extdatasource::TRowBatch* const row_batch, bool verify) {
   row_batch_ = row_batch;
-  cols_next_val_idx_.resize(materialized_slots_.size(), 0);
+  fill(cols_next_val_idx_.begin(), cols_next_val_idx_.end(), 0);
+  next_row_idx_ = 0;
 
   if (verify) {
     const vector<TColumnData>& cols = row_batch_->cols;
@@ -131,17 +133,17 @@ Status DataSourceRowConverter::MaterializeNextRow(Tuple* tuple, MemPool* pool) {
     int val_idx = cols_next_val_idx_[i]++;
     switch (slot_desc->type().type) {
       case TYPE_STRING: {
-          if (val_idx >= col.string_vals.size()) {
-            return Status(Substitute(ERROR_INVALID_COL_DATA, "STRING"));
-          }
-          const string& val = col.string_vals[val_idx];
-          size_t val_size = val.size();
-          char* buffer = reinterpret_cast<char*>(pool->Allocate(val_size));
-          memcpy(buffer, val.data(), val_size);
-          reinterpret_cast<StringValue*>(slot)->ptr = buffer;
-          reinterpret_cast<StringValue*>(slot)->len = val_size;
-          break;
+        if (val_idx >= col.string_vals.size()) {
+          return Status(Substitute(ERROR_INVALID_COL_DATA, "STRING"));
         }
+        const string& val = col.string_vals[val_idx];
+        size_t val_size = val.size();
+        char* buffer = reinterpret_cast<char*>(pool->Allocate(val_size));
+        memcpy(buffer, val.data(), val_size);
+        reinterpret_cast<StringValue*>(slot)->ptr = buffer;
+        reinterpret_cast<StringValue*>(slot)->len = val_size;
+        break;
+      }
       case TYPE_TINYINT:
         if (val_idx >= col.byte_vals.size()) {
           return Status(Substitute(ERROR_INVALID_COL_DATA, "TINYINT"));

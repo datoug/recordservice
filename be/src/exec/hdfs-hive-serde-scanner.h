@@ -17,7 +17,7 @@
 
 #include <jni.h>
 
-#include "exec/hdfs-scanner.h"
+#include "exec/hdfs-text-scanner.h"
 
 namespace impala {
 
@@ -28,16 +28,17 @@ struct HdfsFileDesc;
 // HdfsScanner implementation that calls Hive serde classes to parse
 // the input (currently only text-formatted) records. This is done by
 // calling a Java-side class `HiveSerDeExecutor` through JNI.
-
-// TODO: implement more sophisticated text parsing, e.g., tuple/field
-// boundary handling, timer, etc.
-class HdfsHiveSerdeScanner : public HdfsScanner {
+// This class uses many of the existing logics from HdfsTextScanner, including
+// issuing initial range, split processing, buffer filling, column/row boundary
+// handling, etc. The main difference is in WriteFields. Unlike HdfsTextScanner,
+// this class wraps the raw buffer, send it to the FE, and calls the
+// DataSourceRowConverter to materialize the rows in the results.
+class HdfsHiveSerdeScanner : public HdfsTextScanner {
  public:
   HdfsHiveSerdeScanner(HdfsScanNode* scan_node, RuntimeState* state);
 
   virtual ~HdfsHiveSerdeScanner();
   virtual Status Prepare(ScannerContext* context);
-  virtual Status ProcessSplit();
   virtual void Close();
 
   static Status IssueInitialRanges(HdfsScanNode*, const std::vector<HdfsFileDesc*>&);
@@ -58,22 +59,22 @@ class HdfsHiveSerdeScanner : public HdfsScanner {
   // Initialize this scanner for a new scan range.
   virtual Status InitNewRange();
 
-  // Process the entire scan range, reading bytes from context and appending
-  // materialized row batches to the scan node.
-  Status ProcessRange();
+  // This overrides HdfsTextScanner::WriteFields. The difference here is
+  // that we send buffers to the FE, instead of processing them directly here.
+  virtual int WriteFields(MemPool* pool, TupleRow* tuple_row,
+                          int num_fields, int num_tuples);
 
-  // Fill the next byte buffer from context. This will block if there are
-  // no more bytes ready.
-  virtual Status FillByteBuffer(bool* eosr);
+  // Calls the FE HiveSerDeExecutor to process tuples collected so far.
+  // `input` contains the buffer to send. The results are materialized in the
+  // `tuple_row`, and `num_tuples_materialized` is incremented by the number of tuples
+  // materialized in this call.
+  Status WriteRowBatch(MemPool* pool, const TSerDeInput& input,
+                       TupleRow** tuple_row, int* num_tuples_materialized);
 
-  // Current position in the buffer returned from ScannerContext
-  char* byte_buffer_ptr_;
-
-  // End position of the current buffer returned from ScannerContext
-  char* byte_buffer_end_;
-
-  // Actual bytes received from last file read
-  int64_t byte_buffer_read_size_;
+  // Return the specific HDFS file format associated with this scanner.
+  virtual inline THdfsFileFormat::type GetTHdfsFileFormat() const {
+    return THdfsFileFormat::HIVE_SERDE;
+  }
 
   // An instance of HiveSerDeExecutor object
   jobject executor_;
@@ -87,19 +88,8 @@ class HdfsHiveSerdeScanner : public HdfsScanner {
   // The deserialize method id for the executor class
   jmethodID executor_deser_id_;
 
-  // Helper class for picking rows from delimited text
-  boost::scoped_ptr<DelimitedTextParser> delimited_text_parser_;
-
   // Helper class for parsing rows from external data source
   boost::scoped_ptr<DataSourceRowConverter> row_converter_;
-
-  // Return field locations from the delimited text parser.
-  // Not needed for this class, just to keep the parser happy.
-  std::vector<FieldLocation> field_locations_;
-
-  // Pointers into scanner context's byte buffer for the end ptr
-  // locations of each row processed in the current batch.
-  std::vector<char*> row_end_locations_;
 };
 }
 

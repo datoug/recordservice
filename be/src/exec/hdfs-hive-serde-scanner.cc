@@ -22,20 +22,15 @@
 #include "exec/delimited-text-parser.inline.h"
 #include "exec/external-data-source-executor.h"
 #include "exec/hdfs-scan-node.h"
-#include "exec/scanner-context.inline.h"
-#include "exec/text-converter.inline.h"
 #include "rpc/jni-thrift-util.h"
 #include "runtime/runtime-state.h"
 #include "runtime/tuple.h"
 #include "runtime/tuple-row.h"
-#include "util/codec.h"
 #include "util/jni-util.h"
 
 #include "gen-cpp/ExternalDataSource_types.h"
 
-using namespace boost;
 using namespace impala;
-using namespace llvm;
 using namespace std;
 
 const char* HdfsHiveSerdeScanner::EXECUTOR_CLASS =
@@ -46,20 +41,8 @@ const char* HdfsHiveSerdeScanner::EXECUTOR_DESERIALIZE_NAME = "deserialize";
 
 Status HdfsHiveSerdeScanner::IssueInitialRanges(
     HdfsScanNode* scan_node, const vector<HdfsFileDesc*>& files) {
-
-  for (int i = 0; i < files.size(); ++i) {
-    // We're just assuming the files are not compressed
-    THdfsCompression::type compression = files[i]->file_compression;
-    switch (compression) {
-    case THdfsCompression::NONE:
-      RETURN_IF_ERROR(scan_node->AddDiskIoRanges(files[i]));
-      break;
-    default:
-      DCHECK(false) << "Cannot handle compressed file format yet.";
-    }
-  }
-
-  return Status::OK;
+  return HdfsTextScanner::IssueInitialRangesInternal(
+      THdfsFileFormat::HIVE_SERDE, scan_node, files);
 }
 
 Status HdfsHiveSerdeScanner::InitNewRange() {
@@ -94,12 +77,13 @@ Status HdfsHiveSerdeScanner::InitNewRange() {
   executor_ = env->NewGlobalRef(executor_);
   RETURN_ERROR_IF_EXC(env);
 
+  RETURN_IF_ERROR(HdfsTextScanner::ResetScanner());
+
   return Status::OK;
 }
 
 HdfsHiveSerdeScanner::HdfsHiveSerdeScanner(HdfsScanNode* scan_node, RuntimeState* state)
-  : HdfsScanner(scan_node, state), byte_buffer_ptr_(NULL),
-    byte_buffer_end_(NULL), byte_buffer_read_size_(0),
+  : HdfsTextScanner(scan_node, state),
     executor_(NULL), executor_class_(NULL), executor_ctor_id_(NULL),
     executor_deser_id_(NULL) {
 }
@@ -108,7 +92,12 @@ HdfsHiveSerdeScanner::~HdfsHiveSerdeScanner() {
 }
 
 Status HdfsHiveSerdeScanner::Prepare(ScannerContext* context) {
+  // Unlike a few other places, we don't call the same function from
+  // HdfsScanner here, since field_locations_ is initialized with a different size.
   RETURN_IF_ERROR(HdfsScanner::Prepare(context));
+
+  parse_delimiter_timer_ = ADD_CHILD_TIMER(scan_node_->runtime_profile(),
+      "DelimiterParseTime", ScanNode::SCANNER_THREAD_TOTAL_WALLCLOCK_TIME);
 
   field_locations_.resize(state_->batch_size());
   row_end_locations_.resize(state_->batch_size());
@@ -130,107 +119,92 @@ Status HdfsHiveSerdeScanner::Prepare(ScannerContext* context) {
   return Status::OK;
 }
 
-Status HdfsHiveSerdeScanner::ProcessSplit() {
-  // Reset state for the new scan range
-  RETURN_IF_ERROR(InitNewRange());
-  RETURN_IF_ERROR(ProcessRange());
-  return Status::OK;
+int HdfsHiveSerdeScanner::WriteFields(MemPool* pool, TupleRow* tuple_row,
+                                      int num_fields, int num_tuples) {
+  SCOPED_TIMER(scan_node_->materialize_tuple_timer());
+
+  int num_tuples_materialized = 0;
+  int start_idx = 0;
+  TSerDeInput input;
+  const char* buffer_start = field_locations_[0].start;
+
+  // Check if we have any boundary row. If so, we need to send the whole
+  // row (together with the part we read this time) to the FE for
+  // a separete call.
+  if (!boundary_row_.Empty()) {
+    input.row_start_offsets.push_back(0);
+    input.row_end_offsets.push_back(field_locations_[0].len);
+
+    // In CopyBoundaryFields, we've already concatenated the row, and put it
+    // in field_locations_[0].
+    input.data = string(field_locations_[0].start, field_locations_[0].len);
+    parse_status_ = WriteRowBatch(pool, input, &tuple_row, &num_tuples_materialized);
+    if (!parse_status_.ok()) return 0;
+
+    // If there was only the boundary row, return.
+    if (num_tuples == 1) return num_tuples_materialized;
+
+    buffer_start = field_locations_[1].start;
+    start_idx = 1;
+    input.row_start_offsets.clear();
+    input.row_end_offsets.clear();
+    boundary_row_.Clear();
+  }
+
+  // Send the byte buffer, which contains a set of whole rows we read this time,
+  // to the FE.
+  for (int i = start_idx; i < num_tuples; ++i) {
+    input.row_start_offsets.push_back(field_locations_[i].start - buffer_start);
+    input.row_end_offsets.push_back(row_end_locations_[i] - buffer_start);
+  }
+
+  // Pass a string (ByteBuffer on the Java side) through thrift.
+  // TODO: optimize this further
+  input.data = string(buffer_start, row_end_locations_[num_tuples - 1] - buffer_start);
+  parse_status_ = WriteRowBatch(pool, input, &tuple_row, &num_tuples_materialized);
+  if (!parse_status_.ok()) return 0;
+
+  return num_tuples_materialized;
 }
 
-Status HdfsHiveSerdeScanner::ProcessRange() {
-  bool eosr = stream_->eosr();
+Status HdfsHiveSerdeScanner::WriteRowBatch(
+    MemPool* pool, const TSerDeInput& input, TupleRow** tuple_row,
+    int* num_tuples_materialized) {
+  extdatasource::TRowBatch row_batch;
 
-  while (true) {
-    if (!eosr && byte_buffer_ptr_ == byte_buffer_end_) {
-      RETURN_IF_ERROR(FillByteBuffer(&eosr));
+  // Call the FE side Java serde executor
+  JNIEnv* env = getJNIEnv();
+  JniLocalFrame jni_frame;
+  RETURN_IF_ERROR(jni_frame.push(env));
+
+  jbyteArray input_bytes;
+  jbyteArray output_bytes;
+
+  RETURN_IF_ERROR(SerializeThriftMsg(env, &input, &input_bytes));
+  output_bytes = (jbyteArray)
+                 env->CallObjectMethod(executor_, executor_deser_id_, input_bytes);
+
+  // The output from the executor call is a RowBatch.
+  TSerDeOutput output;
+  RETURN_IF_ERROR(DeserializeThriftMsg(env, output_bytes, &output));
+  row_batch = output.batch;
+
+  // Materialize the contents in RowBatch to slots inside the tuple.
+  RETURN_IF_ERROR(row_converter_->ResetRowBatch(&row_batch, false));
+  while (row_converter_->HasNextRow()) {
+    RETURN_IF_ERROR(row_converter_->MaterializeNextRow(tuple_, pool));
+    (*tuple_row)->SetTuple(scan_node_->tuple_idx(), tuple_);
+    if (EvalConjuncts(*tuple_row)) {
+      ++*num_tuples_materialized;
+      tuple_ = next_tuple(tuple_);
+      *tuple_row = next_row(*tuple_row);
     }
-
-    // First, use delimited text parser to find row boundaries
-    // from the buffer.
-    MemPool* pool;
-    TupleRow* tuple_row;
-    int max_tuples = GetMemory(&pool, &tuple_, &tuple_row);
-    DCHECK_GT(max_tuples, 0);
-
-    int num_tuples = 0;
-    int num_fields = 0;
-    int num_commit = 0;
-    char* col_start;
-    char* buffer_start = byte_buffer_ptr_;
-
-    RETURN_IF_ERROR(delimited_text_parser_->ParseFieldLocations(
-        max_tuples, byte_buffer_read_size_, &byte_buffer_ptr_,
-        &row_end_locations_[0], &field_locations_[0], &num_tuples,
-        &num_fields, &col_start));
-
-    // Construct a TSerDeInput which consists of the byte buffer,
-    // a list of start position offsets, and a list of end position offsets
-    // for each row in the buffer.
-    TSerDeInput input;
-
-    for (int i = 0; i < num_tuples; ++i) {
-      input.row_start_offsets.push_back(field_locations_[i].start - buffer_start);
-      input.row_end_offsets.push_back(row_end_locations_[i] - buffer_start);
-    }
-
-    // Pass a string (ByteBuffer on the Java side) through thrift.
-    // TODO: optimize this further
-    input.data = string(buffer_start, row_end_locations_[num_tuples - 1] - buffer_start);
-
-    // Call the FE side Java serde executor
-    JNIEnv* env = getJNIEnv();
-    JniLocalFrame jni_frame;
-    RETURN_IF_ERROR(jni_frame.push(env));
-
-    jbyteArray input_bytes;
-    jbyteArray output_bytes;
-
-    RETURN_IF_ERROR(SerializeThriftMsg(env, &input, &input_bytes));
-    output_bytes = (jbyteArray)
-        env->CallObjectMethod(executor_, executor_deser_id_, input_bytes);
-
-    // The output from the executor call is a RowBatch.
-    TSerDeOutput output;
-    RETURN_IF_ERROR(DeserializeThriftMsg(env, output_bytes, &output));
-
-    // Don't need to verify here since we trust our FE code.
-    RETURN_IF_ERROR(row_converter_->ResetRowBatch(&output.batch, false));
-    while (row_converter_->HasNextRow()) {
-      RETURN_IF_ERROR(row_converter_->MaterializeNextRow(tuple_, pool));
-      tuple_row->SetTuple(scan_node_->tuple_idx(), tuple_);
-      if (EvalConjuncts(tuple_row)) {
-        ++num_commit;
-        tuple_ = next_tuple(tuple_);
-        tuple_row = next_row(tuple_row);
-      }
-    }
-
-    COUNTER_ADD(scan_node_->rows_read_counter(), num_tuples);
-
-    // Commit the rows to the row batch and scan node
-    RETURN_IF_ERROR(CommitRows(num_commit));
-    if ((byte_buffer_ptr_ == byte_buffer_end_) && eosr) break;
-    if (scan_node_->ReachedLimit()) break;
   }
 
   return Status::OK;
 }
 
-Status HdfsHiveSerdeScanner::FillByteBuffer(bool* eosr) {
-  RETURN_IF_ERROR(stream_->GetBuffer(false,
-      reinterpret_cast<uint8_t**>(&byte_buffer_ptr_),
-      &byte_buffer_read_size_));
-
-  *eosr = stream_->eosr();
-  byte_buffer_end_ = byte_buffer_ptr_ + byte_buffer_read_size_;
-
-  return Status::OK;
-}
-
 void HdfsHiveSerdeScanner::Close() {
-  AddFinalRowBatch();
-  scan_node_->RangeComplete(THdfsFileFormat::TEXT, THdfsCompression::NONE);
-
   // clean up JNI stuff
   if (executor_ != NULL) {
     JNIEnv* env = getJNIEnv();
@@ -240,5 +214,5 @@ void HdfsHiveSerdeScanner::Close() {
     if (!status.ok()) state_->LogError(status.msg());
   }
 
-  HdfsScanner::Close();
+  HdfsTextScanner::Close();
 }

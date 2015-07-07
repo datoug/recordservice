@@ -27,6 +27,8 @@ struct HdfsFileDesc;
 
 // HdfsScanner implementation that understands text-formatted records.
 // Uses SSE instructions, if available, for performance.
+// TODO: maybe it's cleaner to create a HdfsTextScannerBase and have
+// HdfsTextScanner and HdfsHiveSerdeScanner to subclass it?
 class HdfsTextScanner : public HdfsScanner {
  public:
   HdfsTextScanner(HdfsScanNode* scan_node, RuntimeState* state);
@@ -51,6 +53,11 @@ class HdfsTextScanner : public HdfsScanner {
   static const char* LLVM_CLASS_NAME;
 
  protected:
+  // Internal implementation for IssueInitialRanges. This is shared between
+  // HdfsTextScanner and its subclasses.
+  static Status IssueInitialRangesInternal(const THdfsFileFormat::type file_format,
+      HdfsScanNode* scan_node, const std::vector<HdfsFileDesc*>& files);
+
   // Reset the scanner.  This clears any partial state that needs to
   // be cleared when starting or when restarting after an error.
   Status ResetScanner();
@@ -67,6 +74,37 @@ class HdfsTextScanner : public HdfsScanner {
   // True if we are parsing the header for this scanner.
   bool only_parsing_header_;
 
+  // Return field locations from the Delimited Text Parser.
+  std::vector<FieldLocation> field_locations_;
+
+  // Pointers into 'byte_buffer_' for the end ptr locations for each row
+  // processed in the current batch.  Used to report row errors.
+  std::vector<char*> row_end_locations_;
+
+  // Helper class for picking fields and rows from delimited text.
+  boost::scoped_ptr<DelimitedTextParser> delimited_text_parser_;
+
+  // Mem pool for boundary_row_ and boundary_column_.
+  boost::scoped_ptr<MemPool> boundary_pool_;
+
+  // Helper string for dealing with input rows that span file blocks.
+  // We keep track of a whole line that spans file blocks to be able to report
+  // the line as erroneous in case of parsing errors.
+  StringBuffer boundary_row_;
+
+  // Time parsing text files
+  RuntimeProfile::Counter* parse_delimiter_timer_;
+
+  // Process the entire scan range, reading bytes from context and appending
+  // materialized row batches to the scan node.  *num_tuples returns the
+  // number of tuples parsed.  past_scan_range is true if this is processing
+  // beyond the end of the scan range and this function should stop after
+  // finding one tuple.
+  virtual Status ProcessRange(int* num_tuples, bool past_scan_range);
+
+  // Reads past the end of the scan range for the next tuple end.
+  virtual Status FinishScanRange();
+
  private:
   const static int NEXT_BLOCK_READ_SIZE = 1024; //bytes
 
@@ -80,16 +118,6 @@ class HdfsTextScanner : public HdfsScanner {
   // and no more processing neesd to be done in this range (i.e. there are really large
   // columns)
   Status FindFirstTuple(bool* tuple_found);
-
-  // Process the entire scan range, reading bytes from context and appending
-  // materialized row batches to the scan node.  *num_tuples returns the
-  // number of tuples parsed.  past_scan_range is true if this is processing
-  // beyond the end of the scan range and this function should stop after
-  // finding one tuple.
-  Status ProcessRange(int* num_tuples, bool past_scan_range);
-
-  // Reads past the end of the scan range for the next tuple end.
-  Status FinishScanRange();
 
   // Fills the next byte buffer from the context.  This will block if there are no bytes
   // ready.  Updates byte_buffer_ptr_, byte_buffer_end_ and byte_buffer_read_size_.
@@ -116,13 +144,20 @@ class HdfsTextScanner : public HdfsScanner {
 
   // Writes the intermediate parsed data into slots, outputting
   // tuples to row_batch as they complete.
+  //
+  // This function should be called after data has been parsed and
+  // 'field_locations' has been populated. It should assume there exists boundary
+  // column/rows when it is called. In case there's an error, it should update
+  // 'parse_status_' and return 0.
+  //
   // Input Parameters:
-  //  mempool: MemPool to allocate from for field data
-  //  num_fields: Total number of fields contained in parsed_data_
-  //  num_tuples: Number of tuples in parsed_data_. This includes the potential
+  //  mempool: MemPool to allocate from for field data.
+  //  num_fields: Total number of fields contained in parsed data.
+  //  num_tuples: Number of tuples in parsed data. This includes the potential
   //    partial tuple at the beginning of 'field_locations_'.
-  // Returns the number of tuples added to the row batch.
-  int WriteFields(MemPool*, TupleRow* tuple_row_mem, int num_fields, int num_tuples);
+  // Returns the number of tuples added to the row batch. In case of error, returns 0.
+  virtual int WriteFields(MemPool* mempool, TupleRow* tuple_row_mem,
+                          int num_fields, int num_tuples);
 
   // Utility function to write out 'num_fields' to 'tuple_'.  This is used to parse
   // partial tuples.  Returns bytes processed.  If copy_strings is true, strings
@@ -133,29 +168,16 @@ class HdfsTextScanner : public HdfsScanner {
   // row_idx is 0-based (in current batch) where the parse error occured.
   virtual void LogRowParseError(int row_idx, std::stringstream*);
 
-  // Mem pool for boundary_row_ and boundary_column_.
-  boost::scoped_ptr<MemPool> boundary_pool_;
-
-  // Helper string for dealing with input rows that span file blocks.
-  // We keep track of a whole line that spans file blocks to be able to report
-  // the line as erroneous in case of parsing errors.
-  StringBuffer boundary_row_;
+  // Return the specific HDFS file format associated with this scanner.
+  virtual inline THdfsFileFormat::type GetTHdfsFileFormat() const {
+    return THdfsFileFormat::TEXT;
+  }
 
   // Helper string for dealing with columns that span file blocks.
   StringBuffer boundary_column_;
 
   // Index into materialized_slots_ for the next slot to output for the current tuple.
   int slot_idx_;
-
-  // Helper class for picking fields and rows from delimited text.
-  boost::scoped_ptr<DelimitedTextParser> delimited_text_parser_;
-
-  // Return field locations from the Delimited Text Parser.
-  std::vector<FieldLocation> field_locations_;
-
-  // Pointers into 'byte_buffer_' for the end ptr locations for each row
-  // processed in the current batch.  Used to report row errors.
-  std::vector<char*> row_end_locations_;
 
   // Pointer into byte_buffer that is the start of the current batch being
   // processed.
@@ -175,9 +197,6 @@ class HdfsTextScanner : public HdfsScanner {
   // If false, there is a tuple that is partially materialized (i.e. partial_tuple_
   // contains data)
   bool partial_tuple_empty_;
-
-  // Time parsing text files
-  RuntimeProfile::Counter* parse_delimiter_timer_;
 };
 
 }
