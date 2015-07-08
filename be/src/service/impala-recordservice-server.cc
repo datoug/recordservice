@@ -565,12 +565,13 @@ string FilePatternToRegex(const string& pattern) {
   return result;
 }
 
-Status ReadFileHeader(hdfsFS fs, const char* path, uint8_t header[3]) {
-  hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, sizeof(header), 0, 0);
+Status ReadFileHeader(hdfsFS fs, const char* path,
+    uint8_t header[HADOOP_FILE_HEADER_SIZE]) {
+  hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, HADOOP_FILE_HEADER_SIZE, 0, 0);
   if (file == NULL) return Status("Could not open file.");
-  int bytes_read = hdfsRead(fs, file, header, sizeof(header));
+  int bytes_read = hdfsRead(fs, file, header, HADOOP_FILE_HEADER_SIZE);
   hdfsCloseFile(fs, file);
-  if (bytes_read != sizeof(header)) return Status("Could not read header.");
+  if (bytes_read != HADOOP_FILE_HEADER_SIZE) return Status("Could not read header.");
   return Status::OK;
 }
 

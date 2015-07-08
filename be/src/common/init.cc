@@ -56,10 +56,12 @@ DEFINE_int32(max_log_files, 10, "Maximum number of log files to retain per sever
 // in ways the authors of redaction rules can't anticipate.
 DECLARE_string(vmodule);
 
+#ifndef ADDRESS_SANITIZER
 // tcmalloc will hold on to freed memory. We will periodically release the memory back
 // to the OS if the extra memory is too high. If the memory used by the application
 // is less than this fraction of the total reserved memory, free it back to the OS.
 static const float TCMALLOC_RELEASE_FREE_MEMORY_FRACTION = 0.5f;
+#endif
 
 using namespace boost;
 using std::string;

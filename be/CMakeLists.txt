@@ -47,7 +47,7 @@ SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFI
 SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 
 if (IMPALA_TOOLCHAIN)
-  SET(CXX_GCC_FLAGS "${CXX_COMMON_FLAGS} -static-libstdc++")
+  SET(CXX_GCC_FLAGS "-static-libstdc++")
 endif()
 
 # For any clang builds (currently only ASAN):
@@ -118,10 +118,17 @@ if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
 
   SET(CMAKE_CXX_COMPILER ${CLANG_TRUNK_EXECUTABLE})
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef")
-  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-return-type-c-linkage")
   # TODO: remove this when we enable c++11
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++11-extensions")
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --gcc-toolchain=${GCC_ROOT_DIR}")
+
+  # gutil's CMakeLists references CXX_COMMON_FLAGS directly. gutil has a lot of warnings
+  # so silence a bunch more. (The exact warnings are compiler dependent, hence we add
+  # more of them here.
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedef")
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-function")
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-const-variable")
 endif ()
 
 
@@ -157,8 +164,9 @@ add_definitions(-DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H -DHAVE_NETDB_H)
 # Note that we don't enable any optimization. We want unoptimized IR since we will be
 # modifying it at runtime, then re-compiling (and optimizing) the modified code. The final
 # optimizations will be less effective if the initial code is also optimized.
-set(CLANG_IR_CXX_FLAGS "-emit-llvm" "-c" "-DIR_COMPILE" "-DNDEBUG"
-  "-DHAVE_INTTYPES_H" "-DHAVE_NETINET_IN_H" "-DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
+set(CLANG_IR_CXX_FLAGS "-emit-llvm" "-c" "-DIR_COMPILE" "-DNDEBUG" "-Wno-deprecated"
+  "-Wno-c++11-extensions" "-DHAVE_INTTYPES_H" "-DHAVE_NETINET_IN_H" 
+  "-DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
 
 # setup doc generation with Doxygen
 find_package(Doxygen)

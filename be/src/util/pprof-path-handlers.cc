@@ -36,7 +36,9 @@ using namespace boost;
 
 DECLARE_string(heap_profile_dir);
 
+#ifndef ADDRESS_SANITIZER
 const int PPROF_DEFAULT_SAMPLE_SECS = 30; // pprof default sample time in seconds.
+#endif
 
 // GLog already implements symbolization. Just import their hidden symbol.
 namespace google {
