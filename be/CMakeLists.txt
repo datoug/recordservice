@@ -25,24 +25,29 @@ enable_testing()
 #      to CMakeFiles/<currentdir>.dir/<srcfile>.s
 PROJECT(ASSEMBLER)
 
+# If TRUE, compile with clang trunk (from toolchain). This is set when using ASAN
+# but needs more work to be set for other builds.
+# TODO: this is a better development compiler. Get this to work.
+SET(USE_CLANG_TRUNK "FALSE")
+SET(GCC_ROOT_DIR "$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}")
+
 # compiler flags that are common across debug/release builds
 #  - Wall: Enable all warnings.
 #  - Wno-sign-compare: suppress warnings for comparison between signed and unsigned
 #    integers
 #   -fno-strict-aliasing: disable optimizations that assume strict aliasing. This
 #       is unsafe to do if the code uses casts (which we obviously do).
-#  - Wno-unknown-pragmas: suppress warnings for unknown (compiler specific) pragmas
 #  - Wno-deprecated: gutil contains deprecated headers
 #  - pthread: enable multithreaded malloc
 #  - DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG: enable nanosecond precision for boost
 SET(CXX_COMMON_FLAGS "-Wall -Wno-sign-compare -Wno-unknown-pragmas -pthread")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fno-strict-aliasing")
-SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated -Wno-unused-local-typedefs")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
 SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 
 if (IMPALA_TOOLCHAIN)
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -static-libstdc++")
+  SET(CXX_GCC_FLAGS "${CXX_COMMON_FLAGS} -static-libstdc++")
 endif()
 
 # For any clang builds (currently only ASAN):
@@ -74,7 +79,7 @@ endif()
 SET(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -ggdb -gdwarf-2")
 SET(CXX_FLAGS_RELEASE "${CXX_GCC_FLAGS} -O3 -DNDEBUG -gdwarf-2")
 SET(CXX_FLAGS_ADDRESS_SANITIZER
-    "-O1 -g -fsanitize=address -fno-omit-frame-pointer -DADDRESS_SANITIZER")
+    "${CXX_CLANG_FLAGS} -O1 -g -fsanitize=address -fno-omit-frame-pointer -DADDRESS_SANITIZER")
 
 # if no build build type is specified, default to debug builds
 if (NOT CMAKE_BUILD_TYPE)
@@ -93,11 +98,32 @@ elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "CODE_COVERAGE_DEBUG")
 elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "CODE_COVERAGE_RELEASE")
   SET(CMAKE_CXX_FLAGS "${CXX_FLAGS_RELEASE} ${CXX_COVERAGE_FLAGS}")
 elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "ADDRESS_SANITIZER")
-  SET(CMAKE_CXX_COMPILER ${LLVM_CLANG_EXECUTABLE})
-  SET(CMAKE_CXX_FLAGS ${CXX_FLAGS_ADDRESS_SANITIZER})
+  SET(USE_CLANG_TRUNK "TRUE")
+  SET(CMAKE_CXX_FLAGS "${CXX_FLAGS_ADDRESS_SANITIZER}")
 else()
   message(FATAL_ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}")
 endif ()
+
+if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
+  # Look for the clang trunk compiler and set some additional compiler flags.
+  find_program(CLANG_TRUNK_EXECUTABLE clang++
+    PATHS
+    $ENV{IMPALA_TOOLCHAIN}/llvm-trunk/bin
+    NO_DEFAULT_PATH
+  )
+  if (CLANG_TRUNK_EXECUTABLE STREQUAL "CLANG_TRUNK_EXECUTABLE-NOTFOUND")
+    message(FATAL_ERROR "Could not find clang++")
+  endif ()
+  MESSAGE(STATUS "Using clang compiler: ${CLANG_TRUNK_EXECUTABLE}")
+
+  SET(CMAKE_CXX_COMPILER ${CLANG_TRUNK_EXECUTABLE})
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
+  # TODO: remove this when we enable c++11
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++11-extensions")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --gcc-toolchain=${GCC_ROOT_DIR}")
+endif ()
+
 
 # Add flags that are common across build types
 #  - fverboase-asm creates better annotated assembly.  This doesn't seem to affect
@@ -106,6 +132,22 @@ endif ()
 SET(CMAKE_CXX_FLAGS "${CXX_COMMON_FLAGS} ${CMAKE_CXX_FLAGS}")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fverbose-asm")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LLVM_CFLAGS}")
+
+# Use ccache when found and not explicitly disabled by setting the DISABLE_CCACHE envvar.
+find_program(CCACHE ccache)
+if (CCACHE AND NOT DEFINED ENV{DISABLE_CCACHE})
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+  if ("${CMAKE_BUILD_TYPE}" STREQUAL "ADDRESS_SANITIZER")
+    # Need to set CCACHE_CPP so that ccache calls clang with the original source file for
+    # both preprocessing and compilation. Otherwise, ccache will use clang to preprocess
+    # the file and then call clang with the preprocessed output if not cached. However,
+    # the preprocessed output from clang may contain code (e.g. from macro expansions)
+    # that generates compilation warnings that would not be reported if compiling the
+    # original source directly with clang.
+    SET(ENV{CCACHE_CPP} YES)
+  endif()
+endif()
 
 # Thrift requires these definitions for some types that we use
 add_definitions(-DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H -DHAVE_NETDB_H)
@@ -161,9 +203,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/generated-sources)
 set(CLANG_INCLUDE_FLAGS)
 if (IMPALA_TOOLCHAIN)
   set(CLANG_INCLUDE_FLAGS "${CLANG_INCLUDE_FLAGS}"
-    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2"
-    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2/backward"
-    "-I$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}/include/c++/4.9.2/x86_64-unknown-linux-gnu"
+    "-I${GCC_ROOT_DIR}/include/c++/4.9.2"
+    "-I${GCC_ROOT_DIR}/include/c++/4.9.2/backward"
+    "-I${GCC_ROOT_DIR}/include/c++/4.9.2/x86_64-unknown-linux-gnu"
   )
 endif()
 
