@@ -67,7 +67,6 @@ if (IMPALA_TOOLCHAIN)
   set_dep_root(LLVM)
   set_dep_root(LZ4)
   set_dep_root(OPENLDAP)
-  set_dep_root(OPENSSL)
   set_dep_root(RE2)
   set_dep_root(RAPIDJSON)
   set_dep_root(SNAPPY)
@@ -101,11 +100,7 @@ set(LIBS ${LIBS} ${Boost_LIBRARIES})
 message(STATUS "Boost include dir: " ${Boost_INCLUDE_DIRS})
 message(STATUS "Boost libraries: " ${Boost_LIBRARIES})
 
-# Hint the OpenSSL path
-if (IMPALA_TOOLCHAIN)
-  set(OPENSSL_ROOT_DIR ${OPENSSL_ROOT})
-endif()
-
+# OpenSSL is special in that we don't statically link it (we can't).
 find_package(OpenSSL REQUIRED)
 include_directories(${OPENSSL_INCLUDE_DIR})
 set(OPENSSL_LIBS ${OPENSSL_SSL} ${OPENSSL_CRYPTO})

@@ -46,10 +46,6 @@ SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
 SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 
-if (IMPALA_TOOLCHAIN)
-  SET(CXX_GCC_FLAGS "-static-libstdc++")
-endif()
-
 # For any clang builds (currently only ASAN):
 #   -Qunused-arguments: quiet warnings about unused arguments to clang because ccache
 #        makes extra calls to clang which may have extra includes (-I) that are unused.
@@ -60,7 +56,7 @@ SET(CXX_CLANG_FLAGS "-Qunused-arguments -fcolor-diagnostics")
 #   -g: Enable symbols for profiler tools
 #   -Wno-unused-local-typedefs: Do not warn for local typedefs that are unused.
 if (IMPALA_TOOLCHAIN)
-  SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs")
+  SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs -static-libstdc++")
 else()
   # Older gcc's (rhel5), don't support -Wno-unused-local-typedefs.
   SET(CXX_GCC_FLAGS "-g")
