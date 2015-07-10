@@ -13,6 +13,7 @@ from subprocess import call
 
 from tests.common.impala_test_suite import *
 
+@pytest.mark.execute_serially
 class TestScanAllTypes(ImpalaTestSuite):
   TEST_TBL_NAME = 'serde_alltypes'
 
