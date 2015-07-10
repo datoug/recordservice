@@ -851,7 +851,7 @@ public class Frontend {
     // Limit is populated to each task, and since we don't have coordinator to further
     // apply the limit to the results gathered from each task, the final result
     // would be incorrect.
-    if (node.limit > 0) throw new AnalysisException(UNSUPPORTED_ERROR);
+    if (node.limit >= 0) throw new AnalysisException(UNSUPPORTED_ERROR);
 
     return request;
   }
