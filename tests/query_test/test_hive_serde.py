@@ -23,13 +23,11 @@ class TestScanAllTypes(ImpalaTestSuite):
 
   @classmethod
   def add_test_dimensions(cls):
-    BATCH_SIZES = [0, 1, 16]
     MAX_SCAN_RANGE_LENGTHS = [1, 2, 5, 16, 17, 32]
     super(TestScanAllTypes, cls).add_test_dimensions()
     # Only test text format
     cls.TestMatrix.add_dimension(
         TestDimension('max_scan_range_length', *MAX_SCAN_RANGE_LENGTHS))
-    cls.TestMatrix.add_dimension( TestDimension('batch_size', *BATCH_SIZES))
     cls.TestMatrix.add_constraint(lambda v:\
         v.get_value('table_format').file_format == 'text')
 
@@ -66,8 +64,6 @@ class TestScanAllTypes(ImpalaTestSuite):
     call(["hive", "-e", "DROP TABLE functional.%s" % (self.TEST_TBL_NAME)])
 
   def test_scan(self, vector):
-    new_vector = deepcopy(vector)
-    new_vector.get_value('exec_option')['max_scan_range_length'] =\
+    vector.get_value('exec_option')['max_scan_range_length'] =\
         vector.get_value('max_scan_range_length')
-    new_vector.get_value('exec_option')['batch_size'] = vector.get_value('batch_size')
-    self.run_test_case('QueryTest/hive_serde', new_vector)
+    self.run_test_case('QueryTest/hive_serde', vector)
