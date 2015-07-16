@@ -1,0 +1,203 @@
+// Licensed to Cloudera, Inc. under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  Cloudera, Inc. licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+{
+  "name" : "RECORD_SERVICE",
+  "label" : "Record Service",
+  "description" : "The Record Service",
+  "version" : "1.0",
+  "compatibility" : {
+    "cdhVersion" : {
+      "min" : "5",
+      "max" : "5"
+    }
+  },
+  "runAs" : {
+    "user" : "recordservice",
+    "group" : "recordservice"
+    // TODO: add it to hive/impala group
+  },
+  "icon" : "images/icon.png",
+  "parcel" : {
+    /* Automatically add the record service parcel repository */
+    "repoUrl" : "http://repos.jenkins.cloudera.com/recordservice-nightly/parcels/latest/",
+    "requiredTags" : ["recordservice", "cdh"]
+  },
+  "serviceDependencies" : [
+    {
+      "name" : "HDFS",
+      "required" : "true"
+    },
+    {
+      "name" : "HIVE",
+      "required" : "true"
+    },
+    {
+      "name"  : "SENTRY",
+      "required" : "false"
+    },
+    {
+      "name" : "HBASE",
+      "required" : "false"
+    },
+    {
+      "name" : "IMPALA",
+      "required" : "true"
+    }
+  ],
+  // TODO: add more configs
+  // kerberos_reinit_interval
+  // principal
+  // keytab_file
+  "parameters" : [
+    {
+      "name" : "recordservice_planner_port",
+      "label" : "Record Service Planner Port",
+      "description" : "record service planner port number",
+      "required" : "true",
+          "type" : "port",
+          "default" : 40010
+    },
+    {
+      "name" : "recordservice_worker_port",
+      "label" : "Record Service worker Port",
+      "description" : "record service worker port number",
+      "required" : "true",
+      "type" : "port",
+      "default" : 40110
+    },
+    {
+      "name" : "state_store_subscriber_port",
+      "label" : "state store subscriber port",
+      "description" : "state store subscriber port",
+      "required" : "true",
+      "type" : "port",
+      "default" : 23000
+    },
+    {
+      "name" : "statestore_subscriber_timeout_seconds",
+      "label" : "statestore subscriber timeout",
+      "description" : "statestore subscriber timeout",
+      "required" : "true",
+      "type" : "long",
+      "default" : 30,
+      "unit" : "seconds"
+    },
+    {
+      "name" : "log_filename",
+      "label" : "log filename",
+      "description" : "log filename",
+      "required" : "true",
+      "type" : "string",
+      "default" : "recordserviced"
+    },
+    {
+      "name" : "hostname",
+      "label" : "hostname",
+      "description" : "hostname",
+      "required" : "true",
+      "type" : "string",
+      "default" : ""
+    },
+    {
+      "name" : "state_store_host",
+      "label" : "statestore hostname",
+      "description" : "statestore hostname",
+      "required" : "true",
+      "type" : "string",
+      "default" : "vd0214.halxg.cloudera.com"
+    },
+    {
+      "name" : "state_store_port",
+      "label" : "statestore port",
+      "description" : "statestore port",
+      "required" : "true",
+      "type" : "port",
+      "default" : 24000
+    },
+    {
+      "name" : "catalog_service_host",
+      "label" : "catalog service hostname",
+      "description" : "catalog service hostname",
+      "required" : "true",
+      "type" : "string",
+      "default" : "vd0214.halxg.cloudera.com"
+    },
+    {
+      "name" : "catalog_service_port",
+      "label" : "catalog service port",
+      "description" : "catalog service port",
+      "required" : "true",
+      "type" : "port",
+      "default" : 26000
+    },
+    {
+      "name" : "webservice_port",
+      "label" : "webservice port for debug",
+      "description" : "webservice port for debug",
+      "required" : "true",
+      "type" : "port",
+      "default" : 35010
+    },
+    // TODO: create log dir for recordservice use only
+    {
+      "name" : "log_dir",
+      "label" : "log directory for recordservice",
+      "description" : "log directory for recordservice",
+      "required" : "true",
+      "type" : "string",
+      "default" : "/var/log/recordserviced"
+    }
+  ],
+  "roles" : [
+  // TODO: add new role to start catalog and statestore,
+  // so that we do not have to rely on impala.
+    {
+      "name" : "RECORD_SERVICE_PW",
+      "label" : "Record Service Planner and Worker",
+      "pluralLabel" : "record service planner and worker",
+      "logging" : {
+        "dir" : "/var/log/recordserviced",
+        "filename" : "recordserviced.INFO"
+      },
+      "startRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "start" ],
+        "environmentVariables" : {
+          "PLANNER_PORT" : "${recordservice_planner_port}",
+          "WORKER_PORT" : "${recordservice_worker_port}",
+          "STATESTORE_SUB_PORT" : "${state_store_subscriber_port}",
+          "STATESTORE_SUB_TIMEOUT_SEC" : "${statestore_subscriber_timeout_seconds}",
+          "LOG_FILENAME" : "${log_filename}",
+          "HOSTNAME" : "${host}",
+          "STATESTORE_HOST" : "${state_store_host}",
+          "STATESTORE_PORT" : "${state_store_port}",
+          "CATALOG_SERVICE_HOST" : "${catalog_service_host}",
+          "CATALOG_SERVICE_PORT" : "${catalog_service_port}",
+          "WEBSERVICE_PORT" : "${webservice_port}",
+          "LOG_DIR" : "${log_dir}"
+        }
+      },
+      "stopRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "stopAll" ],
+        "environmentVariables" : {
+          "MAIN_PROCESS" : "recordserviced"
+        },
+        "timeout" : 180000
+      }
+    }
+  ]
+}
