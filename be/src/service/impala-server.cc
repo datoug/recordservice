@@ -160,12 +160,6 @@ DECLARE_bool(compact_catalog_topic);
 
 DEFINE_int32(recordservice_planner_port, 40000, "Port to run RecordService planner");
 DEFINE_int32(recordservice_worker_port, 40100, "Port to run RecordService worker");
-// FIXME: remove this. This is a stopgap until we have delegation tokens working.
-// It's very likely that we can't run MR jobs with kerberized workers without
-// delegation tokens and it requires keytabs to be distributed. For now, we can
-// just kerberize the planner service.
-DEFINE_bool(recordservice_allow_kerberized_worker, false,
-    "If false, worker service is never kerberized.");
 
 namespace impala {
 
@@ -1954,11 +1948,6 @@ Status ImpalaServer::StartRecordServiceServices(ExecEnv* exec_env,
 
   if (recordservice_worker != NULL && worker_port != 0) {
     AuthProvider* auth_provider = AuthManager::GetInstance()->GetExternalAuthProvider();
-    if (!FLAGS_recordservice_allow_kerberized_worker) {
-      // We're never going to kerberize worker with this flag set to false; always
-      // use the no-auth provider.
-      auth_provider = AuthManager::GetInstance()->GetNoAuthProvider();
-    }
     RETURN_IF_ERROR(CreateServer<recordservice::RecordServiceWorkerProcessor>(
           exec_env, server, auth_provider,
           worker_port, RECORD_SERVICE_WORKER_SERVER_NAME,
