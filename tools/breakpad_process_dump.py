@@ -35,8 +35,8 @@ def run_shell_cmd(cmd):
   return 0
 
 if __name__ == "__main__":
-  if len(sys.argv) != 3:
+  if len(args) != 2:
     sys.exit("usage: [mini dump] [root symbols directory]")
 
-  cmd = options.stackwalk_binary + " " + sys.argv[1] + " " + sys.argv[2]
+  cmd = options.stackwalk_binary + " " + args[0] + " " + args[1]
   run_shell_cmd(cmd)

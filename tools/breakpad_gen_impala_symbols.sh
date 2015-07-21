@@ -19,11 +19,19 @@
 # things we don't ship (e.g. libjvm.so) and .so's from the system that we don't
 # ship (e.g. libpthread.so) We'd store the symbol files per platform and per release.
 
-# Exit on reference to uninitialized variable
-set -u
-
 # Exit on non-zero return value
-set -e
+set -ex
 
 cd $IMPALA_HOME/be/build/debug
-$IMPALA_HOME/tools/breakpad_gen_symbols.py /tmp/symbols service/impalad codegen/libCodeGen.so runtime/libRuntime.so transport/libThriftSaslTransport.so rpc/libRpc.so exec/libExec.so thrift/libImpalaThrift.so exprs/libExprs.so common/libGlobalFlags.so common/libCommon.so resourcebroker/libResourceBroker.so catalog/libCatalog.so service/libfesupport.so service/libService.so statestore/libStatestore.so udf/libUdf.so util/libUtil.so util/libloggingsupport.so
+
+export CMD=$IMPALA_HOME/tools/breakpad_gen_symbols.py
+if [[ -e $IMPALA_TOOLCHAIN ]]; then
+  export CMD="$CMD --dump_syms=$IMPALA_TOOLCHAIN/breakpad-$IMPALA_BREAKPAD_VERSION/bin/dump_syms"
+fi
+
+$CMD /tmp/symbols service/impalad
+if [ -e codegen/libCodeGen.so ]
+then
+  # Dynamically linked, generated symbols for shared objects as well.
+  $CMD /tmp/symbols service/impalad codegen/libCodeGen.so runtime/libRuntime.so transport/libThriftSaslTransport.so rpc/libRpc.so exec/libExec.so thrift/libImpalaThrift.so exprs/libExprs.so common/libGlobalFlags.so common/libCommon.so resourcebroker/libResourceBroker.so catalog/libCatalog.so service/libfesupport.so service/libService.so statestore/libStatestore.so udf/libUdf.so util/libUtil.so util/libloggingsupport.so
+fi

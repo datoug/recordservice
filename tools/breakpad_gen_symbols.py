@@ -41,10 +41,10 @@ def mkdir_if_not_exist(p):
     os.makedirs(p)
 
 if __name__ == "__main__":
-  if len(sys.argv) < 3:
+  if len(args) < 2:
     sys.exit("usage: [output dir] [list of binaries]");
 
-  out_dir = sys.argv[1]
+  out_dir = args[0]
   mkdir_if_not_exist(out_dir)
 
   # For each binary, we need to:
@@ -53,15 +53,15 @@ if __name__ == "__main__":
   #  put the symbol file with a particular directory structure in out_dir
   #    - out_dir/<binary_name>/<HASH>/<binary_name>.sym
   tmp_sym_file = out_dir + "/sym.sym"
-  for i in range(2, len(sys.argv)):
-    cmd = options.dump_syms_binary + " " + sys.argv[i] + " > " + tmp_sym_file
+  for i in range(1, len(args)):
+    cmd = options.dump_syms_binary + " " + args[i] + " > " + tmp_sym_file
     run_shell_cmd(cmd)
     with open(tmp_sym_file, 'r') as f:
       first_line = f.readline().strip()
       fields = first_line.split(' ')
       if len(fields) != 5:
         sys.exit("Unexpected symbol file format. First line:\n  " + first_line +
-          "\nshould contain 5 fields. The binary is:\n  " + sys.argv[i])
+          "\nshould contain 5 fields. The binary is:\n  " + args[i])
       sym_dir = out_dir + "/" + fields[4] + "/" + fields[3]
       mkdir_if_not_exist(sym_dir)
       shutil.move(tmp_sym_file, sym_dir + "/" + fields[4] + ".sym")
