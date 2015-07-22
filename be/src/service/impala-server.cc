@@ -83,6 +83,7 @@ using namespace apache::thrift;
 using namespace beeswax;
 using namespace boost::posix_time;
 using namespace strings;
+using namespace rapidjson;
 
 DECLARE_int32(be_port);
 DECLARE_string(nn);
@@ -325,9 +326,12 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
 
   // Register the membership callback if required
   if (exec_env->subscriber() != NULL) {
-    StatestoreSubscriber::UpdateCallback cb =
-        bind<void>(mem_fn(&ImpalaServer::MembershipCallback), this, _1, _2);
-    exec_env->subscriber()->AddTopic(SimpleScheduler::IMPALA_MEMBERSHIP_TOPIC, true, cb);
+    if (!exec_env->is_record_service()) {
+      StatestoreSubscriber::UpdateCallback cb =
+          bind<void>(mem_fn(&ImpalaServer::MembershipCallback), this, _1, _2);
+      exec_env->subscriber()->AddTopic(
+          SimpleScheduler::IMPALA_MEMBERSHIP_TOPIC, true, cb);
+    }
 
     // If we are running the RecordService services in this daemon, don't register
     // to the catalog yet. Only register if this starts up a planner service.
@@ -1482,9 +1486,10 @@ void ImpalaServer::RecordServiceMembershipCallback(
             RECORD_SERVICE_PLANNER_MEMBERSHIP_TOPIC :
             RECORD_SERVICE_WORKER_MEMBERSHIP_TOPIC);
 
-    BackendAddressMap& services = planner_topic ? known_recordservice_planners_ :
-        known_recordservice_workers_;
+    unordered_map<string, TBackendDescriptor>& services = planner_topic ?
+        known_recordservice_planners_ : known_recordservice_workers_;
 
+    unique_lock<mutex> l(recordservice_membership_lock_);
     if (topic == incoming_topic_deltas.end()) return;
     const TTopicDelta& delta = topic->second;
     // If this is not a delta, the update should include all entries in the topic so
@@ -1504,7 +1509,7 @@ void ImpalaServer::RecordServiceMembershipCallback(
         continue;
       }
       // This is a new item - add it to the map of known services.
-      services.insert(make_pair(item.key, backend_descriptor.address));
+      services.insert(make_pair(item.key, backend_descriptor));
     }
 
     // Process membership deletions.
@@ -1562,6 +1567,24 @@ void ImpalaServer::RecordServiceMembershipCallback(
         subscriber_topic_updates->pop_back();
       }
     }
+  }
+}
+
+void ImpalaServer::GetRecordServiceMembership(Scheduler::BackendList* planners,
+    Scheduler::BackendList* workers) {
+  planners->clear();
+  workers->clear();
+
+  unique_lock<mutex> l(recordservice_membership_lock_);
+  for (unordered_map<string, TBackendDescriptor>::const_iterator it =
+          known_recordservice_planners_.begin();
+      it != known_recordservice_planners_.end(); ++it) {
+    planners->push_back(it->second);
+  }
+  for (unordered_map<string, TBackendDescriptor>::const_iterator it =
+          known_recordservice_workers_.begin();
+      it != known_recordservice_workers_.end(); ++it) {
+    workers->push_back(it->second);
   }
 }
 

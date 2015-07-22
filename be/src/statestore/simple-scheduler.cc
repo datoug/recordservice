@@ -71,9 +71,6 @@ static const string SCHEDULER_INIT_KEY("simple-scheduler.initialized");
 static const string NUM_BACKENDS_KEY("simple-scheduler.num-backends");
 static const string DEFAULT_USER("default");
 
-static const string BACKENDS_WEB_PAGE = "/backends";
-static const string BACKENDS_TEMPLATE = "backends.tmpl";
-
 const string SimpleScheduler::IMPALA_MEMBERSHIP_TOPIC("impala-membership");
 
 static const string ERROR_USER_TO_POOL_MAPPING_NOT_FOUND(
@@ -181,13 +178,6 @@ SimpleScheduler::SimpleScheduler(const vector<TNetworkAddress>& backends,
 Status SimpleScheduler::Init() {
   LOG(INFO) << "Starting simple scheduler";
 
-  if (webserver_ != NULL) {
-    Webserver::UrlCallback backends_callback =
-        bind<void>(mem_fn(&SimpleScheduler::BackendsUrlCallback), this, _1, _2);
-    webserver_->RegisterUrlCallback(BACKENDS_WEB_PAGE, BACKENDS_TEMPLATE,
-        backends_callback);
-  }
-
   if (statestore_subscriber_ != NULL) {
     StatestoreSubscriber::UpdateCallback cb =
         bind<void>(mem_fn(&SimpleScheduler::UpdateMembership), this, _1, _2);
@@ -247,19 +237,6 @@ Status SimpleScheduler::Init() {
 bool TBackendDescriptorComparator(const TBackendDescriptor& a,
     const TBackendDescriptor& b) {
   return TNetworkAddressComparator(a.address, b.address);
-}
-
-void SimpleScheduler::BackendsUrlCallback(const Webserver::ArgumentMap& args,
-    Document* document) {
-  BackendList backends;
-  GetAllKnownBackends(&backends);
-  Value backends_list(kArrayType);
-  BOOST_FOREACH(const BackendList::value_type& backend, backends) {
-    Value str(TNetworkAddressToString(backend.address).c_str(), document->GetAllocator());
-    backends_list.PushBack(str, document->GetAllocator());
-  }
-
-  document->AddMember("backends", backends_list, document->GetAllocator());
 }
 
 void SimpleScheduler::UpdateMembership(

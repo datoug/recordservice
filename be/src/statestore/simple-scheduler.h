@@ -192,14 +192,6 @@ class SimpleScheduler : public Scheduler {
   void UpdateMembership(const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
       std::vector<TTopicDelta>* subscriber_topic_updates);
 
-  // Webserver callback that produces a list of known backends.
-  // Example output:
-  // "backends": [
-  //     "henry-metrics-pkg-cdh5.ent.cloudera.com:22000"
-  //              ],
-  void BackendsUrlCallback(const Webserver::ArgumentMap& args,
-      rapidjson::Document* document);
-
   // Determines the pool for a user and query options via request_pool_service_.
   Status GetRequestPool(const std::string& user,
       const TQueryOptions& query_options, std::string* pool) const;

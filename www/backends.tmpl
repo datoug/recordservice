@@ -23,4 +23,20 @@ limitations under the License.
 {{/backends}}
 </ul>
 
+<h2>Known planners(s): {{%planners}}</h2>
+
+<ul class="list-group">
+{{#planners}}
+<li class="list-group-item">{{.}}</li>
+{{/planners}}
+</ul>
+
+<h2>Known workers(s): {{%workers}}</h2>
+
+<ul class="list-group">
+{{#workers}}
+<li class="list-group-item">{{.}}</li>
+{{/workers}}
+</ul>
+
 {{> www/common-footer.tmpl}}

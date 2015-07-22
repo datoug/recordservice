@@ -45,6 +45,7 @@
 #include "runtime/timestamp-value.h"
 #include "runtime/types.h"
 #include "rapidjson/rapidjson.h"
+#include "statestore/scheduler.h"
 
 namespace re2 {
   class RE2;
@@ -288,6 +289,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   void CatalogUpdateCallback(const StatestoreSubscriber::TopicDeltaMap& topic_deltas,
       std::vector<TTopicDelta>* topic_updates);
+
+  // Returns the list of known RecordService planners and workers.
+  void GetRecordServiceMembership(Scheduler::BackendList* planners,
+      Scheduler::BackendList* workers);
 
   // Returns true if Impala is offline (and not accepting queries), false otherwise.
   bool IsOffline() {
@@ -1051,8 +1056,11 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // RecordService workers and planners in the cluster. Only maintained if this daemon
   // is running the planner service.
-  BackendAddressMap known_recordservice_workers_;
-  BackendAddressMap known_recordservice_planners_;
+  // Lock protects access to these data structure. Do not do any blocking calls
+  // while holding the lock.
+  boost::mutex recordservice_membership_lock_;
+  boost::unordered_map<std::string, TBackendDescriptor> known_recordservice_workers_;
+  boost::unordered_map<std::string, TBackendDescriptor> known_recordservice_planners_;
 
   // Generate unique session id for HiveServer2 session
   boost::uuids::random_generator uuid_generator_;

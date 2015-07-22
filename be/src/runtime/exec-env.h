@@ -110,8 +110,12 @@ class ExecEnv {
   // differently.
   bool is_fe_tests() { return is_fe_tests_; }
 
-  // Returns true if this daemon is running as the RecordService.
+  // Returns true if this daemon is recordserviced.
   bool is_record_service() const { return is_record_service_; }
+
+  // Returns true if this daemon is running the RecordService services
+  // (could be impalad).
+  // TODO: remove.
   bool running_record_service() const { return running_record_service_; }
 
   // Returns true if the Llama in use is pseudo-distributed, used for development
@@ -166,6 +170,10 @@ class ExecEnv {
 
   // Initialise cgroups manager, detect test RM environment and init resource broker.
   void InitRm();
+
+  // Populates the peer daemons in the document.
+  void BackendsUrlCallback(const Webserver::ArgumentMap& args,
+      rapidjson::Document* document);
 };
 
 } // namespace impala

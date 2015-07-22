@@ -32,6 +32,7 @@
 #include "runtime/thread-resource-mgr.h"
 #include "scheduling/request-pool-service.h"
 #include "service/frontend.h"
+#include "service/impala-server.h"
 #include "statestore/simple-scheduler.h"
 #include "statestore/statestore-subscriber.h"
 #include "util/debug-util.h"
@@ -53,6 +54,7 @@
 using namespace std;
 using namespace boost;
 using namespace strings;
+using namespace rapidjson;
 
 DEFINE_bool(use_statestore, true,
     "Use an external statestore process to manage cluster membership");
@@ -126,6 +128,9 @@ DEFINE_int32(resource_broker_recv_timeout, 0, "Time to wait, in ms, "
 const static string PSEUDO_DISTRIBUTED_CONFIG_KEY =
     "yarn.scheduler.include-port-in-node-name";
 
+static const string BACKENDS_WEB_PAGE = "/backends";
+static const string BACKENDS_TEMPLATE = "backends.tmpl";
+
 namespace impala {
 
 ExecEnv* ExecEnv::exec_env_ = NULL;
@@ -155,8 +160,7 @@ ExecEnv::ExecEnv(bool is_record_service, bool running_record_service)
   if (FLAGS_enable_rm) InitRm();
   // Initialize the scheduler either dynamically (with a statestore) or statically (with
   // a standalone single backend)
-  if (FLAGS_use_statestore) {
-    // FIXME: more RecordService statestore changes.
+  if (FLAGS_use_statestore && !is_record_service_) {
     TNetworkAddress subscriber_address =
         MakeNetworkAddress(FLAGS_hostname, is_record_service ?
             FLAGS_recordservice_state_store_subscriber_port :
@@ -205,7 +209,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
   request_pool_service_.reset(new RequestPoolService(metrics_.get()));
   if (FLAGS_enable_rm) InitRm();
 
-  if (FLAGS_use_statestore && statestore_port > 0) {
+  if (FLAGS_use_statestore && statestore_port > 0 && !is_record_service_) {
     TNetworkAddress subscriber_address =
         MakeNetworkAddress(hostname, subscriber_port);
     TNetworkAddress statestore_address =
@@ -285,6 +289,35 @@ Status ExecEnv::InitForFeTests() {
   mem_tracker_.reset(new MemTracker(-1, -1, "Process"));
   is_fe_tests_ = true;
   return Status::OK;
+}
+
+void PopulateDocument(Document* document, const char* topic,
+    const Scheduler::BackendList& l) {
+  Value items(kArrayType);
+  BOOST_FOREACH(const Scheduler::BackendList::value_type& e, l) {
+    Value str(TNetworkAddressToString(e.address).c_str(), document->GetAllocator());
+    items.PushBack(str, document->GetAllocator());
+  }
+  document->AddMember(topic, items, document->GetAllocator());
+}
+
+void ExecEnv::BackendsUrlCallback(const Webserver::ArgumentMap& args,
+    Document* document) {
+  if (scheduler_ != NULL) {
+    Scheduler::BackendList backends;
+    // Populate impalad backends.
+    scheduler_->GetAllKnownBackends(&backends);
+    PopulateDocument(document, "backends", backends);
+  }
+  if (running_record_service()) {
+    // Populate RecordService planner/workers.
+    DCHECK(impala_server() != NULL);
+    Scheduler::BackendList planners;
+    Scheduler::BackendList workers;
+    impala_server()->GetRecordServiceMembership(&planners, &workers);
+    PopulateDocument(document, "planners", planners);
+    PopulateDocument(document, "workers", workers);
+  }
 }
 
 Status ExecEnv::StartServices() {
@@ -389,6 +422,10 @@ Status ExecEnv::StartServices() {
   if (enable_webserver_) {
     AddDefaultUrlCallbacks(webserver_.get(), mem_tracker_.get());
     RETURN_IF_ERROR(webserver_->Start());
+    Webserver::UrlCallback backends_callback =
+        bind<void>(mem_fn(&ExecEnv::BackendsUrlCallback), this, _1, _2);
+    webserver_->RegisterUrlCallback(BACKENDS_WEB_PAGE, BACKENDS_TEMPLATE,
+        backends_callback);
   } else {
     LOG(INFO) << "Not starting webserver";
   }
