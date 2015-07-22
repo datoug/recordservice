@@ -566,12 +566,11 @@ string FilePatternToRegex(const string& pattern) {
 }
 
 Status ReadFileHeader(hdfsFS fs, const char* path,
-    uint8_t header[HADOOP_FILE_HEADER_SIZE]) {
+    uint8_t header[HADOOP_FILE_HEADER_SIZE], int* bytes_read) {
   hdfsFile file = hdfsOpenFile(fs, path, O_RDONLY, HADOOP_FILE_HEADER_SIZE, 0, 0);
   if (file == NULL) return Status("Could not open file.");
-  int bytes_read = hdfsRead(fs, file, header, HADOOP_FILE_HEADER_SIZE);
+  *bytes_read = hdfsRead(fs, file, header, HADOOP_FILE_HEADER_SIZE);
   hdfsCloseFile(fs, file);
-  if (bytes_read != HADOOP_FILE_HEADER_SIZE) return Status("Could not read header.");
   return Status::OK;
 }
 
@@ -583,6 +582,8 @@ Status DetermineFileFormat(hdfsFS fs, const string& path,
   int num_entries = 1;
   hdfsFileInfo* files = hdfsListDirectory(fs, path.c_str(), &num_entries);
   if (files == NULL) return Status("Could not list directory.");
+
+  Status status;
 
   // Look for the first name that matches the path and filter. We'll look at
   // the file format of that file. This doesn't handle the case where a directory
@@ -601,21 +602,26 @@ Status DetermineFileFormat(hdfsFS fs, const string& path,
     }
 
     uint8_t header[HADOOP_FILE_HEADER_SIZE];
-    RETURN_IF_ERROR(ReadFileHeader(fs, files[i].mName, header));
-    if (memcmp(header, AVRO_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
-      *format = THdfsFileFormat::AVRO;
-    } else if (memcmp(header, PARQUET_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
-      *format = THdfsFileFormat::PARQUET;
-    } else if (memcmp(header, SEQUENCE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
-      *format = THdfsFileFormat::SEQUENCE_FILE;
-    } else if (memcmp(header, RCFILE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
-      *format = THdfsFileFormat::RC_FILE;
+    int bytes_read;
+    status = ReadFileHeader(fs, files[i].mName, header, &bytes_read);
+    if (!status.ok()) break;
+
+    if (bytes_read == HADOOP_FILE_HEADER_SIZE) {
+      if (memcmp(header, AVRO_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+        *format = THdfsFileFormat::AVRO;
+      } else if (memcmp(header, PARQUET_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+        *format = THdfsFileFormat::PARQUET;
+      } else if (memcmp(header, SEQUENCE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+        *format = THdfsFileFormat::SEQUENCE_FILE;
+      } else if (memcmp(header, RCFILE_HEADER, HADOOP_FILE_HEADER_SIZE) == 0) {
+        *format = THdfsFileFormat::RC_FILE;
+      }
     }
     *first_file = files[i].mName;
     break;
   }
   hdfsFreeFileInfo(files, num_entries);
-  return Status::OK;
+  return status;
 }
 
 //
