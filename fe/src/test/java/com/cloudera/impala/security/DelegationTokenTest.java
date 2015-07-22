@@ -27,10 +27,23 @@ import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import com.cloudera.impala.security.ZooKeeperTokenStore.TokenStoreException;
 
 // TODO: test expiration.
 public class DelegationTokenTest {
+  // Connection to the local ZK running and a non-secure ACL.
+  public static final String ZOOKEEPER_HOSTPORT = "localhost:2181";
+  public static final String ZOOKEEPER_ACL = "world:anyone:cdrwa";
+
+  @BeforeClass
+  public static void setUpBeforeClass() throws Exception {
+    // Setup log4j for testing.
+    org.apache.log4j.BasicConfigurator.configure();
+  }
+
   // Basic tests to verify that tokens can be generated. This directly accesses
   // the imported code.
   @Test
@@ -62,11 +75,16 @@ public class DelegationTokenTest {
     mgr.stopThreads();
   }
 
-  @Test
-  public void TestTokenManager() throws IOException {
+  private void testTokenManager(boolean useZK) throws IOException {
     String userName = UserGroupInformation.getCurrentUser().getUserName();
-    DelegationTokenManager.init(new Configuration(), true);
-    DelegationTokenManager mgr = DelegationTokenManager.instance();
+    Configuration config = new Configuration();
+    if (useZK) {
+      config.set(ZooKeeperTokenStore.DELEGATION_TOKEN_STORE_ZK_CONNECT_STR,
+          ZOOKEEPER_HOSTPORT);
+      config.set(ZooKeeperTokenStore.DELEGATION_TOKEN_STORE_ZK_ACL,
+          ZOOKEEPER_ACL);
+    }
+    DelegationTokenManager mgr = new DelegationTokenManager(config, true, useZK);
 
     // Create two tokens
     byte[] token1 = mgr.getToken(userName, userName, userName).token;
@@ -114,6 +132,9 @@ public class DelegationTokenTest {
     } catch (IOException e) {
       exceptionThrown = true;
       assertTrue(e.getMessage().contains("can't be found"));
+    } catch (TokenStoreException e) {
+      exceptionThrown = true;
+      assertTrue(e.getMessage(), e.getMessage().contains("Token does not exist"));
     }
     assertTrue(exceptionThrown);
 
@@ -124,18 +145,21 @@ public class DelegationTokenTest {
     } catch (IOException e) {
       exceptionThrown = true;
       assertTrue(e.getMessage().contains("Renewal request for unknown token"));
+    } catch (TokenStoreException e) {
+      exceptionThrown = true;
+      assertTrue(e.getMessage(), e.getMessage().contains("Token does not exist"));
     }
     assertTrue(exceptionThrown);
 
     // Try to cancel.
-    exceptionThrown = false;
     try {
       mgr.cancelToken(userName, token1);
     } catch (IOException e) {
-      exceptionThrown = true;
+      // Depending on the underlying store (ZK vs in mem), we will throw an exception
+      // or silently fail. Having cancel be idempotent is reasonable and the ZK
+      // behavior.
       assertTrue(e.getMessage().contains("Token not found"));
     }
-    assertTrue(exceptionThrown);
 
     // Try a corrupt token.
     exceptionThrown = false;
@@ -146,5 +170,11 @@ public class DelegationTokenTest {
       assertTrue(e.getMessage().contains("Token is corrupt."));
     }
     assertTrue(exceptionThrown);
+  }
+
+  @Test
+  public void TestTokenManager() throws IOException {
+    testTokenManager(false);
+    testTokenManager(true);
   }
 }

@@ -97,29 +97,19 @@ public class DelegationTokenManager {
    * to create/renew/cancel tokens, otherwise it can only verify them.
    * This is expected to be called once in secure clusters.
    *
+   * If useZookeeper is true, the tokens are persisted in ZK. For distributed
+   * deployements, this is required.
+   *
    * This starts the underlying clients (e.g. zookeeper connections) and threads to
    * manage delegation tokens.
    */
-  public static void init(Configuration conf, boolean generatesTokens)
-      throws IOException {
+  public static void init(Configuration conf, boolean generatesTokens,
+      boolean useZookeeper) throws IOException {
     if (instance_ != null) {
       throw new RuntimeException("init() can only be called once.");
     }
-
     LOGGER.info("Starting token manager.");
-
-    long secretKeyInterval = conf.getLong(DELEGATION_KEY_UPDATE_INTERVAL_KEY,
-        DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT);
-    long tokenMaxLifetime = conf.getLong(DELEGATION_TOKEN_MAX_LIFETIME_KEY,
-        DELEGATION_TOKEN_MAX_LIFETIME_DEFAULT);
-    long tokenRenewInterval = conf.getLong(DELEGATION_TOKEN_RENEW_INTERVAL_KEY,
-        DELEGATION_TOKEN_RENEW_INTERVAL_DEFAULT);
-    long tokenGcInterval = conf.getLong(DELEGATION_TOKEN_GC_INTERVAL,
-        DELEGATION_TOKEN_GC_INTERVAL_DEFAULT);
-
-    instance_ = new DelegationTokenManager(secretKeyInterval, tokenMaxLifetime,
-        tokenRenewInterval, tokenGcInterval, generatesTokens);
-    instance_.mgr_.startThreads();
+    instance_ = new DelegationTokenManager(conf, generatesTokens, useZookeeper);
     LOGGER.info("Token manager started.");
   }
 
@@ -135,13 +125,29 @@ public class DelegationTokenManager {
   private final boolean generatesTokens_;
 
 
-  protected DelegationTokenManager(long delegationKeyUpdateInterval,
-      long delegationTokenMaxLifetime, long delegationTokenRenewInterval,
-      long delegationTokenRemoverScanInterval, boolean generatesTokens) {
+  protected DelegationTokenManager(Configuration conf, boolean generatesTokens,
+      boolean useZookeeper) throws IOException {
+    long secretKeyInterval = conf.getLong(DELEGATION_KEY_UPDATE_INTERVAL_KEY,
+        DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT);
+    long tokenMaxLifetime = conf.getLong(DELEGATION_TOKEN_MAX_LIFETIME_KEY,
+        DELEGATION_TOKEN_MAX_LIFETIME_DEFAULT);
+    long tokenRenewInterval = conf.getLong(DELEGATION_TOKEN_RENEW_INTERVAL_KEY,
+        DELEGATION_TOKEN_RENEW_INTERVAL_DEFAULT);
+    long tokenGcInterval = conf.getLong(DELEGATION_TOKEN_GC_INTERVAL,
+        DELEGATION_TOKEN_GC_INTERVAL_DEFAULT);
+
     generatesTokens_ = generatesTokens;
-    mgr_ = new DelegationTokenSecretManager(delegationKeyUpdateInterval,
-        delegationTokenMaxLifetime, delegationTokenRenewInterval,
-        delegationTokenRemoverScanInterval);
+    if (useZookeeper) {
+      ZooKeeperTokenStore store = new ZooKeeperTokenStore();
+      store.setConf(conf);
+      store.init();
+      mgr_ = new PersistedDelegationTokenSecretManager(secretKeyInterval,
+          tokenMaxLifetime, tokenRenewInterval, tokenGcInterval, store);
+    } else {
+      mgr_ = new DelegationTokenSecretManager(secretKeyInterval,
+          tokenMaxLifetime, tokenRenewInterval, tokenGcInterval);
+    }
+    mgr_.startThreads();
   }
 
   // Serialized token split into the various parts needed by the client.

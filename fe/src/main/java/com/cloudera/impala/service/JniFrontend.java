@@ -147,7 +147,7 @@ public class JniFrontend {
 
     if (enableDelegationTokens) {
       try {
-        DelegationTokenManager.init(CONF, runningPlanner);
+        DelegationTokenManager.init(CONF, runningPlanner, true);
       } catch (IOException e) {
         throw new InternalException("Could not initialize delegation token manager", e);
       }

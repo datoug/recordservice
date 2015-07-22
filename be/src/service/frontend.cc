@@ -25,6 +25,7 @@
 using namespace std;
 using namespace impala;
 
+DECLARE_string(principal);
 DECLARE_string(sentry_config);
 DECLARE_int32(non_impala_java_vlog);
 DECLARE_int32(recordservice_planner_port);
@@ -94,8 +95,8 @@ Frontend::Frontend() {
   };
 
   jboolean lazy = (FLAGS_load_catalog_at_startup ? false : true);
-  jboolean enable_delegation_tokens =
-      FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0;
+  jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
+      (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
   jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
   jstring policy_file_path =
       jni_env->NewStringUTF(FLAGS_authorization_policy_file.c_str());

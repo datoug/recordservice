@@ -69,7 +69,7 @@ public class ZooKeeperTokenStore implements Closeable {
   public static final String DELEGATION_TOKEN_STORE_CLS =
       "recordservice.delegation.token.store.class";
   public static final String DELEGATION_TOKEN_STORE_ZK_CONNECT_STR =
-      "recordservice..delegation.token.store.zookeeper.connectString";
+      "recordservice.delegation.token.store.zookeeper.connectString";
 
   public static final String DELEGATION_TOKEN_STORE_ZK_CONNECT_TIMEOUTMILLIS =
       "recordservice.delegation.token.store.zookeeper.connectTimeoutMillis";
@@ -78,7 +78,12 @@ public class ZooKeeperTokenStore implements Closeable {
   public static final String DELEGATION_TOKEN_STORE_ZK_ACL =
       "recordservice.delegation.token.store.zookeeper.acl";
   public static final String DELEGATION_TOKEN_STORE_ZK_ZNODE_DEFAULT =
-      "/recordservicedelegation";
+      "/recordservice";
+
+  public static final String RECORD_SERVICE_PRINCIPAL_CONF =
+      "recordservice.kerberos.principal";
+  public static final String RECORD_SERVICE_KEY_TAB_CONF =
+      "recordservice.kerberos.keytab.file";
 
   private String rootNode = "";
   private volatile CuratorFramework zkSession;
@@ -117,7 +122,7 @@ public class ZooKeeperTokenStore implements Closeable {
     }
   };
 
-  private final String WHEN_ZK_DSTORE_MSG = "when zookeeper based delegation token storage is enabled"
+  private final String WHEN_ZK_DSTORE_MSG = " when zookeeper based delegation token storage is enabled"
       + "("+ DELEGATION_TOKEN_STORE_CLS + "=" + ZooKeeperTokenStore.class.getName() + ")";
 
   private Configuration conf;
@@ -129,15 +134,21 @@ public class ZooKeeperTokenStore implements Closeable {
   protected ZooKeeperTokenStore() {
   }
 
+  public void setConf(Configuration conf) {
+    if (conf == null) {
+      throw new IllegalArgumentException("conf is null");
+    }
+    this.conf = conf;
+  }
 
-  public void init(Object objectStore) {
-    zkConnectString =
-        conf.get(DELEGATION_TOKEN_STORE_ZK_CONNECT_STR, null);
+  public void init() {
+    zkConnectString = conf.get(DELEGATION_TOKEN_STORE_ZK_CONNECT_STR);
     if (zkConnectString == null || zkConnectString.trim().isEmpty()) {
       throw new IllegalArgumentException("Zookeeper connect string has to be specifed through "
           + DELEGATION_TOKEN_STORE_ZK_CONNECT_STR
           + WHEN_ZK_DSTORE_MSG);
     }
+    LOGGER.info("Connecting to zookeeper at: " + zkConnectString);
     connectTimeoutMillis =
         conf.getInt(
             DELEGATION_TOKEN_STORE_ZK_CONNECT_TIMEOUTMILLIS,
@@ -146,6 +157,7 @@ public class ZooKeeperTokenStore implements Closeable {
     if (StringUtils.isNotBlank(aclStr)) {
       this.newNodeAcl = parseACLs(aclStr);
     }
+    LOGGER.info("Zookeeper acl: " + aclStr);
     rootNode =
         conf.get(DELEGATION_TOKEN_STORE_ZK_ZNODE,
             DELEGATION_TOKEN_STORE_ZK_ZNODE_DEFAULT);
@@ -166,7 +178,7 @@ public class ZooKeeperTokenStore implements Closeable {
    * @param acl list of ACL entries
    * @throws TokenStoreException
    */
-  public void ensurePath(String path, List<ACL> acl)
+  private void ensurePath(String path, List<ACL> acl)
       throws TokenStoreException {
     try {
       CuratorFramework zk = getSession();
@@ -175,6 +187,7 @@ public class ZooKeeperTokenStore implements Closeable {
       LOGGER.info("Created path: {} ", node);
     } catch (KeeperException.NodeExistsException e) {
       // node already exists
+      LOGGER.debug("ZNode already exists: {} ", path);
     } catch (Exception e) {
       throw new TokenStoreException("Error creating path " + path, e);
     }
@@ -324,7 +337,12 @@ public class ZooKeeperTokenStore implements Closeable {
   }
 
   public DelegationTokenInformation getToken(DelegationTokenIdentifier tokenIdentifier) {
-    byte[] tokenBytes = zkGetData(getTokenPath(tokenIdentifier));
+    String path = getTokenPath(tokenIdentifier);
+    byte[] tokenBytes = zkGetData(path);
+    if (tokenBytes == null) {
+      throw new TokenStoreException("Token does not exist in ZK: id=" +
+          tokenIdentifier + " path=" + path, null);
+    }
     try {
       return HiveDelegationTokenSupport.decodeDelegationTokenInformation(tokenBytes);
     } catch (Exception ex) {
@@ -378,10 +396,8 @@ public class ZooKeeperTokenStore implements Closeable {
       LOGGER.warn("Login is not from keytab");
       return;
     }
-
-    // NONG: TODO
-    String principal = getNonEmptyConfVar(conf, "recordservice.kerberos.principal");
-    String keytab = getNonEmptyConfVar(conf, "recordservice.kerberos.keytab.file");
+    String principal = getNonEmptyConfVar(conf, RECORD_SERVICE_PRINCIPAL_CONF);
+    String keytab = getNonEmptyConfVar(conf, RECORD_SERVICE_KEY_TAB_CONF);
     Utils.setZookeeperClientKerberosJaasConfig(principal, keytab);
   }
 
