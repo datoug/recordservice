@@ -26,9 +26,8 @@ enable_testing()
 PROJECT(ASSEMBLER)
 
 # If TRUE, compile with clang trunk (from toolchain). This is set when using ASAN
-# but needs more work to be set for other builds.
-# TODO: this is a better development compiler. Get this to work.
-SET(USE_CLANG_TRUNK "FALSE")
+# but can be also set in the environment.
+SET(USE_CLANG_TRUNK "$ENV{USE_CLANG_TRUNK}")
 SET(GCC_ROOT_DIR "$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}")
 
 # compiler flags that are common across debug/release builds
@@ -52,15 +51,6 @@ SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 #   -fcolor-diagnostics: ensure clang generates colorized output, which is necessary
 #        when using ccache as clang thinks it is not called from a terminal.
 SET(CXX_CLANG_FLAGS "-Qunused-arguments -fcolor-diagnostics")
-# For any gcc builds:
-#   -g: Enable symbols for profiler tools
-#   -Wno-unused-local-typedefs: Do not warn for local typedefs that are unused.
-if (IMPALA_TOOLCHAIN)
-  SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs -static-libstdc++")
-else()
-  # Older gcc's (rhel5), don't support -Wno-unused-local-typedefs.
-  SET(CXX_GCC_FLAGS "-g")
-endif()
 
 # compiler flags for different build types (run 'cmake -DCMAKE_BUILD_TYPE=<type> .')
 # For all builds:
@@ -114,7 +104,9 @@ if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
 
   SET(CMAKE_CXX_COMPILER ${CLANG_TRUNK_EXECUTABLE})
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-return-type-c-linkage")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
   # TODO: remove this when we enable c++11
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++11-extensions")
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --gcc-toolchain=${GCC_ROOT_DIR}")
@@ -125,6 +117,20 @@ if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
   SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedef")
   SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-function")
   SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-const-variable")
+
+  # TODO: The places we use inline asm don't work without optimizations. Fix this. 
+  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -O1")
+else()
+  # For any gcc builds:
+  #   -g: Enable symbols for profiler tools
+  #   -Wno-unused-local-typedefs: Do not warn for local typedefs that are unused.
+  if (IMPALA_TOOLCHAIN)
+    SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedefs")
+    SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs -static-libstdc++")
+  else()
+    # Older gcc's (rhel5), don't support -Wno-unused-local-typedefs.
+    SET(CXX_GCC_FLAGS "-g")
+  endif()
 endif ()
 
 
@@ -213,7 +219,7 @@ if (IMPALA_TOOLCHAIN)
   )
 endif()
 
-set(CLANG_INCLUDE_FLAGS
+set(CODEGEN_INCLUDE_FLAGS
   "${CLANG_INCLUDE_FLAGS}"
   "-I${CMAKE_CURRENT_SOURCE_DIR}/src"
   "-I${CMAKE_CURRENT_SOURCE_DIR}/generated-sources"
