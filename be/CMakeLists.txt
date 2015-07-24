@@ -39,13 +39,15 @@ SET(GCC_ROOT_DIR "$ENV{IMPALA_TOOLCHAIN}/gcc-$ENV{IMPALA_GCC_VERSION}")
 #  - Wno-deprecated: gutil contains deprecated headers
 #  - pthread: enable multithreaded malloc
 #  - DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG: enable nanosecond precision for boost
-SET(CXX_COMMON_FLAGS "-Wall -Wno-sign-compare -Wno-unknown-pragmas -pthread")
+#  - fverboase-asm creates better annotated assembly.
+SET(CXX_COMMON_FLAGS "-g -Wall -Wno-sign-compare -Wno-unknown-pragmas -pthread")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fno-strict-aliasing")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated")
 SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
-SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS")
+SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -fverbose-asm")
 
-# For any clang builds (currently only ASAN):
+# For any clang builds:
 #   -Qunused-arguments: quiet warnings about unused arguments to clang because ccache
 #        makes extra calls to clang which may have extra includes (-I) that are unused.
 #   -fcolor-diagnostics: ensure clang generates colorized output, which is necessary
@@ -62,10 +64,11 @@ SET(CXX_CLANG_FLAGS "-Qunused-arguments -fcolor-diagnostics")
 #   -DNDEBUG: Turn off dchecks/asserts/debug only code.
 #
 # Debug information is stored as dwarf2 to be as compatible as possible
+SET(CXX_COVERAGE_FLAGS "-fprofile-arcs -ftest-coverage")
 SET(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -ggdb -gdwarf-2")
 SET(CXX_FLAGS_RELEASE "${CXX_GCC_FLAGS} -O3 -DNDEBUG -gdwarf-2")
 SET(CXX_FLAGS_ADDRESS_SANITIZER
-    "${CXX_CLANG_FLAGS} -O1 -g -fsanitize=address -fno-omit-frame-pointer -DADDRESS_SANITIZER")
+    "${CXX_CLANG_FLAGS} -O1 -fsanitize=address -fno-omit-frame-pointer -DADDRESS_SANITIZER")
 
 # if no build build type is specified, default to debug builds
 if (NOT CMAKE_BUILD_TYPE)
@@ -90,6 +93,16 @@ else()
   message(FATAL_ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}")
 endif ()
 
+# gutil has a lot of warnings so silence a bunch more. The exact warnings are 
+# compiler dependent, hence we add more of them below depending on the compiler
+# version.
+SET(CXX_GUTIL_FLAGS "${CXX_COMMON_FLAGS}")
+SET(CMAKE_CXX_FLAGS "${CXX_COMMON_FLAGS} ${CMAKE_CXX_FLAGS}")
+
+#
+# Below here only append flags to CXX_GUTIL_FLAGS and CMAKE_CXX_FLAGS to
+# add compiler specific flags.
+#
 if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
   # Look for the clang trunk compiler and set some additional compiler flags.
   find_program(CLANG_TRUNK_EXECUTABLE clang++
@@ -110,37 +123,23 @@ if ("${USE_CLANG_TRUNK}" STREQUAL "TRUE")
   # TODO: remove this when we enable c++11
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++11-extensions")
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --gcc-toolchain=${GCC_ROOT_DIR}")
-
-  # gutil's CMakeLists references CXX_COMMON_FLAGS directly. gutil has a lot of warnings
-  # so silence a bunch more. (The exact warnings are compiler dependent, hence we add
-  # more of them here.
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedef")
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-function")
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-const-variable")
-
+  
   # TODO: The places we use inline asm don't work without optimizations. Fix this. 
-  SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -O1")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O1")
+
+  SET(CXX_GUTIL_FLAGS "${CXX_GUTIL_FLAGS} -Wno-unused-local-typedef")
+  SET(CXX_GUTIL_FLAGS "${CXX_GUTIL_FLAGS} -Wno-unused-function")
+  SET(CXX_GUTIL_FLAGS "${CXX_GUTIL_FLAGS} -Wno-unused-const-variable")
 else()
   # For any gcc builds:
-  #   -g: Enable symbols for profiler tools
+  #   Older gcc's (rhel5), don't support -Wno-unused-local-typedefs so only do
+  #   it for toolchain.
   #   -Wno-unused-local-typedefs: Do not warn for local typedefs that are unused.
   if (IMPALA_TOOLCHAIN)
-    SET(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-unused-local-typedefs")
-    SET(CXX_GCC_FLAGS "-g -Wno-unused-local-typedefs -static-libstdc++")
-  else()
-    # Older gcc's (rhel5), don't support -Wno-unused-local-typedefs.
-    SET(CXX_GCC_FLAGS "-g")
+    SET(CXX_GUTIL_FLAGS "${CXX_GUTIL_FLAGS} -Wno-unused-local-typedefs")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs -static-libstdc++")
   endif()
 endif ()
-
-
-# Add flags that are common across build types
-#  - fverboase-asm creates better annotated assembly.  This doesn't seem to affect
-#    when building the binary.
-# LLMV_CFLAGS - Adding llvm compile flags
-SET(CMAKE_CXX_FLAGS "${CXX_COMMON_FLAGS} ${CMAKE_CXX_FLAGS}")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fverbose-asm")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LLVM_CFLAGS}")
 
 # Use ccache when found and not explicitly disabled by setting the DISABLE_CCACHE envvar.
 find_program(CCACHE ccache)
