@@ -256,7 +256,7 @@ class Status {
 #define EXIT_WITH_ERROR(msg) \
   do { \
     LOG(ERROR) << msg; \
-    exit(1); \
+    _exit(1); \
   } while (false)
 
 }

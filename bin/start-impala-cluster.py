@@ -36,7 +36,7 @@ parser.add_option("--catalogd_args", dest="catalogd_args", default="",
 parser.add_option("--kill", "--kill_only", dest="kill_only", action="store_true",
                   default=False, help="Instead of starting the cluster, just kill all"\
                   " the running impalads and the statestored.")
-parser.add_option("--force_kill", dest="force_kill", action="store_true", default=False,
+parser.add_option("--force_kill", dest="force_kill", action="store_true", default=True,
                   help="Force kill impalad and statestore processes.")
 parser.add_option("-r", "--restart_impalad_only", dest="restart_impalad_only",
                   action="store_true", default=False,

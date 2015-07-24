@@ -158,20 +158,21 @@ ExecEnv::ExecEnv(bool is_record_service, bool running_record_service)
     backend_address_(MakeNetworkAddress(FLAGS_hostname, FLAGS_be_port)),
     is_pseudo_distributed_llama_(false) {
   if (FLAGS_enable_rm) InitRm();
+
+  TNetworkAddress subscriber_address =
+      MakeNetworkAddress(FLAGS_hostname, is_record_service ?
+          FLAGS_recordservice_state_store_subscriber_port :
+          FLAGS_state_store_subscriber_port);
+  TNetworkAddress statestore_address =
+      MakeNetworkAddress(FLAGS_state_store_host, FLAGS_state_store_port);
+
+  statestore_subscriber_.reset(new StatestoreSubscriber(
+      Substitute("impalad@$0", TNetworkAddressToString(backend_address_)),
+      subscriber_address, statestore_address, metrics_.get()));
+
   // Initialize the scheduler either dynamically (with a statestore) or statically (with
   // a standalone single backend)
   if (FLAGS_use_statestore && !is_record_service_) {
-    TNetworkAddress subscriber_address =
-        MakeNetworkAddress(FLAGS_hostname, is_record_service ?
-            FLAGS_recordservice_state_store_subscriber_port :
-            FLAGS_state_store_subscriber_port);
-    TNetworkAddress statestore_address =
-        MakeNetworkAddress(FLAGS_state_store_host, FLAGS_state_store_port);
-
-    statestore_subscriber_.reset(new StatestoreSubscriber(
-        Substitute("impalad@$0", TNetworkAddressToString(backend_address_)),
-        subscriber_address, statestore_address, metrics_.get()));
-
     scheduler_.reset(new SimpleScheduler(statestore_subscriber_.get(),
         statestore_subscriber_->id(), backend_address_, metrics_.get(),
         webserver_.get(), resource_broker_.get(), request_pool_service_.get()));
