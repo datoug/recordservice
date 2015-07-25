@@ -530,6 +530,15 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
         "Could not get session.", status.msg().GetFullMessageDetails());
   }
   DCHECK(session != NULL);
+  // Set the user name. If it was set by a lower-level transport (i.e authenticated
+  // user), use that. Otherwise, use the value in the request.
+  const ThriftServer::Username& username =
+      ThriftServer::GetThreadConnectionContext()->username;
+  if (username.empty()) {
+    session->connected_user = req.user;
+  } else {
+    session->connected_user = username;
+  }
   session->ToThrift(session_id, &query_ctx.session);
 
   // Plan the request.
