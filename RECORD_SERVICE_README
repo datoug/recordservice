@@ -5,3 +5,6 @@ To build this repo:
   - Build the record service repo
   - Make sure RECORD_SERVICE_HOME is set to the home of that repo.
   - Follow the normal Impala build instructions.
+
+Last rebase: 4/27/2015 
+  e3f26e18a5e2546909000ba700e3f432ec268873: Removed impyla requirement
