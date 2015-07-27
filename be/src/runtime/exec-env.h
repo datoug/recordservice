@@ -168,6 +168,9 @@ class ExecEnv {
   // deployments.
   bool is_pseudo_distributed_llama_;
 
+  // Initializes statestore_subscriber_.
+  void InitStatestoreSubscriber();
+
   // Initialise cgroups manager, detect test RM environment and init resource broker.
   void InitRm();
 
