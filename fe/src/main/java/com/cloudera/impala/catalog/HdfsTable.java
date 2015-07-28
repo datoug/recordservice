@@ -14,6 +14,8 @@
 
 package com.cloudera.impala.catalog;
 
+import static com.codahale.metrics.MetricRegistry.name;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -78,8 +80,10 @@ import com.cloudera.impala.util.FsPermissionChecker;
 import com.cloudera.impala.util.HdfsCachingUtil;
 import com.cloudera.impala.util.ListMap;
 import com.cloudera.impala.util.MetaStoreUtil;
+import com.cloudera.impala.util.Metrics;
 import com.cloudera.impala.util.TAccessLevelUtil;
 import com.cloudera.impala.util.TResultRowBuilder;
+import com.codahale.metrics.Timer;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -185,6 +189,20 @@ public class HdfsTable extends Table {
   private static final Configuration CONF = new Configuration();
 
   private static final boolean SUPPORTS_VOLUME_ID;
+
+  // TODO: Keep the naming scheme consistent with BE metrics
+  // LOAD_BLOCK_LOCATION.db_name.tbl_name
+  private final String loadBlockLocation_;
+  // LOAD_VOLUME_IDS.db_name.tbl_name
+  private final String loadVolumeIds_;
+  // LOAD_HDFSTABLE_METADATA.db_name.tbl_name
+  private final String loadTblMetadata_;
+  // LOAD_PARTITIONS.db_name.tbl_name
+  private final String loadPartitions_;
+  // LOAD_BLOCK_LOCATION_PER_PARTITION.db_name.tbl_name
+  private final String loadBlockLocationPerPartition_;
+  // LOAD_VOLUME_IDS.db_name.tbl_name
+  private final String loadVolumeIdsPerPartition_;
 
   // Wrapper around a FileSystem object to hash based on the underlying FileSystem's
   // scheme and authority.
@@ -420,6 +438,14 @@ public class HdfsTable extends Table {
       Db db, String name, String owner) {
     super(id, msTbl, db, name, owner);
     this.partitions_ = Lists.newArrayList();
+    this.loadBlockLocation_ = name("LOAD_BLOCK_LOCATION", getFullName());
+    this.loadVolumeIds_ = name("LOAD_VOLUME_IDS", getFullName());
+    this.loadTblMetadata_ = name("LOAD_HDFSTABLE_METADATA", getFullName());
+    this.loadPartitions_ = name("LOAD_PARTITIONS", getFullName());
+    this.loadBlockLocationPerPartition_ = name("LOAD_BLOCK_LOCATION_PER_PARTITION",
+        getFullName());
+    this.loadVolumeIdsPerPartition_ = name("LOAD_VOLUME_IDS_PER_PARTITION",
+        getFullName());
   }
 
   @Override
@@ -633,6 +659,10 @@ public class HdfsTable extends Table {
     partitions_.clear();
     hdfsBaseDir_ = msTbl.getSd().getLocation();
 
+    // start timer for loadBlockMetadata.
+    final Timer.Context loadBlockLocationTimer = Metrics.INSTANCE
+        .getTimerCtx(loadBlockLocation_);
+
     // Map of filesystem to the file blocks for new/modified FileDescriptors. Blocks in
     // this map will have their disk volume IDs information (re)loaded. This is used to
     // speed up the incremental refresh of a table's metadata by skipping unmodified,
@@ -685,7 +715,36 @@ public class HdfsTable extends Table {
         }
       }
     }
+
+    // stop timer for loadBlockLocation.
+    long timeSpent = loadBlockLocationTimer.stop() / Metrics.NANOTOMILLISEC;
+    LOG.info("{}: {}millisec", loadBlockLocation_, timeSpent);
+
+    // update histogram for loadBlockLocationPerPartition.
+    if (msPartitions.size() > 0) {
+      Metrics.INSTANCE.getHistogram(loadBlockLocationPerPartition_).update(timeSpent
+          / msPartitions.size());
+      LOG.info("{}: {}millisec", loadBlockLocationPerPartition_, timeSpent
+          / msPartitions.size());
+    }
+
+    // start timer for loadVolumeIds.
+    final Timer.Context loadVolumeIdsTimer = Metrics.INSTANCE
+        .getTimerCtx(loadVolumeIds_);
+
     loadDiskIds(blocksToLoad);
+
+    // stop timer for loadVolumeIds.
+    timeSpent = loadVolumeIdsTimer.stop() / Metrics.NANOTOMILLISEC;
+    LOG.info("{}: {}millisec", loadVolumeIds_, timeSpent);
+
+    // update histogram for loadVolumeIdsPerPartition.
+    if (msPartitions.size() > 0) {
+      Metrics.INSTANCE.getHistogram(loadVolumeIdsPerPartition_).update(timeSpent
+          / msPartitions.size());
+      LOG.info("{}: {}millisec", loadVolumeIdsPerPartition_, timeSpent
+          / msPartitions.size());
+    }
   }
 
   /**
@@ -1002,7 +1061,11 @@ public class HdfsTable extends Table {
       org.apache.hadoop.hive.metastore.api.Table msTbl) throws TableLoadingException {
     numHdfsFiles_ = 0;
     totalHdfsBytes_ = 0;
-    LOG.debug("load table: " + db_.getName() + "." + name_);
+    LOG.debug("load table: " + getFullName());
+
+    // start timer for loadTblMetadata.
+    final Timer.Context loadTblMetadataTimer = Metrics.INSTANCE
+        .getTimerCtx(loadTblMetadata_);
 
     // turn all exceptions into TableLoadingException
     try {
@@ -1071,6 +1134,10 @@ public class HdfsTable extends Table {
       numClusteringCols_ = partKeys.size();
       loadColumns(fieldSchemas, client);
 
+      // start timer for collectPartitions.
+      Timer.Context collectPartitionsTimer = Metrics.INSTANCE
+          .getTimerCtx(loadPartitions_);
+
       // Collect the list of partitions to use for the table. Partitions may be reused
       // from the existing cached table entry (if one exists), read from the metastore,
       // or a mix of both. Whether or not a partition is reused depends on whether
@@ -1138,6 +1205,11 @@ public class HdfsTable extends Table {
         oldFileDescMap = cachedHdfsTable.fileDescMap_;
         hostIndex_.populate(cachedHdfsTable.hostIndex_.getList());
       }
+
+      // stop timer for collectPartitions.
+      LOG.info("{}: {}millisec", loadPartitions_, collectPartitionsTimer.stop()
+          / Metrics.NANOTOMILLISEC);
+
       loadPartitions(msPartitions, msTbl, oldFileDescMap);
 
       // load table stats
@@ -1158,6 +1230,10 @@ public class HdfsTable extends Table {
       throw e;
     } catch (Exception e) {
       throw new TableLoadingException("Failed to load metadata for table: " + name_, e);
+    } finally {
+      // stop timer for loadTblMetadata.
+      LOG.info("{}: {}millisec", loadTblMetadata_, loadTblMetadataTimer.stop()
+          / Metrics.NANOTOMILLISEC);
     }
   }
 
