@@ -93,6 +93,8 @@ public class ZooKeeperTokenStore implements Closeable {
 
   /**
    * Exception for internal token store errors that typically cannot be handled by the caller.
+   * FIXME: this is really bad because as it extends RuntimeException so there is no easy way
+   * to tell if functions throw. Fix this.
    */
   public static class TokenStoreException extends RuntimeException {
     private static final long serialVersionUID = 249268338223156938L;

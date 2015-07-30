@@ -253,16 +253,22 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
         .iterator();
     while (i.hasNext()) {
       DelegationTokenIdentifier id = i.next();
-      if (now > id.getMaxDate()) {
-        this.tokenStore.removeToken(id); // no need to look at token info
-      } else {
-        // get token info to check renew date
-        DelegationTokenInformation tokenInfo = tokenStore.getToken(id);
-        if (tokenInfo != null) {
-          if (now > tokenInfo.getRenewDate()) {
-            this.tokenStore.removeToken(id);
+      try {
+        if (now > id.getMaxDate()) {
+          this.tokenStore.removeToken(id); // no need to look at token info
+        } else {
+          // get token info to check renew date
+          DelegationTokenInformation tokenInfo = tokenStore.getToken(id);
+          if (tokenInfo != null) {
+            if (now > tokenInfo.getRenewDate()) {
+              this.tokenStore.removeToken(id);
+            }
           }
         }
+      } catch (ZooKeeperTokenStore.TokenStoreException e) {
+        // Ignore. This can happen if the token is already removed. For example, after
+        // the call to getAllDelegationTokenIdentifiers(), the token is removed by
+        // another daemon.
       }
     }
   }
