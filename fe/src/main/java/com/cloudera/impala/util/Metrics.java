@@ -62,7 +62,7 @@ public enum Metrics {
   private final JmxReporter jmxReporter_;
   public final static int NANOTOMILLISEC = 1000000;
 
-  private Metrics() {
+  Metrics() {
     metricRegistry_ = new MetricRegistry();
     // Start a console reporter.
     consoleReporter_ = ConsoleReporter.forRegistry(metricRegistry_)
