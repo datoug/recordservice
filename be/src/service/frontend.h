@@ -33,7 +33,8 @@ class Frontend {
  public:
   // Does all the work of initialising the JNI method stubs. If any method can't be found,
   // or if there is any further exception, the constructor will terminate the process.
-  Frontend();
+  // 'server_id' is the unique identifier for this server (across the cluster).
+  Frontend(const std::string& server_id);
 
   // Request to update the Impalad catalog cache. The TUpdateCatalogCacheRequest contains
   // a list of objects that should be added/removed from the Catalog. Returns a response

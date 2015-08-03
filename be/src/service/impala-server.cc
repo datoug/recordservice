@@ -161,6 +161,7 @@ DECLARE_bool(compact_catalog_topic);
 
 DEFINE_int32(recordservice_planner_port, 40000, "Port to run RecordService planner");
 DEFINE_int32(recordservice_worker_port, 40100, "Port to run RecordService worker");
+DEFINE_bool(zookeeper_membership, false, "If true, use zookeeper for membership.");
 
 namespace impala {
 

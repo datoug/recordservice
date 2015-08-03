@@ -31,6 +31,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.cloudera.impala.security.ZooKeeperTokenStore.TokenStoreException;
+import com.cloudera.impala.service.ZooKeeperSession;
 
 // TODO: test expiration.
 public class DelegationTokenTest {
@@ -78,13 +79,15 @@ public class DelegationTokenTest {
   private void testTokenManager(boolean useZK) throws IOException {
     String userName = UserGroupInformation.getCurrentUser().getUserName();
     Configuration config = new Configuration();
+    ZooKeeperSession zk = null;
     if (useZK) {
-      config.set(ZooKeeperTokenStore.DELEGATION_TOKEN_STORE_ZK_CONNECT_STR,
+      config.set(ZooKeeperSession.ZOOKEEPER_CONNECTION_STRING_CONF,
           ZOOKEEPER_HOSTPORT);
-      config.set(ZooKeeperTokenStore.DELEGATION_TOKEN_STORE_ZK_ACL,
+      config.set(ZooKeeperSession.ZOOKEEPER_STORE_ACL_CONF,
           ZOOKEEPER_ACL);
+      zk = new ZooKeeperSession(config, "test", true, true);
     }
-    DelegationTokenManager mgr = new DelegationTokenManager(config, true, useZK);
+    DelegationTokenManager mgr = new DelegationTokenManager(config, true, zk);
 
     // Create two tokens
     byte[] token1 = mgr.getToken(userName, userName, userName).token;

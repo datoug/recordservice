@@ -127,7 +127,8 @@ public class JniFrontend {
    */
   public JniFrontend(boolean lazy, String serverName, String authorizationPolicyFile,
       String sentryConfigFile, String authPolicyProviderClass, int impalaLogLevel,
-      int otherLogLevel, boolean enableDelegationTokens, boolean runningPlanner)
+      int otherLogLevel, boolean enableDelegationTokens, boolean runningPlanner,
+      boolean runningWorker, boolean zookeeperMembership, String serviceId)
       throws InternalException {
     GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
         TLogLevel.values()[otherLogLevel]);
@@ -148,9 +149,19 @@ public class JniFrontend {
 
     frontend_ = new Frontend(authConfig);
 
+    ZooKeeperSession zkSession = null;
+    if (zookeeperMembership || enableDelegationTokens) {
+      // Start up zookeeper/curator connection.
+      try {
+        zkSession = new ZooKeeperSession(CONF, serviceId, runningPlanner, runningWorker);
+      } catch (IOException e) {
+        throw new InternalException("Could not start up zookeeper session.", e);
+      }
+    }
+
     if (enableDelegationTokens) {
       try {
-        DelegationTokenManager.init(CONF, runningPlanner, true);
+        DelegationTokenManager.init(CONF, runningPlanner, zkSession);
       } catch (IOException e) {
         throw new InternalException("Could not initialize delegation token manager", e);
       }
@@ -643,14 +654,16 @@ public class JniFrontend {
     TGetMasterKeyRequest request = new TGetMasterKeyRequest();
     JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
     TGetMasterKeyResponse result = new TGetMasterKeyResponse();
-    Pair<Integer, String> pair =
-        DelegationTokenManager.instance().getMasterKey(request.seq);
-    result.seq = pair.getLeft();
-    result.key = pair.getRight();
     try {
+      Pair<Integer, String> pair =
+          DelegationTokenManager.instance().getMasterKey(request.seq);
+      result.seq = pair.getLeft();
+      result.key = pair.getRight();
       return new TSerializer(protocolFactory_).serialize(result);
+    } catch (IOException e) {
+      throw new InternalException(e.getMessage(), e);
     } catch (TException e) {
-      throw new InternalException(e.getMessage());
+      throw new InternalException(e.getMessage(), e);
     }
   }
 

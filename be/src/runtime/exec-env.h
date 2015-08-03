@@ -52,10 +52,13 @@ class Frontend;
 // once to properly initialise service state.
 class ExecEnv {
  public:
-  ExecEnv(bool is_record_service = false, bool running_record_service = false);
+  // Id is the server id that needs to be unique across the cluster.
+  ExecEnv(const std::string& server_id, bool is_record_service = false,
+      bool running_record_service = false);
 
+  // Ctor used for tests.
   ExecEnv(const std::string& hostname, int backend_port, int subscriber_port,
-          int webserver_port, const std::string& statestore_host, int statestore_port);
+      int webserver_port, const std::string& statestore_host, int statestore_port);
 
   // Returns the first created exec env instance. In a normal impalad, this is
   // the only instance. In test setups with multiple ExecEnv's per process,
@@ -79,6 +82,7 @@ class ExecEnv {
   CatalogServiceClientCache* catalogd_client_cache() {
     return catalogd_client_cache_.get();
   }
+  const std::string& server_id() const { return server_id_; }
   HBaseTableFactory* htable_factory() { return htable_factory_.get(); }
   DiskIoMgr* disk_io_mgr() { return disk_io_mgr_.get(); }
   Webserver* webserver() { return webserver_.get(); }
@@ -130,6 +134,11 @@ class ExecEnv {
   // True if this is impalad but running the RecordService services.
   // TODO: remove when recordserviced is ready.
   const bool running_record_service_;
+
+  // ID for this process that needs to be unique across all instances in each of
+  // the services this daemon is part of. This ID is used for membership registration
+  // and must be able to uniquely identify a server.
+  const std::string server_id_;
 
   // Leave protected so that subclasses can override
   boost::scoped_ptr<DataStreamMgr> stream_mgr_;

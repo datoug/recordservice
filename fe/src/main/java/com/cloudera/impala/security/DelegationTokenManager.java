@@ -26,6 +26,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.cloudera.impala.service.ZooKeeperSession;
+
 /**
  * Highest level class that deals with delegation tokens. This class is expected
  * to run as a singleton on each daemon in a secure cluster.
@@ -98,19 +100,18 @@ public class DelegationTokenManager {
    * to create/renew/cancel tokens, otherwise it can only verify them.
    * This is expected to be called once in secure clusters.
    *
-   * If useZookeeper is true, the tokens are persisted in ZK. For distributed
+   * If zkSession is not null, the tokens are persisted in ZK. For distributed
    * deployements, this is required.
    *
-   * This starts the underlying clients (e.g. zookeeper connections) and threads to
-   * manage delegation tokens.
+   * This starts the threads to manage delegation tokens.
    */
   public static void init(Configuration conf, boolean generatesTokens,
-      boolean useZookeeper) throws IOException {
+      ZooKeeperSession zkSession) throws IOException {
     if (instance_ != null) {
       throw new RuntimeException("init() can only be called once.");
     }
     LOGGER.info("Starting token manager.");
-    instance_ = new DelegationTokenManager(conf, generatesTokens, useZookeeper);
+    instance_ = new DelegationTokenManager(conf, generatesTokens, zkSession);
     LOGGER.info("Token manager started.");
   }
 
@@ -127,7 +128,7 @@ public class DelegationTokenManager {
 
 
   protected DelegationTokenManager(Configuration conf, boolean generatesTokens,
-      boolean useZookeeper) throws IOException {
+      ZooKeeperSession zkSession) throws IOException {
     long secretKeyInterval = conf.getLong(DELEGATION_KEY_UPDATE_INTERVAL_KEY,
         DELEGATION_KEY_UPDATE_INTERVAL_DEFAULT);
     long tokenMaxLifetime = conf.getLong(DELEGATION_TOKEN_MAX_LIFETIME_KEY,
@@ -138,10 +139,8 @@ public class DelegationTokenManager {
         DELEGATION_TOKEN_GC_INTERVAL_DEFAULT);
 
     generatesTokens_ = generatesTokens;
-    if (useZookeeper) {
-      ZooKeeperTokenStore store = new ZooKeeperTokenStore();
-      store.setConf(conf);
-      store.init();
+    if (zkSession != null) {
+      ZooKeeperTokenStore store = new ZooKeeperTokenStore(zkSession);
       mgr_ = new PersistedDelegationTokenSecretManager(secretKeyInterval,
           tokenMaxLifetime, tokenRenewInterval, tokenGcInterval, store);
     } else {
@@ -251,7 +250,7 @@ public class DelegationTokenManager {
    * The token manager needs to use ZooKeeper in order to perform this operation.
    * Otherwise, a RuntimeException will be thrown.
    */
-  public Pair<Integer, String> getMasterKey(int keySeq) {
+  public Pair<Integer, String> getMasterKey(int keySeq) throws IOException {
     if (!(mgr_ instanceof PersistedDelegationTokenSecretManager)) {
       throw new RuntimeException("getMasterKey() can only be called on " +
           "PersistedDelegationTokenSecretManager.");

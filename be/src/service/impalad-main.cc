@@ -45,6 +45,7 @@
 using namespace boost;
 using namespace impala;
 using namespace std;
+using namespace strings;
 
 DECLARE_string(classpath);
 DECLARE_bool(use_statestore);
@@ -77,7 +78,11 @@ int main(int argc, char** argv) {
   EXIT_IF_ERROR(HBaseTableWriter::InitJNI());
   InitFeSupport();
 
-  ExecEnv exec_env(false, FLAGS_start_recordservice);
+  // Generate a service ID that will unique across the cluster.
+  TNetworkAddress service_address(MakeNetworkAddress(FLAGS_hostname, FLAGS_be_port));
+  string service_id = Substitute("impalad@$0", TNetworkAddressToString(service_address));
+
+  ExecEnv exec_env(service_id, false, FLAGS_start_recordservice);
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
 

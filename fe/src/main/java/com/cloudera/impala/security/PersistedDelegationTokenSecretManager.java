@@ -140,9 +140,16 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
 
   @Override
   public byte[] retrievePassword(DelegationTokenIdentifier identifier) throws InvalidToken {
-    DelegationTokenInformation info = this.tokenStore.getToken(identifier);
+    DelegationTokenInformation info = null;
+    try {
+      info = this.tokenStore.getToken(identifier);
+    } catch (IOException e) {
+      LOGGER.info("Could not get token: " + e);
+      // info == null handled below.
+    }
+
     if (info == null) {
-        throw new InvalidToken("token expired or does not exist: " + identifier);
+      throw new InvalidToken("token expired or does not exist: " + identifier);
     }
     // must reuse super as info.getPassword is not accessible
     synchronized (this) {
@@ -187,7 +194,7 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
     return id;
   }
 
-  protected Map<Integer, DelegationKey> reloadKeys() {
+  protected Map<Integer, DelegationKey> reloadKeys() throws IOException {
     // read keys from token store
     String[] allKeys = tokenStore.getMasterKeys();
     Map<Integer, DelegationKey> keys
@@ -224,7 +231,11 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
         throw new IllegalStateException("Failed to retrieve token after creation");
       }
     }
-    this.tokenStore.addToken(id, info);
+    try {
+      this.tokenStore.addToken(id, info);
+    } catch (IOException e) {
+      throw new RuntimeException("Could not persist token.", e);
+    }
     return password;
   }
 
@@ -251,7 +262,7 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
    * that cannot be reused due to private method access. Logic here can more efficiently
    * deal with external token store by only loading into memory the minimum data needed.
    */
-  protected void removeExpiredTokens() {
+  protected void removeExpiredTokens() throws IOException {
     long now = System.currentTimeMillis();
     Iterator<DelegationTokenIdentifier> i = tokenStore.getAllDelegationTokenIdentifiers()
         .iterator();

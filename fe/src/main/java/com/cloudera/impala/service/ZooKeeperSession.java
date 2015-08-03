@@ -1,0 +1,535 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.cloudera.impala.service;
+
+import java.io.Closeable;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.AppConfigurationEntry.LoginModuleControlFlag;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.api.ACLProvider;
+import org.apache.curator.framework.imps.CuratorFrameworkState;
+import org.apache.curator.framework.recipes.cache.ChildData;
+import org.apache.curator.framework.recipes.cache.PathChildrenCache;
+import org.apache.curator.framework.recipes.cache.PathChildrenCache.StartMode;
+import org.apache.curator.framework.recipes.cache.PathChildrenCacheEvent;
+import org.apache.curator.framework.recipes.cache.PathChildrenCacheListener;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.security.SecurityUtil;
+import org.apache.hadoop.security.authentication.util.KerberosUtil;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooDefs.Ids;
+import org.apache.zookeeper.ZooDefs.Perms;
+import org.apache.zookeeper.client.ZooKeeperSaslClient;
+import org.apache.zookeeper.data.ACL;
+import org.apache.zookeeper.data.Id;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+
+/**
+ * Wrapper around curator to manage zookeeper sessions. This class also
+ * handles membership.
+ */
+public class ZooKeeperSession implements Closeable {
+  private static final Logger LOGGER =
+      LoggerFactory.getLogger(ZooKeeperSession.class.getName());
+
+  // Location of zookeeper quorem.
+  public static final String ZOOKEEPER_CONNECTION_STRING_CONF =
+      "recordservice.zookeeper.connectString";
+  public static final String ZOOKEEPER_CONNECT_TIMEOUTMILLIS_CONF =
+      "recordservice..zookeeper.connectTimeoutMillis";
+
+  // Root zookeeper directory.
+  public static final String ZOOKEEPER_ZNODE_CONF =
+      "recordservice.zookeeper.znode";
+  public static final String ZOOKEEPER_ZNODE_DEFAULT = "/recordservice";
+
+  // Acl to use when creating znodes
+  public static final String ZOOKEEPER_STORE_ACL_CONF =
+      "recordservice.zookeeper.acl";
+
+  // Kerberos settings.
+  public static final String RECORD_SERVICE_PRINCIPAL_CONF =
+      "recordservice.kerberos.principal";
+  public static final String RECORD_SERVICE_KEY_TAB_CONF =
+      "recordservice.kerberos.keytab.file";
+
+  // Zookeeper directory locations
+  private static final String PLANNER_MEMBERSHIP_ZNODE = "planners";
+  private static final String WORKER_MEMBERSHIP_ZNODE = "workers";
+
+  // ZooKeeper property name to pick the correct JAAS conf section
+  private static final String SASL_LOGIN_CONTEXT_NAME = "RecordServiceZooKeeperClient";
+
+  // Zookeeper connection string (host/port of quorem).
+  private final String zkConnectString_;
+
+  // Session timeout.
+  private final int connectTimeoutMillis_;
+
+  // Root znode directory.
+  private String rootNode_ = "";
+
+  // Current Zookeeper session.
+  private volatile CuratorFramework zkSession_;
+
+  // Watcher of the worker membership znode.
+  private PathChildrenCache workerMembership_;
+
+  // Worker membership. Only maintained for planners. (runningPlanner_ = true)
+  // Access to this needs to be thread safe. If this and zkSession_ need to be
+  // locked, lock zkSession_ first.
+  private final Set<String> workers_ = Sets.newHashSet();
+
+  // List of callbacks to invoke when the zk sessions is (re) created.
+  private List<NewSessionCb> newSessionsCbs_ = Lists.newArrayList();
+
+  // ACLs to use when creating new znodes.
+  private List<ACL> newNodeAcl_ = Arrays.asList(new ACL(Perms.ALL, Ids.AUTH_IDS));
+
+  // ID for this service.
+  private final String id_;
+
+  // If true, running the RecordService planner/worker services.
+  private final boolean runningPlanner_;
+  private final boolean runningWorker_;
+
+  /**
+   * ACLProvider permissions will be used in case parent dirs need to be created
+   */
+  private final ACLProvider aclDefaultProvider_ = new ACLProvider() {
+    @Override
+    public List<ACL> getDefaultAcl() {
+      return newNodeAcl_;
+    }
+    @Override
+    public List<ACL> getAclForPath(String path) {
+      return getDefaultAcl();
+    }
+  };
+
+  /**
+   * Connects to zookeeper and handles maintaining membership.
+   * @param conf
+   * @param id - The ID for this server. This should be unique among
+   *    all instances of the service.
+   * @param runningPlanner - If true, running the planner service.
+   * @param runningWorker - If true, running the worker service.
+   */
+  public ZooKeeperSession(Configuration conf, String id, boolean runningPlanner,
+      boolean runningWorker) throws IOException {
+    id_ = id;
+    runningPlanner_ = runningPlanner;
+    runningWorker_ = runningWorker;
+
+    zkConnectString_ = conf.get(ZOOKEEPER_CONNECTION_STRING_CONF);
+    if (zkConnectString_ == null || zkConnectString_.trim().isEmpty()) {
+      throw new IllegalArgumentException(
+          "Zookeeper connect string has to be specified through "
+          + ZOOKEEPER_CONNECTION_STRING_CONF);
+    }
+    LOGGER.info("Connecting to zookeeper at: " + zkConnectString_ + " with id: " + id_);
+
+    connectTimeoutMillis_ =
+        conf.getInt(ZOOKEEPER_CONNECT_TIMEOUTMILLIS_CONF,
+            CuratorFrameworkFactory.builder().getConnectionTimeoutMs());
+
+    String aclStr = conf.get(ZOOKEEPER_STORE_ACL_CONF, null);
+    LOGGER.info("Zookeeper acl: " + aclStr);
+    if (StringUtils.isNotBlank(aclStr)) newNodeAcl_ = parseACLs(aclStr);
+
+    rootNode_ = conf.get(ZOOKEEPER_ZNODE_CONF, ZOOKEEPER_ZNODE_DEFAULT);
+    LOGGER.info("Zookeeper root: " + rootNode_);
+
+    // Install the JAAS Configuration for the runtime
+    setupJAASConfig(conf);
+    initMembershipPaths();
+  }
+
+  /**
+   * Closes the underlying ZK session. This should be called if the server is stopped
+   * to remove this node from ZK more quickly (otherwise it will timeout eventually).
+   */
+  public void close() throws IOException {
+    if (workerMembership_ != null) {
+      workerMembership_.close();
+      synchronized (workers_) {
+        workers_.clear();
+      }
+    }
+    if (zkSession_ != null) zkSession_.close();
+  }
+
+  /**
+   * Callback that is invoked when a sessions restarts.
+   */
+  public interface NewSessionCb {
+    void newSession() throws IOException;
+  }
+
+  /**
+   * Adds a callback to be invoked when a new ZK session is created.
+   */
+  public void addNewSessionCb(NewSessionCb cb) {
+    synchronized (newSessionsCbs_) {
+      newSessionsCbs_.add(cb);
+    }
+  }
+
+  /**
+   * Returns the current Curator session, reconnecting if necessary. As part of this,
+   * if the connection is re(created), membership is updated accordingly.
+   */
+  public CuratorFramework getSession() throws IOException {
+    if (zkSession_ == null || zkSession_.getState() == CuratorFrameworkState.STOPPED) {
+      boolean recreatedSession = false;
+      synchronized (this) {
+        if (zkSession_ == null || zkSession_.getState() == CuratorFrameworkState.STOPPED) {
+          zkSession_ = CuratorFrameworkFactory.builder()
+              .connectString(zkConnectString_)
+              .connectionTimeoutMs(connectTimeoutMillis_)
+              .aclProvider(aclDefaultProvider_)
+              .retryPolicy(new ExponentialBackoffRetry(1000, 3))
+              .build();
+          zkSession_.start();
+          recreatedSession = true;
+        }
+      }
+      // Just started a new session, register membership.
+      if (recreatedSession) {
+        if (runningPlanner_) registerMembership(zkSession_, true);
+        if (runningWorker_) registerMembership(zkSession_, false);
+
+        synchronized (newSessionsCbs_) {
+          for (NewSessionCb cb: newSessionsCbs_) {
+            cb.newSession();
+          }
+        }
+      }
+    }
+    return zkSession_;
+  }
+
+  public String rootZnode() { return rootNode_; }
+  public List<ACL> newNodeAcl() { return newNodeAcl_; }
+
+  /**
+   * Returns a path relative (appended to) the root znode path.
+   */
+  public String getRelativePath(String path) {
+    return rootNode_ + "/" + path;
+  }
+
+  /**
+   * Returns the set of workers. Only callable for planner services.
+   */
+  public Set<String> getWorkerMembership() {
+    if (!runningPlanner_) {
+      // TODO: we can either always listen to the membership or just get the list on
+      // demand for worker-only services. Currently, there is no use case for this.
+      throw new IllegalStateException("Can only call when running planner.");
+    }
+    synchronized (workers_) {
+      return ImmutableSet.copyOf(workers_);
+    }
+  }
+
+  /**
+   * Create a path if it does not already exist ("mkdir -p")
+   * @param path string with '/' separator
+   * @param acl list of ACL entries
+   */
+  public void ensurePath(String path, List<ACL> acl) throws IOException {
+    try {
+      CuratorFramework zk = getSession();
+      String node = zk.create().creatingParentsIfNeeded().withMode(CreateMode.PERSISTENT)
+          .withACL(acl).forPath(path);
+      LOGGER.info("Created path: {} ", node);
+    } catch (KeeperException.NodeExistsException e) {
+      // node already exists
+      LOGGER.debug("ZNode already exists: {} ", path);
+    } catch (Exception e) {
+      throw new IOException("Error creating path " + path, e);
+    }
+  }
+
+  /**
+   * Deletes the znode at 'path'. Idempotent.
+   */
+  public void zkDelete(String path) throws IOException {
+    CuratorFramework zk = getSession();
+    try {
+      zk.delete().forPath(path);
+    } catch (KeeperException.NoNodeException ex) {
+      // already deleted
+    } catch (Exception e) {
+      throw new IOException("Error deleting " + path, e);
+    }
+  }
+
+  /**
+   * Lists all the children in 'path'.
+   */
+  public List<String> zkGetChildren(String path) throws IOException {
+    CuratorFramework zk = getSession();
+    try {
+      return zk.getChildren().forPath(path);
+    } catch (Exception e) {
+      throw new IOException("Error getting children for " + path, e);
+    }
+  }
+
+  /**
+   * Returns the data at 'nodePath'. Returns null if there is no data (but
+   * the path exists).
+   */
+  public byte[] zkGetData(String nodePath) throws IOException {
+    CuratorFramework zk = getSession();
+    try {
+      return zk.getData().forPath(nodePath);
+    } catch (KeeperException.NoNodeException ex) {
+      return null;
+    } catch (Exception e) {
+      throw new IOException("Error reading " + nodePath, e);
+    }
+  }
+
+  /**
+   * Adds this service in the planner and/or membership directory. This is done
+   * in Zookeeper by creating a ephemeral znode with 'id'. ephemeral means that
+   * if the session closes (zookeeper manages timeouts), the znode is deleted.
+   */
+  private void registerMembership(CuratorFramework zk, boolean planner)
+      throws IOException {
+    if (planner) {
+      synchronized (zkSession_) {
+        if (workerMembership_ != null) workerMembership_.close();
+        // This is the planner meaning we also want to listen to the worker membership.
+        workerMembership_ =
+            new PathChildrenCache(zk, getRelativePath(WORKER_MEMBERSHIP_ZNODE), true);
+        try {
+          Preconditions.checkState(workers_.isEmpty());
+          workerMembership_.start(StartMode.BUILD_INITIAL_CACHE);
+          synchronized (workers_) {
+            for (ChildData d: workerMembership_.getCurrentData()) {
+              workers_.add(d.getPath());
+            }
+          }
+        } catch (Exception e) {
+          throw new IOException("Could not watch worker membership.", e);
+        }
+      }
+
+      // Add a listener to the worker directory for updates.
+      workerMembership_.getListenable().addListener(new PathChildrenCacheListener() {
+        @Override
+        public void childEvent(CuratorFramework zk, PathChildrenCacheEvent arg)
+            throws Exception {
+          synchronized (zkSession_) {
+            // This session is no longer the active one, ignore this update.
+            if (zk != zkSession_) return;
+            synchronized (workers_) {
+              switch (arg.getType()) {
+                case CHILD_ADDED:
+                  workers_.add(arg.getData().getPath());
+                  break;
+                case CHILD_REMOVED:
+                  workers_.remove(arg.getData().getPath());
+                  break;
+
+                case INITIALIZED:
+                default:
+                  // TODO: what do the other types mean? Should be safe to just
+                  // reconstruct.
+                  workers_.clear();
+                  for (ChildData d: workerMembership_.getCurrentData()) {
+                    workers_.add(d.getPath());
+                  }
+                  break;
+              }
+            }
+          }
+        }
+      });
+    }
+
+    String path = getRelativePath(
+        (planner ? PLANNER_MEMBERSHIP_ZNODE : WORKER_MEMBERSHIP_ZNODE) + "/" + id_);
+    // First delete the current path. This is required for correctness. For example, if
+    // this service is restarted, the previous znode might still be there (hasn't timed
+    // out yet) and this function would not be able to create the znode with this
+    // session.
+    zkDelete(path);
+    try {
+      String node = zk.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
+        .withACL(newNodeAcl_).forPath(path);
+      LOGGER.info("Created path: {} ", node);
+    } catch (Exception e) {
+      throw new IOException("Could not create znode at " + path, e);
+    }
+  }
+
+  /**
+   * Initializes the paths for storing membership. This creates the directories
+   * for planners and workers.
+   */
+  private void initMembershipPaths() throws IOException {
+    ensurePath(getRelativePath(PLANNER_MEMBERSHIP_ZNODE), newNodeAcl_);
+    ensurePath(getRelativePath(WORKER_MEMBERSHIP_ZNODE), newNodeAcl_);
+  }
+
+  /**
+   * Parse comma separated list of ACL entries to secure generated nodes, e.g.
+   * <code>sasl:recordservice/host1@MY.DOMAIN:cdrwa,</code>
+   */
+  private static List<ACL> parseACLs(String aclString) {
+    String[] aclComps = StringUtils.splitByWholeSeparator(aclString, ",");
+    List<ACL> acl = new ArrayList<ACL>(aclComps.length);
+    for (String a : aclComps) {
+      if (StringUtils.isBlank(a)) {
+         continue;
+      }
+      a = a.trim();
+      // from ZooKeeperMain private method
+      int firstColon = a.indexOf(':');
+      int lastColon = a.lastIndexOf(':');
+      if (firstColon == -1 || lastColon == -1 || firstColon == lastColon) {
+         LOGGER.error(a + " does not have the form scheme:id:perm");
+         continue;
+      }
+      ACL newAcl = new ACL();
+      newAcl.setId(new Id(a.substring(0, firstColon), a.substring(
+          firstColon + 1, lastColon)));
+      newAcl.setPerms(getPermFromString(a.substring(lastColon + 1)));
+      acl.add(newAcl);
+    }
+    return acl;
+  }
+
+  /**
+   * Parse ACL permission string, from ZooKeeperMain private method
+   */
+  private static int getPermFromString(String permString) {
+    int perm = 0;
+    for (int i = 0; i < permString.length(); i++) {
+      switch (permString.charAt(i)) {
+        case 'r':
+          perm |= ZooDefs.Perms.READ;
+          break;
+        case 'w':
+          perm |= ZooDefs.Perms.WRITE;
+          break;
+        case 'c':
+          perm |= ZooDefs.Perms.CREATE;
+          break;
+        case 'd':
+          perm |= ZooDefs.Perms.DELETE;
+          break;
+        case 'a':
+          perm |= ZooDefs.Perms.ADMIN;
+          break;
+        default:
+          LOGGER.error("Unknown perm type: " + permString.charAt(i));
+      }
+    }
+    return perm;
+  }
+
+  /**
+   * A JAAS configuration for ZooKeeper clients intended to use for SASL
+   * Kerberos.
+   */
+  private static class JaasConfiguration
+      extends javax.security.auth.login.Configuration {
+    // Current installed Configuration
+    private final javax.security.auth.login.Configuration baseConfig =
+        javax.security.auth.login.Configuration.getConfiguration();
+    private final String loginContextName;
+    private final String principal;
+    private final String keyTabFile;
+
+    public JaasConfiguration(String hiveLoginContextName,
+        String principal, String keyTabFile) {
+      this.loginContextName = hiveLoginContextName;
+      this.principal = principal;
+      this.keyTabFile = keyTabFile;
+    }
+
+    @Override
+    public AppConfigurationEntry[] getAppConfigurationEntry(String appName) {
+      if (loginContextName.equals(appName)) {
+        Map<String, String> krbOptions = new HashMap<String, String>();
+        krbOptions.put("doNotPrompt", "true");
+        krbOptions.put("storeKey", "true");
+        krbOptions.put("useKeyTab", "true");
+        krbOptions.put("principal", principal);
+        krbOptions.put("keyTab", keyTabFile);
+        krbOptions.put("refreshKrb5Config", "true");
+        AppConfigurationEntry hiveZooKeeperClientEntry = new AppConfigurationEntry(
+            KerberosUtil.getKrb5LoginModuleName(),
+            LoginModuleControlFlag.REQUIRED, krbOptions);
+        return new AppConfigurationEntry[] { hiveZooKeeperClientEntry };
+      }
+      // Try the base config
+      if (baseConfig != null) {
+        return baseConfig.getAppConfigurationEntry(appName);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Setup configuration to connect to Zookeeper using kerberos.
+   */
+  private void setupJAASConfig(Configuration conf) throws IOException {
+    String principal = conf.get(RECORD_SERVICE_PRINCIPAL_CONF);
+    if (principal != null) {
+      String keytab = conf.get(RECORD_SERVICE_KEY_TAB_CONF);
+      if (keytab == null || keytab.trim().isEmpty()) {
+        throw new IOException("Keytab must be set to connect using kerberos.");
+      }
+      System.setProperty(
+          ZooKeeperSaslClient.LOGIN_CONTEXT_NAME_KEY, SASL_LOGIN_CONTEXT_NAME);
+      principal = SecurityUtil.getServerPrincipal(principal, "0.0.0.0");
+      JaasConfiguration jaasConf =
+          new JaasConfiguration(SASL_LOGIN_CONTEXT_NAME, principal, keytab);
+      // Install the Configuration in the runtime.
+      javax.security.auth.login.Configuration.setConfiguration(jaasConf);
+    }
+  }
+}

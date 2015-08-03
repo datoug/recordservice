@@ -19,6 +19,7 @@
 
 #include "common/logging.h"
 #include "rpc/jni-thrift-util.h"
+#include "runtime/exec-env.h"
 #include "util/jni-util.h"
 #include "util/logging-support.h"
 
@@ -30,6 +31,7 @@ DECLARE_string(sentry_config);
 DECLARE_int32(non_impala_java_vlog);
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
+DECLARE_bool(zookeeper_membership);
 
 DEFINE_bool(load_catalog_at_startup, false, "if true, load all catalog data at startup");
 
@@ -53,10 +55,10 @@ DEFINE_string(authorized_proxy_user_config, "",
     "separated list of short usernames, or '*' to indicate all users. For example: "
     "hue=user1,user2;admin=*");
 
-Frontend::Frontend() {
+Frontend::Frontend(const string& server_id) {
   JniMethodDescriptor methods[] = {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;IIZZ)V", &fe_ctor_},
+        "Ljava/lang/String;IIZZZZLjava/lang/String;)V", &fe_ctor_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
     {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
     {"getExplainPlan", "([B)Ljava/lang/String;", &get_explain_plan_id_},
@@ -99,6 +101,7 @@ Frontend::Frontend() {
   jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
       (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
   jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
+  jboolean running_recordservice_worker = FLAGS_recordservice_worker_port != 0;
   jstring policy_file_path =
       jni_env->NewStringUTF(FLAGS_authorization_policy_file.c_str());
   jstring server_name =
@@ -107,10 +110,14 @@ Frontend::Frontend() {
       jni_env->NewStringUTF(FLAGS_sentry_config.c_str());
   jstring auth_provider_class =
       jni_env->NewStringUTF(FLAGS_authorization_policy_provider_class.c_str());
+  jstring sid = jni_env->NewStringUTF(server_id.c_str());
+
   jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
       policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
       FlagToTLogLevel(FLAGS_non_impala_java_vlog), enable_delegation_tokens,
-      running_recordservice_planner);
+      running_recordservice_planner, running_recordservice_worker,
+      FLAGS_zookeeper_membership, sid);
+
   EXIT_IF_EXC(jni_env);
   EXIT_IF_ERROR(JniUtil::LocalToGlobalRef(jni_env, fe, &fe_));
 }

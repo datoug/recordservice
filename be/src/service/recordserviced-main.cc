@@ -44,12 +44,19 @@
 using namespace boost;
 using namespace impala;
 using namespace std;
+using namespace strings;
 
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
 
 int main(int argc, char** argv) {
   InitCommonRuntime(argc, argv, true);
+
+  if (FLAGS_recordservice_worker_port == 0 && FLAGS_recordservice_planner_port == 0) {
+    LOG(ERROR) << "Cannot start recordservice daemon that is not "
+               << "running the planner or worker services.";
+    exit(1);
+  }
 
   LlvmCodeGen::InitializeLlvm();
   JniUtil::InitLibhdfs();
@@ -58,7 +65,14 @@ int main(int argc, char** argv) {
   EXIT_IF_ERROR(HBaseTableWriter::InitJNI());
   InitFeSupport();
 
-  ExecEnv exec_env(true, true);
+  // Generate a service ID that will be unique across the cluster.
+  TNetworkAddress service_address(MakeNetworkAddress(FLAGS_hostname,
+    (FLAGS_recordservice_planner_port == 0 ?
+      FLAGS_recordservice_worker_port : FLAGS_recordservice_planner_port)));
+  string service_id = Substitute("recordserviced@$0",
+      TNetworkAddressToString(service_address));
+  ExecEnv exec_env(service_id, true, true);
+
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
 
@@ -95,4 +109,5 @@ int main(int argc, char** argv) {
 
   if (recordservice_planner != NULL) recordservice_planner->Join();
   if (recordservice_worker != NULL) recordservice_worker->Join();
+  return 0;
 }
