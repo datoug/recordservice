@@ -64,7 +64,9 @@ public abstract class Table implements CatalogObject {
   protected final String owner_;
   protected TTableDescriptor tableDesc_;
   protected List<FieldSchema> fields_;
-  protected TAccessLevel accessLevel_ = TAccessLevel.READ_WRITE;
+
+  // Possibly be called by multiple threads when loading block locations.
+  protected volatile TAccessLevel accessLevel_ = TAccessLevel.READ_WRITE;
 
   // Number of clustering columns.
   protected int numClusteringCols_;

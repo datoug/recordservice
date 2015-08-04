@@ -19,7 +19,6 @@ import java.util.List;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.log4j.Logger;
 import org.apache.thrift.TException;
 
@@ -103,9 +102,9 @@ public class MetaStoreUtil {
    * Returns a List containing all fetched Partitions.
    * Will throw a MetaException if any partitions in 'partNames' do not exist.
    */
-  public static List<Partition> fetchPartitionsByName(
-      HiveMetaStoreClient client, List<String> partNames, String dbName, String tblName)
-      throws MetaException, TException {
+  public static List<org.apache.hadoop.hive.metastore.api.Partition>
+      fetchPartitionsByName(HiveMetaStoreClient client, List<String> partNames,
+          String dbName, String tblName) throws MetaException, TException {
     LOG.trace(String.format("Fetching %d partitions for: %s.%s using partition " +
         "batch size: %d", partNames.size(), dbName, tblName, maxPartitionsPerRpc_));
 
@@ -121,5 +120,30 @@ public class MetaStoreUtil {
           client.getPartitionsByNames(dbName, tblName, partsToFetch));
     }
     return fetchedPartitions;
+  }
+
+  /**
+   * Identical to fetchPartitionsByName() except with retry when there is MetaException.
+   */
+  public static List<org.apache.hadoop.hive.metastore.api.Partition>
+      fetchPartitionsByName(HiveMetaStoreClient client, List<String> partNames,
+      String dbName, String tblName, int numRetries) throws TException {
+    int retryAttempt = 0;
+    while (true) {
+      try {
+        return MetaStoreUtil.fetchPartitionsByName(client, partNames, dbName, tblName);
+      } catch (MetaException e) {
+        // Only retry for MetaExceptions, since TExceptions could indicate a broken
+        // connection which we can't recover from by retrying.
+        if (retryAttempt < numRetries) {
+          LOG.error(String.format("Error fetching partitions for table: %s.%s. " +
+              "Retry attempt: %d/%d", dbName, tblName, retryAttempt, numRetries), e);
+          ++retryAttempt;
+          // TODO: Sleep for a bit?
+        } else {
+          throw e;
+        }
+      }
+    }
   }
 }
