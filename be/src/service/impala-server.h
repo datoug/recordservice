@@ -832,6 +832,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // id. Throws an exception if the session does not exist.
   void GetRecordServiceSession(ScopedSessionState* session);
 
+  // Compute HMAC using the given 'key' on the 'data'.
+  string ComputeHMAC(const std::string& key, const std::string& data);
+
   // Guards query_log_ and query_log_index_
   boost::mutex query_log_lock_;
 

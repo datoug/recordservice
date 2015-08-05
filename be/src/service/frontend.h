@@ -171,6 +171,15 @@ class Frontend {
   Status RetrieveUserAndPassword(const TRetrieveUserAndPasswordRequest& params,
       TRetrieveUserAndPasswordResponse* result);
 
+  // Given a sequence number in 'params', returns a sequence number and a master key
+  // corresponding to the number. In case the input number is negative, it returns
+  // the latest master key, and the corresponding sequence number. Otherwise, it returns
+  // the master key for the input number, and the input number itself.
+  // This function can only be called if delegation token is being used, and ZooKeeper
+  // is used to persist the tokens.
+  Status GetMasterKey(const TGetMasterKeyRequest& params,
+      TGetMasterKeyResponse* result);
+
  private:
   // Descriptor of Java Frontend class itself, used to create a new instance.
   jclass fe_class_;
@@ -201,6 +210,7 @@ class Frontend {
   jmethodID cancel_delegation_token_id_; // JniFrontend.cancelDelegationToken
   jmethodID renew_delegation_token_id_; // JniFrontend.renewDelegationToken
   jmethodID retrieve_user_and_password_id_; // JniFrontend.retrieveUserAndPassword
+  jmethodID get_master_key_id_; // JniFrontend.getMasterKey
   jmethodID fe_ctor_;
 };
 

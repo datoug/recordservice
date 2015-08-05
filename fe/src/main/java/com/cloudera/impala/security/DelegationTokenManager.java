@@ -21,6 +21,7 @@ package com.cloudera.impala.security;
 import java.io.IOException;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -239,5 +240,24 @@ public class DelegationTokenManager {
     String pw =
         DelegationTokenSecretManager.encodePassword(mgr_.retriableRetrievePassword(id));
     return new UserPassword(id.getUser().getShortUserName(), pw);
+  }
+
+  /**
+   * Given the sequence number 'keySeq', return a master key in the ZooKeeper token
+   * store, and the corresponding sequence number to the key.
+   * If the 'keySeq' is negative, this returns the latest master key, and the
+   * corresponding sequence number. Otherwise, the sequence number in the result will
+   * be the same as the input one.
+   * The token manager needs to use ZooKeeper in order to perform this operation.
+   * Otherwise, a RuntimeException will be thrown.
+   */
+  public Pair<Integer, String> getMasterKey(int keySeq) {
+    if (!(mgr_ instanceof PersistedDelegationTokenSecretManager)) {
+      throw new RuntimeException("getMasterKey() can only be called on " +
+          "PersistedDelegationTokenSecretManager.");
+    }
+    ZooKeeperTokenStore store =
+        ((PersistedDelegationTokenSecretManager) mgr_).getTokenStore();
+    return store.getMasterKey(keySeq);
   }
 }

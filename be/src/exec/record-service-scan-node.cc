@@ -134,15 +134,24 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   scoped_ptr<Codec> decompressor;
   Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
-  string decompressed_task;
+
+  TRecordServiceTask rs_task;
+  TExecRequest exec_req;
   for (int i = 0; i < result.tasks.size(); ++i) {
-    RETURN_IF_ERROR(decompressor->Decompress(
-        result.tasks[i].task, true, &decompressed_task));
-    TExecRequest exec_req;
-    uint32_t size = decompressed_task.size();
+    uint32_t size = result.tasks[i].task.size();
     RETURN_IF_ERROR(DeserializeThriftMsg(
-        reinterpret_cast<const uint8_t*>(decompressed_task.data()),
+        reinterpret_cast<const uint8_t*>(result.tasks[i].task.data()),
+        &size, true, &rs_task));
+
+    string decompressed_exec_req;
+    RETURN_IF_ERROR(decompressor->Decompress(
+        rs_task.request, true, &decompressed_exec_req));
+
+    size = decompressed_exec_req.size();
+    RETURN_IF_ERROR(DeserializeThriftMsg(
+        reinterpret_cast<const uint8_t*>(decompressed_exec_req.data()),
         &size, true, &exec_req));
+
     const THdfsFileSplit& split = exec_req.query_exec_request.per_node_scan_ranges.
         begin()->second[0].scan_range.hdfs_file_split;
     if (assigned_splits.find(split) != assigned_splits.end()) {

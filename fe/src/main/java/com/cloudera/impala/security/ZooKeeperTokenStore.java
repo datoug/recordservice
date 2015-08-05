@@ -29,9 +29,11 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.api.ACLProvider;
@@ -90,6 +92,13 @@ public class ZooKeeperTokenStore implements Closeable {
   private String zkConnectString;
   private int connectTimeoutMillis;
   private List<ACL> newNodeAcl = Arrays.asList(new ACL(Perms.ALL, Ids.AUTH_IDS));
+
+  // A map from sequence number to master keys. Used for fast lookup in 'getMasterKey'
+  private final Map<Integer, String> cachedMasterKeys_ =
+    new ConcurrentHashMap<Integer, String>();
+
+  // The latest sequence number at the moment.
+  private volatile int latestSeq_ = -1;
 
   /**
    * Exception for internal token store errors that typically cannot be handled by the caller.
@@ -280,7 +289,10 @@ public class ZooKeeperTokenStore implements Closeable {
       throw new TokenStoreException("Error creating new node with path " + keysPath, e);
     }
     LOGGER.info("Added key {}", newNode);
-    return getSeq(newNode);
+    int keySeq = getSeq(newNode);
+    cachedMasterKeys_.put(keySeq, s);
+    latestSeq_ = keySeq;
+    return keySeq;
   }
 
   public void updateMasterKey(int keySeq, String s) {
@@ -288,6 +300,7 @@ public class ZooKeeperTokenStore implements Closeable {
     String keyPath = rootNode + NODE_KEYS + "/" + String.format(ZK_SEQ_FORMAT, keySeq);
     try {
       zk.setData().forPath(keyPath, s.getBytes());
+      cachedMasterKeys_.put(keySeq, s);
     } catch (Exception e) {
       throw new TokenStoreException("Error setting data in " + keyPath, e);
     }
@@ -296,6 +309,8 @@ public class ZooKeeperTokenStore implements Closeable {
   public boolean removeMasterKey(int keySeq) {
     String keyPath = rootNode + NODE_KEYS + "/" + String.format(ZK_SEQ_FORMAT, keySeq);
     zkDelete(keyPath);
+    cachedMasterKeys_.remove(keySeq);
+    if (keySeq == latestSeq_) latestSeq_ = -1;
     return true;
   }
 
@@ -305,13 +320,42 @@ public class ZooKeeperTokenStore implements Closeable {
       String[] result = new String[allKeys.size()];
       int resultIdx = 0;
       for (byte[] keyBytes : allKeys.values()) {
-          result[resultIdx++] = new String(keyBytes);
+        result[resultIdx++] = new String(keyBytes);
       }
       return result;
     } catch (KeeperException ex) {
       throw new TokenStoreException(ex);
     } catch (InterruptedException ex) {
       throw new TokenStoreException(ex);
+    }
+  }
+
+  public Pair<Integer, String> getMasterKey(int keySeq) {
+    try {
+      if (keySeq < 0) keySeq = latestSeq_;
+
+      if (!cachedMasterKeys_.containsKey(keySeq)) {
+        // Can't find the keySeq in the cache. Now we need to find the
+        // latest key among all the persisted keys. The keys are added with
+        // incrementing sequence numbers, so we just look for the largest
+        // sequence number.
+        if (keySeq < 0) {
+          for (int seq : getAllKeys().keySet()) {
+            if (keySeq < seq) keySeq = seq;
+          }
+          latestSeq_ = keySeq;
+        }
+
+        String keyPath =
+            rootNode + NODE_KEYS + "/" + String.format(ZK_SEQ_FORMAT, keySeq);
+        byte[] data = zkGetData(keyPath);
+        cachedMasterKeys_.put(keySeq, new String(data));
+      }
+
+      return Pair.of(keySeq, cachedMasterKeys_.get(keySeq));
+    } catch (Exception e) {
+      throw new TokenStoreException(
+          "Error getting master key for sequence number " + keySeq, e);
     }
   }
 
@@ -384,6 +428,8 @@ public class ZooKeeperTokenStore implements Closeable {
                   .connectionTimeoutMs(connectTimeoutMillis).aclProvider(aclDefaultProvider)
                   .retryPolicy(new ExponentialBackoffRetry(1000, 3)).build();
           zkSession.start();
+          cachedMasterKeys_.clear();
+          latestSeq_ = -1;
         }
       }
     }

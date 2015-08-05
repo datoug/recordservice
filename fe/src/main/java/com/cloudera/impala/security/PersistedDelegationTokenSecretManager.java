@@ -80,6 +80,10 @@ public class PersistedDelegationTokenSecretManager extends DelegationTokenSecret
     this.tokenStore = sharedStore;
   }
 
+  public ZooKeeperTokenStore getTokenStore() {
+    return tokenStore;
+  }
+
   @Override
   public synchronized void startThreads() throws IOException {
     try {

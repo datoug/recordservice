@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
 import org.apache.hadoop.fs.FileSystem;
@@ -77,6 +78,8 @@ import com.cloudera.impala.thrift.TGetFunctionsParams;
 import com.cloudera.impala.thrift.TGetFunctionsResult;
 import com.cloudera.impala.thrift.TGetHadoopConfigRequest;
 import com.cloudera.impala.thrift.TGetHadoopConfigResponse;
+import com.cloudera.impala.thrift.TGetMasterKeyRequest;
+import com.cloudera.impala.thrift.TGetMasterKeyResponse;
 import com.cloudera.impala.thrift.TGetTablesParams;
 import com.cloudera.impala.thrift.TGetTablesResult;
 import com.cloudera.impala.thrift.TLoadDataReq;
@@ -628,6 +631,24 @@ public class JniFrontend {
     TSerializer serializer = new TSerializer(protocolFactory_);
     try {
       return serializer.serialize(result);
+    } catch (TException e) {
+      throw new InternalException(e.getMessage());
+    }
+  }
+
+  /**
+   * Return the master key corresponds to the sequence number in 'serializedRequest'
+   */
+  public byte[] getMasterKey(byte[] serializedRequest) throws ImpalaException {
+    TGetMasterKeyRequest request = new TGetMasterKeyRequest();
+    JniUtil.deserializeThrift(protocolFactory_, request, serializedRequest);
+    TGetMasterKeyResponse result = new TGetMasterKeyResponse();
+    Pair<Integer, String> pair =
+        DelegationTokenManager.instance().getMasterKey(request.seq);
+    result.seq = pair.getLeft();
+    result.key = pair.getRight();
+    try {
+      return new TSerializer(protocolFactory_).serialize(result);
     } catch (TException e) {
       throw new InternalException(e.getMessage());
     }

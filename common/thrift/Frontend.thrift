@@ -561,6 +561,20 @@ struct TExecRequest {
   11: optional RuntimeProfile.TEventSequence timeline
 }
 
+struct TRecordServiceTask {
+  // The embedded TExecRequest
+  1: required binary request
+
+  // The sequence number for the master key used to encrypt this request.
+  // This field is only set for secure cluster.
+  2: optional i32 seq
+
+  // The computed HMAC using the master key obtained
+  // from the sequence id and the request above, and verified before the
+  // task is executed. This field is only set for secure cluster.
+  3: optional string hmac
+}
+
 // Parameters to FeSupport.cacheJar().
 struct TCacheJarParams {
   // HDFS URI for the jar
@@ -753,3 +767,11 @@ struct TRetrieveUserAndPasswordResponse {
   2: required string password
 }
 
+struct TGetMasterKeyRequest {
+  1: required i32 seq
+}
+
+struct TGetMasterKeyResponse {
+  1: required i32 seq
+  2: required string key
+}

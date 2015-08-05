@@ -23,6 +23,7 @@
 #include <boost/foreach.hpp>
 #include <boost/algorithm/string.hpp>
 #include <gutil/strings/substitute.h>
+#include <openssl/hmac.h>
 
 #include <re2/re2.h>
 #include <re2/stringpiece.h>
@@ -703,6 +704,21 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     int buffer_size = 100 * 1024;  // start out with 100KB
     ThriftSerializer serializer(true, buffer_size);
 
+    TGetMasterKeyRequest key_request;
+    TGetMasterKeyResponse key_response;
+    if (!FLAGS_principal.empty()) {
+      // Get the master key, and use it to encrypt the TExecRequest
+      // Since we are requesting the latest master key here, use a negative number.
+      key_request.seq = -1;
+      Status status = exec_env_->frontend()->GetMasterKey(key_request, &key_response);
+      if (!status.ok()) {
+        ImpalaServer::ThrowRecordServiceException(
+            recordservice::TErrorCode::INTERNAL_ERROR,
+            "Error while getting the master key.",
+            status.msg().GetFullMessageDetails());
+      }
+    }
+
     scoped_ptr<Codec> compressor;
     Codec::CreateCompressor(NULL, false, THdfsCompression::LZ4, &compressor);
 
@@ -772,9 +788,22 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       query_request.per_node_scan_ranges.clear();
       query_request.per_node_scan_ranges[scan_node_id].push_back(scan_range);
 
-      string serialized_task;
-      serializer.Serialize<TExecRequest>(&result, &serialized_task);
-      compressor->Compress(serialized_task, true, &task.task);
+      // Now construct an encrypted TRecordServiceTask
+      TRecordServiceTask rs_task;
+
+      string serialized_request;
+      serializer.Serialize<TExecRequest>(&result, &serialized_request);
+      compressor->Compress(serialized_request, true, &rs_task.request);
+
+      if (!FLAGS_principal.empty()) {
+        rs_task.seq = key_response.seq;
+        rs_task.hmac = ComputeHMAC(key_response.key, rs_task.request);
+        rs_task.__isset.seq = true;
+        rs_task.__isset.hmac = true;
+      }
+
+      serializer.Serialize<TRecordServiceTask>(&rs_task, &task.task);
+
       return_val.tasks.push_back(task);
     }
   } catch (const recordservice::TRecordServiceException& e) {
@@ -818,8 +847,53 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
 
     scoped_ptr<Codec> decompressor;
     Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
-    string decompressed_task;
-    Status status = decompressor->Decompress(req.task, true, &decompressed_task);
+
+    TRecordServiceTask rs_task;
+    uint32_t size = req.task.size();
+    Status status = DeserializeThriftMsg(
+        reinterpret_cast<const uint8_t*>(req.task.data()), &size, true, &rs_task);
+    if (!status.ok()) {
+      ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
+          "Task is corrupt.",
+          status.msg().GetFullMessageDetails());
+    }
+
+    // Verify the task is not modified
+    if (!FLAGS_principal.empty()) {
+      TGetMasterKeyRequest key_request;
+      TGetMasterKeyResponse key_response;
+      if (!rs_task.__isset.seq || !rs_task.__isset.hmac) {
+        ThrowRecordServiceException(recordservice::TErrorCode::AUTHENTICATION_ERROR,
+            "Kerberos is enabled but task is not encrypted.");
+      }
+      key_request.seq = rs_task.seq;
+      status = exec_env_->frontend()->GetMasterKey(key_request, &key_response);
+      if (!status.ok()) {
+        ImpalaServer::ThrowRecordServiceException(
+            recordservice::TErrorCode::INTERNAL_ERROR,
+            "Error while getting the master key.",
+            status.msg().GetFullMessageDetails());
+      }
+
+      DCHECK_EQ(key_response.seq, rs_task.seq);
+
+      string hmac = ComputeHMAC(key_response.key, rs_task.request);
+      if (strcmp(hmac.c_str(), rs_task.hmac.c_str()) != 0) {
+        ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
+            "Task failed authentication.",
+            "Task's HMAC doesn't match the one used to encrypt it.");
+      }
+      VLOG_REQUEST << "Successfully verified the task's HMAC";
+    } else {
+      // non-secure cluster - make sure hmac/seq is not set
+      if (rs_task.__isset.seq || rs_task.__isset.hmac) {
+        ThrowRecordServiceException(recordservice::TErrorCode::AUTHENTICATION_ERROR,
+            "Kerberos is not enabled but task is encrypted.");
+      }
+    }
+
+    string decompressed_exec_req;
+    status = decompressor->Decompress(rs_task.request, true, &decompressed_exec_req);
     if (!status.ok()) {
       ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Task is corrupt.",
@@ -827,15 +901,16 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
     }
 
     TExecRequest exec_req;
-    uint32_t size = decompressed_task.size();
+    size = decompressed_exec_req.size();
     status = DeserializeThriftMsg(
-        reinterpret_cast<const uint8_t*>(decompressed_task.data()),
+        reinterpret_cast<const uint8_t*>(decompressed_exec_req.data()),
         &size, true, &exec_req);
     if (!status.ok()) {
       ThrowRecordServiceException(recordservice::TErrorCode::INVALID_TASK,
           "Task is corrupt.",
           status.msg().GetFullMessageDetails());
     }
+
     TQueryExecRequest& query_request = exec_req.query_exec_request;
 
     VLOG_REQUEST << "RecordService::ExecRequest: "
@@ -1149,7 +1224,7 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
       // FIXME: Add RCFile. We need to look in the file metadata for the number of
       // columns.
       stringstream ss;
-      ss << "File format '" << *format << "'is not supported iwth path requests.";
+      ss << "File format '" << *format << "'is not supported with path requests.";
       return Status(ss.str());
     }
   }
@@ -1286,6 +1361,15 @@ void ImpalaServer::RenewDelegationToken(const recordservice::TDelegationToken& t
         "Could not renew delegation token.",
         status.GetDetail());
   }
+}
+
+string ImpalaServer::ComputeHMAC(const string& key, const string& data) {
+  unsigned char result[160];
+  unsigned int result_len;
+  HMAC(EVP_sha1(), reinterpret_cast<const unsigned char*>(key.c_str()), key.length(),
+      reinterpret_cast<const unsigned char*>(data.c_str()), data.length(),
+      reinterpret_cast<unsigned char*>(&result), &result_len);
+  return string(reinterpret_cast<const char*>(result), result_len);
 }
 
 }

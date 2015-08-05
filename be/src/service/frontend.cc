@@ -82,6 +82,7 @@ Frontend::Frontend() {
     {"cancelDelegationToken", "([B)V", &cancel_delegation_token_id_},
     {"renewDelegationToken", "([B)V", &renew_delegation_token_id_},
     {"retrieveUserAndPassword", "([B)[B", &retrieve_user_and_password_id_},
+    {"getMasterKey", "([B)[B", &get_master_key_id_},
   };
 
   JNIEnv* jni_env = getJNIEnv();
@@ -254,6 +255,11 @@ Status Frontend::RenewDelegationToken(const TRenewDelegationTokenRequest& params
 Status Frontend::RetrieveUserAndPassword(const TRetrieveUserAndPasswordRequest& params,
       TRetrieveUserAndPasswordResponse* result) {
   return JniUtil::CallJniMethod(fe_, retrieve_user_and_password_id_, params, result);
+}
+
+Status Frontend::GetMasterKey(const TGetMasterKeyRequest& params,
+    TGetMasterKeyResponse* result) {
+  return JniUtil::CallJniMethod(fe_, get_master_key_id_, params, result);
 }
 
 bool Frontend::IsAuthorizationError(const Status& status) {
