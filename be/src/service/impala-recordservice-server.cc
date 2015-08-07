@@ -951,6 +951,38 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       query_request.query_ctx.request.query_options.__set_mem_limit(req.mem_limit);
     }
     if (req.__isset.offset && req.offset != 0) task_state->offset = req.offset;
+    if (req.__isset.logging_level) {
+      // Remap client logging levels to server logging levels.
+      int level = 0;
+      switch (req.logging_level) {
+        case recordservice::LoggingLevel::OFF:
+          level = 0;
+          break;
+
+        case recordservice::LoggingLevel::ALL:
+        case recordservice::LoggingLevel::TRACE:
+          level = QUERY_VLOG_ROW_LEVEL;
+          break;
+
+        case recordservice::LoggingLevel::FATAL:
+        case recordservice::LoggingLevel::ERROR:
+          // Always on, no need to do anything.
+          break;
+
+        case recordservice::LoggingLevel::WARN:
+          level = QUERY_VLOG_WARNING_LEVEL;
+          break;
+
+        case recordservice::LoggingLevel::INFO:
+          level = QUERY_VLOG_FRAGMENT_LEVEL;
+          break;
+
+        case recordservice::LoggingLevel::DEBUG:
+          level = QUERY_VLOG_BATCH_LEVEL;
+          break;
+      }
+      query_request.query_ctx.request.query_options.__set_logging_level(level);
+    }
 
     shared_ptr<QueryExecState> exec_state;
     status = ExecuteRecordServiceRequest(&query_request.query_ctx,
