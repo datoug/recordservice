@@ -435,6 +435,86 @@ recordservice::TType ToRecordServiceType(const ColumnType& t) {
   return result;
 }
 
+// Converts a schema to the SQL create table schema. e.g. schema to
+// (col1Name col1Type, col2Name col2Type, ...)
+Status SchemaToSqlString(const recordservice::TSchema& schema, string* sql) {
+  stringstream ss;
+  ss << "(";
+  for (int i = 0; i < schema.cols.size(); ++i) {
+    if (i != 0) ss << ", ";
+    ss << schema.cols[i].name << " ";
+    switch (schema.cols[i].type.type_id) {
+      case recordservice::TTypeId::BOOLEAN:
+        ss << "BOOLEAN";
+        break;
+      case recordservice::TTypeId::TINYINT:
+        ss << "TINYINT";
+        break;
+      case recordservice::TTypeId::SMALLINT:
+        ss << "SMALLINT";
+        break;
+      case recordservice::TTypeId::INT:
+        ss << "INT";
+        break;
+      case recordservice::TTypeId::BIGINT:
+        ss << "BIGINT";
+        break;
+      case recordservice::TTypeId::FLOAT:
+        ss << "FLOAT";
+        break;
+      case recordservice::TTypeId::DOUBLE:
+        ss << "DOUBLE";
+        break;
+      case recordservice::TTypeId::STRING:
+        ss << "STRING";
+        break;
+      case recordservice::TTypeId::CHAR:
+      case recordservice::TTypeId::VARCHAR:
+        if (!schema.cols[i].type.__isset.len) {
+          stringstream err;
+          err << "Invalid schema. 'len' must be set for CHAR/VARCHAR type. Type="
+              << apache::thrift::ThriftDebugString(schema.cols[i].type);
+          return Status(err.str());
+        }
+        if (schema.cols[i].type.type_id == recordservice::TTypeId::CHAR) {
+          ss << "CHAR";
+        } else {
+          ss << "VARCHAR";
+        }
+        ss << "(" << schema.cols[i].type.len << ")";
+        break;
+      case recordservice::TTypeId::DECIMAL:
+        if (!schema.cols[i].type.__isset.precision ||
+            !schema.cols[i].type.__isset.scale) {
+          stringstream err;
+          err << "Invalid schema. 'precision' and 'scale' "
+              << "must be set for DECIMAL type. Type="
+              << apache::thrift::ThriftDebugString(schema.cols[i].type);
+          return Status(err.str());
+        }
+        ss << "DECIMAL(" << schema.cols[i].type.precision << ","
+            << schema.cols[i].type.scale << ")";
+        break;
+      case recordservice::TTypeId::TIMESTAMP_NANOS:
+        ss << "TIMESTAMP";
+        break;
+      default: {
+        // FIXME: Add RCFile. We need to look in the file metadata for the number of
+        // columns.
+        stringstream err;
+        err << "Invalid schema. Type "
+            << apache::thrift::ThriftDebugString(schema.cols[i].type)
+            << " is unknown.";
+        return Status(err.str());
+      }
+    }
+  }
+  ss << ")";
+  *sql = ss.str();
+  return Status::OK;
+}
+
+
 static void PopulateResultSchema(const TResultSetMetadata& metadata,
     recordservice::TSchema* schema) {
   schema->cols.resize(metadata.columns.size());
@@ -1235,26 +1315,61 @@ Status ImpalaServer::CreateTmpTable(const recordservice::TPathRequest& request,
   *table_name = string(TEMP_DB) + "." + string(TEMP_TBL);
   string create_tbl_stmt("CREATE EXTERNAL TABLE " + *table_name);
 
+  // Append the schema to the create statement.
+  if (request.__isset.schema) {
+    // Schema is set from the client, use that.
+    string sql_schema;
+    RETURN_IF_ERROR(SchemaToSqlString(request.schema, &sql_schema));
+    create_tbl_stmt += sql_schema + string(" ");
+  } else {
+    switch (*format) {
+      case THdfsFileFormat::TEXT:
+      case THdfsFileFormat::SEQUENCE_FILE:
+        // For text and sequence file, we can't get the schema, just make it a string.
+        create_tbl_stmt += string("(record STRING) ");
+        break;
+      case THdfsFileFormat::PARQUET:
+        create_tbl_stmt += string(" LIKE PARQUET '") + first_file + string("' ");
+        break;
+      case THdfsFileFormat::AVRO:
+        create_tbl_stmt += string(" LIKE AVRO '") + first_file + string("' ");
+        break;
+      default: {
+        // FIXME: Add RCFile. We need to look in the file metadata for the number of
+        // columns.
+        stringstream ss;
+        ss << "Cannot infer schema for file format '" << *format;
+        return Status(ss.str());
+      }
+    }
+  }
+
+  // Append the file format.
   switch (*format) {
     case THdfsFileFormat::TEXT:
-      // For text, we can't get the schema, just make it a string.
-      create_tbl_stmt += string("(record STRING)");
+      if (request.__isset.field_delimiter) {
+        create_tbl_stmt += string("ROW FORMAT DELIMITED FIELDS TERMINATED BY '")
+          + (char)request.field_delimiter + string("' ");
+      }
+      create_tbl_stmt += string("STORED AS TEXTFILE");
       break;
     case THdfsFileFormat::SEQUENCE_FILE:
-      // For sequence file, we can't get the schema, just make it a string.
-      create_tbl_stmt += string("(record STRING) STORED AS SEQUENCEFILE");
+      if (request.__isset.field_delimiter) {
+        create_tbl_stmt += string("ROW FORMAT DELIMITED FIELDS TERMINATED BY '")
+          + (char)request.field_delimiter + string("' ");
+      }
+      create_tbl_stmt += string("STORED AS SEQUENCEFILE");
       break;
     case THdfsFileFormat::PARQUET:
-      create_tbl_stmt += string(" LIKE PARQUET '") + first_file +
-          string("' STORED AS PARQUET");
+      create_tbl_stmt += string("STORED AS PARQUET");
       break;
     case THdfsFileFormat::AVRO:
-      create_tbl_stmt += string(" LIKE AVRO '") + first_file +
-          string("' STORED AS AVRO");
+      create_tbl_stmt += string("STORED AS AVRO");
+      break;
+    case THdfsFileFormat::RC_FILE:
+      create_tbl_stmt += string("STORED AS RCFILE");
       break;
     default: {
-      // FIXME: Add RCFile. We need to look in the file metadata for the number of
-      // columns.
       stringstream ss;
       ss << "File format '" << *format << "'is not supported with path requests.";
       return Status(ss.str());
