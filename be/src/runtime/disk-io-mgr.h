@@ -36,6 +36,8 @@
 #include "util/runtime-profile.h"
 #include "util/thread.h"
 
+DECLARE_int32(read_size);
+
 namespace impala {
 
 class LockTracker;
@@ -298,7 +300,8 @@ class DiskIoMgr {
   class ScanRange : public RequestRange {
    public:
     // The initial queue capacity for this.  Specify -1 to use IoMgr default.
-    ScanRange(int initial_capacity = -1);
+    ScanRange(int initial_capacity = -1, int min_buffer_size = -1,
+        int max_buffer_size = -1);
 
     virtual ~ScanRange();
 
@@ -429,6 +432,12 @@ class DiskIoMgr {
     // In that case, the capcity is only realized when the caller removes buffers
     // from ready_buffers_.
     int ready_buffers_capacity_;
+
+    // The minimum size of each read buffer.
+    int min_buffer_size_;
+
+    // Maximum read size. This is also the maximum size of each allocated buffer.
+    int max_buffer_size_;
 
     // Lock that should be taken during hdfs calls. Only one thread (the disk reading
     // thread) calls into hdfs at a time so this lock does not have performance impact.
@@ -583,7 +592,7 @@ class DiskIoMgr {
   int64_t GetReadThroughput();
 
   // Returns the maximum read buffer size
-  int max_read_buffer_size() const { return max_buffer_size_; }
+  int max_read_buffer_size() const { return FLAGS_read_size; }
 
   // Returns the total number of disk queues (both local and remote).
   int num_total_disks() const { return disk_queues_.size(); }
@@ -637,12 +646,6 @@ class DiskIoMgr {
   // Number of worker(read) threads per disk. Also the max depth of queued
   // work to the disk.
   const int num_threads_per_disk_;
-
-  // Maximum read size. This is also the maximum size of each allocated buffer.
-  const int max_buffer_size_;
-
-  // The minimum size of each read buffer.
-  const int min_buffer_size_;
 
   // Thread group containing all the worker threads.
   ThreadGroup disk_thread_group_;

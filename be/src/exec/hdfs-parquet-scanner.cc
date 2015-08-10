@@ -64,6 +64,15 @@ const int MAX_PAGE_HEADER_SIZE = 8 * 1024 * 1024;
 // upper bound.
 const int MAX_DICT_HEADER_SIZE = 100;
 
+// Initial scan range capacity for Parquet format. We want this to be much smaller
+// than the default value used for other formats.
+// TODO: determine this value based on number of columns.
+const int INITIAL_SCAN_RANGE_CAPACITY = 4;
+
+// The maximum scan range buffer size for Parquet. It should be smaller than
+// other file formats.
+const int MAX_SCAN_RANGE_BUFFER_SIZE = 1 * 1024 * 1024;
+
 #define LOG_OR_ABORT(error_msg, runtime_state)                          \
   if (runtime_state->abort_on_error()) {                                \
     return Status(error_msg);                                           \
@@ -110,7 +119,7 @@ Status HdfsParquetScanner::IssueInitialRanges(HdfsScanNode* scan_node,
       DiskIoMgr::ScanRange* footer_range = scan_node->AllocateScanRange(
           files[i]->fs, files[i]->filename.c_str(), footer_size, footer_start,
           metadata->partition_id, split->disk_id(), split->try_cache(),
-          split->expected_local());
+          split->expected_local(), -1, FOOTER_SIZE);
       footer_ranges.push_back(footer_range);
     }
   }
@@ -1095,6 +1104,10 @@ Status HdfsParquetScanner::InitColumns(int row_group_idx) {
   // All the scan ranges (one for each column).
   vector<DiskIoMgr::ScanRange*> col_ranges;
 
+  int max_scan_range_buffer_size = max(
+      FLAGS_read_size / static_cast<int>(column_readers_.size()),
+      MAX_SCAN_RANGE_BUFFER_SIZE);
+
   for (int i = 0; i < column_readers_.size(); ++i) {
     const parquet::ColumnChunk& col_chunk =
         row_group.columns[column_readers_[i]->col_idx()];
@@ -1141,7 +1154,8 @@ Status HdfsParquetScanner::InitColumns(int row_group_idx) {
     DiskIoMgr::ScanRange* col_range = scan_node_->AllocateScanRange(
         metadata_range_->fs(), metadata_range_->file(), col_len, col_start,
         column_readers_[i]->col_idx(), metadata_range_->disk_id(),
-        metadata_range_->try_cache(), metadata_range_->expected_local());
+        metadata_range_->try_cache(), metadata_range_->expected_local(),
+        INITIAL_SCAN_RANGE_CAPACITY, -1, max_scan_range_buffer_size);
     col_ranges.push_back(col_range);
 
     // Get the stream that will be used for this column

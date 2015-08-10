@@ -181,7 +181,8 @@ class HdfsScanNode : public ScanNode {
   // This is thread safe.
   DiskIoMgr::ScanRange* AllocateScanRange(
       hdfsFS fs, const char* file, int64_t len, int64_t offset, int64_t partition_id,
-      int disk_id, bool try_cache, bool expected_local);
+      int disk_id, bool try_cache, bool expected_local, int initial_capacity = -1,
+      int min_buffer_size = -1, int max_buffer_size = -1);
 
   // Adds ranges to the io mgr queue and starts up new scanner threads if possible.
   Status AddDiskIoRanges(const std::vector<DiskIoMgr::ScanRange*>& ranges);

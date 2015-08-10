@@ -24,9 +24,15 @@ using namespace boost;
 using namespace impala;
 using namespace std;
 
-// A very large max value to prevent things from going out of control. Not
-// expected to ever hit this value (1GB of buffered data per range).
-const int MAX_QUEUE_CAPACITY = 128;
+// The read size is the size of the reads sent to hdfs/os.
+// There is a trade off between latency and throughout, trying to keep disks busy but
+// not introduce seeks. The literature seems to agree that with 8 MB reads, random
+// io and sequential io perform similarly.
+DEFINE_int32(read_size, 8 * 1024 * 1024, "Read Size (in bytes)");
+DEFINE_int32(min_buffer_size, 1024, "The minimum read buffer size (in bytes)");
+
+// A large max value to prevent things from going out of control.
+const int MAX_QUEUE_CAPACITY = 32;
 const int MIN_QUEUE_CAPACITY = 2;
 
 // Implementation of the ScanRange functionality. Each ScanRange contains a queue
@@ -204,11 +210,17 @@ bool DiskIoMgr::ScanRange::Validate() {
   return true;
 }
 
-DiskIoMgr::ScanRange::ScanRange(int capacity)
-  : lock_("ScanRange"),
-    ready_buffers_capacity_(capacity),
-    hdfs_lock_("ScanRangeLibHdfs") {
+DiskIoMgr::ScanRange::ScanRange(int capacity, int min_size, int max_size)
+    : lock_("ScanRange"), ready_buffers_capacity_(capacity),
+      min_buffer_size_(min_size), max_buffer_size_(max_size),
+      hdfs_lock_("ScanRangeLibHdfs") {
   request_type_ = RequestType::READ;
+  if (min_buffer_size_ < FLAGS_min_buffer_size) {
+    min_buffer_size_ = FLAGS_min_buffer_size;
+  }
+  if (max_buffer_size_ < 0 || max_buffer_size_ > FLAGS_read_size) {
+    max_buffer_size_ = FLAGS_read_size;
+  }
   Reset(NULL, "", -1, -1, -1, false, false);
 }
 
@@ -379,9 +391,9 @@ Status DiskIoMgr::ScanRange::Read(char* buffer, int64_t* bytes_read, bool* eosr)
   *bytes_read = 0;
   // hdfsRead() length argument is an int.  Since max_buffer_size_ type is no bigger
   // than an int, this min() will ensure that we don't overflow the length argument.
-  DCHECK_LE(sizeof(io_mgr_->max_buffer_size_), sizeof(int));
+  DCHECK_LE(sizeof(max_buffer_size_), sizeof(int));
   int bytes_to_read =
-      min(static_cast<int64_t>(io_mgr_->max_buffer_size_), len_ - bytes_read_);
+      min(static_cast<int64_t>(max_buffer_size_), len_ - bytes_read_);
 
   if (fs_ != NULL) {
     DCHECK_NOTNULL(hdfs_file_);

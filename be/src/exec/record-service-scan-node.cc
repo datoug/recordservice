@@ -471,5 +471,7 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
   scanner_threads_.JoinAll();
   DCHECK_EQ(num_active_scanners_, 0);
 
+  materialized_row_batches_->Cleanup();
+
   ScanNode::Close(state);
 }

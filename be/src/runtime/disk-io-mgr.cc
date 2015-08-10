@@ -23,6 +23,8 @@
 #include "util/lock-tracker.h"
 
 DECLARE_bool(disable_mem_pools);
+DECLARE_int32(read_size);
+DECLARE_int32(min_buffer_size);
 
 using namespace boost;
 using namespace impala;
@@ -40,12 +42,6 @@ DEFINE_int32(num_threads_per_disk, 0, "number of threads per disk");
 // open to S3 and use of multiple CPU cores since S3 reads are relatively compute
 // expensive (SSL and JNI buffer overheads).
 DEFINE_int32(num_s3_io_threads, 16, "number of S3 I/O threads");
-// The read size is the size of the reads sent to hdfs/os.
-// There is a trade off of latency and throughout, trying to keep disks busy but
-// not introduce seeks.  The literature seems to agree that with 8 MB reads, random
-// io and sequential io perform similarly.
-DEFINE_int32(read_size, 8 * 1024 * 1024, "Read Size (in bytes)");
-DEFINE_int32(min_buffer_size, 1024, "The minimum read buffer size (in bytes)");
 
 // With 1024B through 8MB buffers, this is up to ~2GB of buffers.
 DEFINE_int32(max_free_io_buffers, 128,
@@ -224,14 +220,12 @@ static void CheckSseSupport() {
 
 DiskIoMgr::DiskIoMgr() :
     num_threads_per_disk_(FLAGS_num_threads_per_disk),
-    max_buffer_size_(FLAGS_read_size),
-    min_buffer_size_(FLAGS_min_buffer_size),
     cached_read_options_(NULL),
     shut_down_(false),
     total_bytes_read_counter_(TUnit::BYTES),
     read_timer_(TUnit::TIME_NS),
     free_buffers_lock_("DiskIoMgr::FreeBuffers") {
-  int64_t max_buffer_size_scaled = BitUtil::Ceil(max_buffer_size_, min_buffer_size_);
+  int64_t max_buffer_size_scaled = BitUtil::Ceil(FLAGS_read_size, FLAGS_min_buffer_size);
   free_buffers_.resize(BitUtil::Log2(max_buffer_size_scaled) + 1);
   int num_local_disks = FLAGS_num_disks == 0 ? DiskInfo::num_disks() : FLAGS_num_disks;
   disk_queues_.resize(num_local_disks + REMOTE_NUM_DISKS);
@@ -241,14 +235,12 @@ DiskIoMgr::DiskIoMgr() :
 DiskIoMgr::DiskIoMgr(int num_local_disks, int threads_per_disk, int min_buffer_size,
                      int max_buffer_size) :
     num_threads_per_disk_(threads_per_disk),
-    max_buffer_size_(max_buffer_size),
-    min_buffer_size_(min_buffer_size),
     cached_read_options_(NULL),
     shut_down_(false),
     total_bytes_read_counter_(TUnit::BYTES),
     read_timer_(TUnit::TIME_NS),
     free_buffers_lock_("DiskIoMgr::FreeBuffers", LockTracker::global()) {
-  int64_t max_buffer_size_scaled = BitUtil::Ceil(max_buffer_size_, min_buffer_size_);
+  int64_t max_buffer_size_scaled = BitUtil::Ceil(max_buffer_size, min_buffer_size);
   free_buffers_.resize(BitUtil::Log2(max_buffer_size_scaled) + 1);
   if (num_local_disks == 0) num_local_disks = DiskInfo::num_disks();
   disk_queues_.resize(num_local_disks + REMOTE_NUM_DISKS);
@@ -566,9 +558,9 @@ Status DiskIoMgr::Read(RequestContext* reader,
   DCHECK_NOTNULL(buffer);
   *buffer = NULL;
 
-  if (range->len() > max_buffer_size_) {
+  if (range->len() > range->max_buffer_size_) {
     return Status(Substitute("Cannot perform sync read larger than $0. Request was $1",
-                             max_buffer_size_, range->len()));
+                             range->max_buffer_size_, range->len()));
   }
 
   vector<DiskIoMgr::ScanRange*> ranges;
@@ -633,13 +625,13 @@ DiskIoMgr::BufferDescriptor* DiskIoMgr::GetBufferDesc(
 }
 
 char* DiskIoMgr::GetFreeBuffer(int64_t* buffer_size) {
-  DCHECK_LE(*buffer_size, max_buffer_size_);
+  DCHECK_LE(*buffer_size, FLAGS_read_size);
   DCHECK_GT(*buffer_size, 0);
-  *buffer_size = min(static_cast<int64_t>(max_buffer_size_), *buffer_size);
+  *buffer_size = min(static_cast<int64_t>(FLAGS_read_size), *buffer_size);
   int idx = free_buffers_idx(*buffer_size);
   // Quantize buffer size to nearest power of 2 greater than the specified buffer size and
   // convert to bytes
-  *buffer_size = (1 << idx) * min_buffer_size_;
+  *buffer_size = (1 << idx) * FLAGS_min_buffer_size;
 
   lock_guard<SpinLock> l(free_buffers_lock_);
   char* buffer = NULL;
@@ -673,11 +665,10 @@ void DiskIoMgr::GcIoBuffers() {
   for (int idx = 0; idx < free_buffers_.size(); ++idx) {
     for (list<char*>::iterator iter = free_buffers_[idx].begin();
          iter != free_buffers_[idx].end(); ++iter) {
-      int64_t buffer_size = (1 << idx) * min_buffer_size_;
+      int64_t buffer_size = (1 << idx) * FLAGS_min_buffer_size;
       process_mem_tracker_->Release(buffer_size);
       --num_allocated_buffers_;
       delete[] *iter;
-
       ++buffers_freed;
       bytes_freed += buffer_size;
     }
@@ -704,9 +695,9 @@ void DiskIoMgr::ReturnFreeBuffer(BufferDescriptor* desc) {
 void DiskIoMgr::ReturnFreeBuffer(char* buffer, int64_t buffer_size) {
   DCHECK(buffer != NULL);
   int idx = free_buffers_idx(buffer_size);
-  DCHECK_EQ(BitUtil::Ceil(buffer_size, min_buffer_size_) & ~(1 << idx), 0)
-      << "buffer_size_ / min_buffer_size_ should be power of 2, got buffer_size = "
-      << buffer_size << ", min_buffer_size_ = " << min_buffer_size_;
+  DCHECK_EQ(BitUtil::Ceil(buffer_size, FLAGS_min_buffer_size) & ~(1 << idx), 0)
+      << "buffer_size_ / min_buffer_size should be power of 2, got buffer_size = "
+      << buffer_size << ", min_buffer_size = " << FLAGS_min_buffer_size;
   lock_guard<SpinLock> l(free_buffers_lock_);
   if (!FLAGS_disable_mem_pools && free_buffers_[idx].size() < FLAGS_max_free_io_buffers) {
     free_buffers_[idx].push_back(buffer);
@@ -964,7 +955,8 @@ void DiskIoMgr::ReadRange(DiskQueue* disk_queue, RequestContext* reader,
   char* buffer = NULL;
   int64_t bytes_remaining = range->len_ - range->bytes_read_;
   DCHECK_GT(bytes_remaining, 0);
-  int64_t buffer_size = ::min(bytes_remaining, static_cast<int64_t>(max_buffer_size_));
+  int64_t buffer_size = ::min(bytes_remaining,
+      static_cast<int64_t>(range->max_buffer_size_));
   bool enough_memory = true;
   if (reader->mem_tracker_ != NULL) {
     enough_memory = reader->mem_tracker_->SpareCapacity() > LOW_MEMORY;
@@ -1101,7 +1093,7 @@ Status DiskIoMgr::WriteRangeHelper(FILE* file_handle, WriteRange* write_range) {
 }
 
 int DiskIoMgr::free_buffers_idx(int64_t buffer_size) {
-  int64_t buffer_size_scaled = BitUtil::Ceil(buffer_size, min_buffer_size_);
+  int64_t buffer_size_scaled = BitUtil::Ceil(buffer_size, FLAGS_min_buffer_size);
   int idx = BitUtil::Log2(buffer_size_scaled);
   DCHECK_GE(idx, 0);
   DCHECK_LT(idx, free_buffers_.size());
@@ -1109,7 +1101,7 @@ int DiskIoMgr::free_buffers_idx(int64_t buffer_size) {
 }
 
 Status DiskIoMgr::AddWriteRange(RequestContext* writer, WriteRange* write_range) {
-  DCHECK_LE(write_range->len(), max_buffer_size_);
+  DCHECK_LE(write_range->len(), FLAGS_read_size);
   unique_lock<Lock> writer_lock(writer->lock_);
 
   if (writer->state_ == RequestContext::Cancelled) {
