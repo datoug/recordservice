@@ -55,7 +55,7 @@ class BufferedBlockMgrTest : public ::testing::Test {
   const static int block_size_ = 1024;
 
   virtual void SetUp() {
-    exec_env_.reset(new ExecEnv);
+    exec_env_.reset(new ExecEnv("BufferedBlockMgrTest"));
     exec_env_->InitForFeTests();
     io_mgr_tracker_.reset(new MemTracker(-1));
     block_mgr_parent_tracker_.reset(new MemTracker(-1));

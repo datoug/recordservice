@@ -92,7 +92,8 @@ class ImpalaTestBackend : public ImpalaInternalServiceIf {
 class DataStreamTest : public testing::Test {
  protected:
   DataStreamTest()
-    : runtime_state_(TPlanFragmentInstanceCtx(), "", &exec_env_),
+    : exec_env_("DataStreamTest"),
+      runtime_state_(TPlanFragmentInstanceCtx(), "", &exec_env_),
       next_val_(0) {
     // Initialize Mem trackers for use by the data stream receiver.
     exec_env_.InitForFeTests();

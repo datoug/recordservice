@@ -58,7 +58,7 @@ static const int NUM_STRINGS = sizeof(STRINGS) / sizeof(StringValue);
 class SimpleTupleStreamTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    exec_env_.reset(new ExecEnv);
+    exec_env_.reset(new ExecEnv("BufferedTupleStreamTest"));
     exec_env_->disk_io_mgr()->Init(&tracker_);
     runtime_state_.reset(
         new RuntimeState(TPlanFragmentInstanceCtx(), "", exec_env_.get()));
