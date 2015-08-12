@@ -55,10 +55,11 @@ DEFINE_string(authorized_proxy_user_config, "",
     "separated list of short usernames, or '*' to indicate all users. For example: "
     "hue=user1,user2;admin=*");
 
-Frontend::Frontend(const string& server_id) {
+Frontend::Frontend() {
   JniMethodDescriptor methods[] = {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;IIZZZZLjava/lang/String;)V", &fe_ctor_},
+        "Ljava/lang/String;II)V", &fe_ctor_},
+    {"initZooKeeper", "(Ljava/lang/String;ZZZ)V", &init_zookeeper_id_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
     {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
     {"getExplainPlan", "([B)Ljava/lang/String;", &get_explain_plan_id_},
@@ -98,10 +99,6 @@ Frontend::Frontend(const string& server_id) {
   };
 
   jboolean lazy = (FLAGS_load_catalog_at_startup ? false : true);
-  jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
-      (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
-  jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
-  jboolean running_recordservice_worker = FLAGS_recordservice_worker_port != 0;
   jstring policy_file_path =
       jni_env->NewStringUTF(FLAGS_authorization_policy_file.c_str());
   jstring server_name =
@@ -110,16 +107,32 @@ Frontend::Frontend(const string& server_id) {
       jni_env->NewStringUTF(FLAGS_sentry_config.c_str());
   jstring auth_provider_class =
       jni_env->NewStringUTF(FLAGS_authorization_policy_provider_class.c_str());
-  jstring sid = jni_env->NewStringUTF(server_id.c_str());
 
   jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
       policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
-      FlagToTLogLevel(FLAGS_non_impala_java_vlog), enable_delegation_tokens,
-      running_recordservice_planner, running_recordservice_worker,
-      FLAGS_zookeeper_membership, sid);
+      FlagToTLogLevel(FLAGS_non_impala_java_vlog));
 
   EXIT_IF_EXC(jni_env);
   EXIT_IF_ERROR(JniUtil::LocalToGlobalRef(jni_env, fe, &fe_));
+}
+
+Status Frontend::InitZooKeeper() {
+  jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
+      (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
+
+  // Not using zookeeper.
+  if (!enable_delegation_tokens && !FLAGS_zookeeper_membership) return Status::OK;
+
+  JNIEnv* jni_env = getJNIEnv();
+  JniLocalFrame jni_frame;
+  RETURN_IF_ERROR(jni_frame.push(jni_env));
+  jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
+  jboolean running_recordservice_worker = FLAGS_recordservice_worker_port != 0;
+  jstring sid = jni_env->NewStringUTF(ExecEnv::GetInstance()->server_id().c_str());
+  jni_env->CallObjectMethod(fe_, init_zookeeper_id_, sid, enable_delegation_tokens,
+      running_recordservice_planner, running_recordservice_worker);
+  RETURN_ERROR_IF_EXC(jni_env);
+  return Status::OK;
 }
 
 Status Frontend::UpdateCatalogCache(const TUpdateCatalogCacheRequest& req,

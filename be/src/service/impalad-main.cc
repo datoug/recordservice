@@ -78,9 +78,9 @@ int main(int argc, char** argv) {
   EXIT_IF_ERROR(HBaseTableWriter::InitJNI());
   InitFeSupport();
 
-  // Generate a service ID that will unique across the cluster.
-  TNetworkAddress service_address(MakeNetworkAddress(FLAGS_hostname, FLAGS_be_port));
-  string service_id = Substitute("impalad@$0", TNetworkAddressToString(service_address));
+  // Create a service ID that will unique across the cluster.
+  string service_id = ImpalaServer::CreateServerId(
+      "impalad", FLAGS_hostname, FLAGS_be_port);
 
   ExecEnv exec_env(service_id, false, FLAGS_start_recordservice);
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());

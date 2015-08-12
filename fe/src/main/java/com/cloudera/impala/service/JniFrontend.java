@@ -127,9 +127,7 @@ public class JniFrontend {
    */
   public JniFrontend(boolean lazy, String serverName, String authorizationPolicyFile,
       String sentryConfigFile, String authPolicyProviderClass, int impalaLogLevel,
-      int otherLogLevel, boolean enableDelegationTokens, boolean runningPlanner,
-      boolean runningWorker, boolean zookeeperMembership, String serviceId)
-      throws InternalException {
+      int otherLogLevel) throws InternalException {
     GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
         TLogLevel.values()[otherLogLevel]);
 
@@ -148,15 +146,19 @@ public class JniFrontend {
     LOG.info(JniUtil.getJavaVersion());
 
     frontend_ = new Frontend(authConfig);
+  }
 
+  /**
+   * Initializes zookeeper for delegation tokens and/or membership.
+   */
+  public void initZooKeeper(String serviceId, boolean enableDelegationTokens,
+      boolean runningPlanner, boolean runningWorker) throws InternalException {
     ZooKeeperSession zkSession = null;
-    if (zookeeperMembership || enableDelegationTokens) {
-      // Start up zookeeper/curator connection.
-      try {
-        zkSession = new ZooKeeperSession(CONF, serviceId, runningPlanner, runningWorker);
-      } catch (IOException e) {
-        throw new InternalException("Could not start up zookeeper session.", e);
-      }
+    // Start up zookeeper/curator connection.
+    try {
+      zkSession = new ZooKeeperSession(CONF, serviceId, runningPlanner, runningWorker);
+    } catch (IOException e) {
+      throw new InternalException("Could not start up zookeeper session.", e);
     }
 
     if (enableDelegationTokens) {

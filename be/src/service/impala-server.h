@@ -294,11 +294,24 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   void GetRecordServiceMembership(Scheduler::BackendList* planners,
       Scheduler::BackendList* workers);
 
+  // Updates the RecordService membership. Used if membership is maintained via
+  // ZooKeeper.
+  void UpdateRecordServiceMembership(const TMembershipUpdate& update);
+
   // Returns true if Impala is offline (and not accepting queries), false otherwise.
   bool IsOffline() {
     boost::lock_guard<boost::mutex> l(is_offline_lock_);
     return is_offline_;
   }
+
+  // Create a unique server id from the input args.
+  static std::string CreateServerId(const std::string& name,
+      const std::string& host, int port);
+
+  // Parses a server id from ids created by CreateServerId().
+  // Returns true if the id is a valid format.
+  static bool ParseServerId(const std::string& id, std::string* name,
+      std::string* host, int* port);
 
   // Returns true if lineage logging is enabled, false otherwise.
   bool IsLineageLoggingEnabled();

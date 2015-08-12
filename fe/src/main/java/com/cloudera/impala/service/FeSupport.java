@@ -37,12 +37,13 @@ import com.cloudera.impala.thrift.TCatalogObjectType;
 import com.cloudera.impala.thrift.TCatalogServiceRequestHeader;
 import com.cloudera.impala.thrift.TColumnValue;
 import com.cloudera.impala.thrift.TExprBatch;
+import com.cloudera.impala.thrift.TMembershipUpdate;
 import com.cloudera.impala.thrift.TPrioritizeLoadRequest;
 import com.cloudera.impala.thrift.TPrioritizeLoadResponse;
 import com.cloudera.impala.thrift.TQueryCtx;
 import com.cloudera.impala.thrift.TResultRow;
-import com.cloudera.impala.thrift.TStatus;
 import com.cloudera.impala.thrift.TStartupOptions;
+import com.cloudera.impala.thrift.TStatus;
 import com.cloudera.impala.thrift.TSymbolLookupParams;
 import com.cloudera.impala.thrift.TSymbolLookupResult;
 import com.cloudera.impala.thrift.TTable;
@@ -83,6 +84,9 @@ public class FeSupport {
 
   // Return select BE startup options as a serialized TStartupOptions
   public native static byte[] NativeGetStartupOptions();
+
+  // Updates the membership maintained in the BE.
+  public native static void NativeUpdateMembership(byte[] thriftReq);
 
   /**
    * Locally caches the jar at the specified HDFS location.
@@ -271,6 +275,15 @@ public class FeSupport {
     } catch (TException e) {
       throw new InternalException("Error retrieving startup options: " + e.getMessage(),
           e);
+    }
+  }
+
+  public static void UpdateMembership(TMembershipUpdate update) throws InternalException {
+    TSerializer serializer = new TSerializer(new TBinaryProtocol.Factory());
+    try {
+      NativeUpdateMembership(serializer.serialize(update));
+    } catch (TException e) {
+      throw new InternalException("Error updating membership.", e);
     }
   }
 

@@ -733,6 +733,23 @@ struct TStartupOptions {
   1: optional bool compute_lineage
 }
 
+enum TMembershipUpdateType {
+  // Added new member
+  ADD,
+  // Member removed
+  REMOVE,
+  // Not a delta, reconstruct list.
+  FULL_LIST,
+}
+
+struct TMembershipUpdate {
+  // True if this is a RecordService planner membership update,
+  // otherwise a RecordService worker.
+  1: bool is_planner
+  2: required TMembershipUpdateType type
+  3: required list<string> membership
+}
+
 struct TGetDelegationTokenRequest {
   // The authenticated user issuing the get request.
   1: required string owner

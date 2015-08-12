@@ -314,6 +314,15 @@ Java_com_cloudera_impala_service_FeSupport_NativeGetStartupOptions(JNIEnv* env,
   return result_bytes;
 }
 
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_cloudera_impala_service_FeSupport_NativeUpdateMembership(JNIEnv* env,
+    jclass caller_class, jbyteArray update_thrift) {
+  TMembershipUpdate update;
+  DeserializeThriftMsg(env, update_thrift, &update);
+  ExecEnv::GetInstance()->impala_server()->UpdateRecordServiceMembership(update);
+}
+
 namespace impala {
 
 static JNINativeMethod native_methods[] = {
@@ -340,6 +349,10 @@ static JNINativeMethod native_methods[] = {
   {
     (char*)"NativeGetStartupOptions", (char*)"()[B",
     (void*)::Java_com_cloudera_impala_service_FeSupport_NativeGetStartupOptions
+  },
+  {
+    (char*)"NativeUpdateMembership", (char*)"([B)V",
+    (void*)::Java_com_cloudera_impala_service_FeSupport_NativeUpdateMembership
   },
 };
 

@@ -55,6 +55,9 @@ import org.apache.zookeeper.data.Id;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.cloudera.impala.common.InternalException;
+import com.cloudera.impala.thrift.TMembershipUpdate;
+import com.cloudera.impala.thrift.TMembershipUpdateType;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -63,6 +66,7 @@ import com.google.common.collect.Sets;
 /**
  * Wrapper around curator to manage zookeeper sessions. This class also
  * handles membership.
+ * TODO: maintain planner membership.
  */
 public class ZooKeeperSession implements Closeable {
   private static final Logger LOGGER =
@@ -117,7 +121,7 @@ public class ZooKeeperSession implements Closeable {
   private final Set<String> workers_ = Sets.newHashSet();
 
   // List of callbacks to invoke when the zk sessions is (re) created.
-  private List<NewSessionCb> newSessionsCbs_ = Lists.newArrayList();
+  private final List<NewSessionCb> newSessionsCbs_ = Lists.newArrayList();
 
   // ACLs to use when creating new znodes.
   private List<ACL> newNodeAcl_ = Arrays.asList(new ACL(Perms.ALL, Ids.AUTH_IDS));
@@ -330,6 +334,40 @@ public class ZooKeeperSession implements Closeable {
   }
 
   /**
+   * Updates the worker membership, including calling into the BE.
+   */
+  private void updateWorkerMembership(TMembershipUpdateType type, String member)
+      throws InternalException {
+    synchronized (workers_) {
+      TMembershipUpdate update =
+          new TMembershipUpdate(false, type, new ArrayList<String>());
+      switch (type) {
+      case ADD:
+        Preconditions.checkNotNull(member);
+        workers_.add(member);
+        update.membership.add(member);
+        break;
+      case REMOVE:
+        Preconditions.checkNotNull(member);
+        workers_.remove(member);
+        update.membership.add(member);
+        break;
+      case FULL_LIST:
+        Preconditions.checkState(member == null);
+        workers_.clear();
+        for (ChildData d: workerMembership_.getCurrentData()) {
+          workers_.add(d.getPath());
+        }
+        update.membership.addAll(workers_);
+        break;
+      default:
+        Preconditions.checkState(false);
+      }
+      FeSupport.UpdateMembership(update);
+    }
+  }
+
+  /**
    * Adds this service in the planner and/or membership directory. This is done
    * in Zookeeper by creating a ephemeral znode with 'id'. ephemeral means that
    * if the session closes (zookeeper manages timeouts), the znode is deleted.
@@ -345,11 +383,7 @@ public class ZooKeeperSession implements Closeable {
         try {
           Preconditions.checkState(workers_.isEmpty());
           workerMembership_.start(StartMode.BUILD_INITIAL_CACHE);
-          synchronized (workers_) {
-            for (ChildData d: workerMembership_.getCurrentData()) {
-              workers_.add(d.getPath());
-            }
-          }
+          updateWorkerMembership(TMembershipUpdateType.FULL_LIST, null);
         } catch (Exception e) {
           throw new IOException("Could not watch worker membership.", e);
         }
@@ -363,25 +397,22 @@ public class ZooKeeperSession implements Closeable {
           synchronized (zkSession_) {
             // This session is no longer the active one, ignore this update.
             if (zk != zkSession_) return;
-            synchronized (workers_) {
-              switch (arg.getType()) {
-                case CHILD_ADDED:
-                  workers_.add(arg.getData().getPath());
-                  break;
-                case CHILD_REMOVED:
-                  workers_.remove(arg.getData().getPath());
-                  break;
+            switch (arg.getType()) {
+              case CHILD_ADDED:
+                updateWorkerMembership(
+                    TMembershipUpdateType.ADD, arg.getData().getPath());
+                break;
+              case CHILD_REMOVED:
+                updateWorkerMembership(
+                    TMembershipUpdateType.REMOVE, arg.getData().getPath());
+                break;
 
-                case INITIALIZED:
-                default:
-                  // TODO: what do the other types mean? Should be safe to just
-                  // reconstruct.
-                  workers_.clear();
-                  for (ChildData d: workerMembership_.getCurrentData()) {
-                    workers_.add(d.getPath());
-                  }
-                  break;
-              }
+              case INITIALIZED:
+              default:
+                // TODO: what do the other types mean? Should be safe to just
+                // reconstruct.
+                updateWorkerMembership(TMembershipUpdateType.FULL_LIST, null);
+                break;
             }
           }
         }

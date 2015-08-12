@@ -367,6 +367,10 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
   }
 
   exec_env_->SetImpalaServer(this);
+  status = exec_env_->frontend()->InitZooKeeper();
+  if (!status.ok()) {
+    exit(1);
+  }
 }
 
 Status ImpalaServer::LogLineageRecord(const TExecRequest& request) {
@@ -1476,6 +1480,8 @@ void ImpalaServer::MembershipCallback(
 void ImpalaServer::RecordServiceMembershipCallback(
     const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
     vector<TTopicDelta>* subscriber_topic_updates) {
+  DCHECK(!FLAGS_zookeeper_membership);
+
   // Loop through (potentially) processing both planner and worker membership topics.
   for (int i = 0; i < 2; ++i) {
     const bool planner_topic = (i == 0);
@@ -1568,6 +1574,46 @@ void ImpalaServer::RecordServiceMembershipCallback(
         subscriber_topic_updates->pop_back();
       }
     }
+  }
+}
+
+bool ServerIdToDescriptor(const string& id, TBackendDescriptor* desc) {
+  string name;
+  string hostname;
+  int port;
+  if (!ImpalaServer::ParseServerId(id, &name, &hostname, &port)) return false;
+  desc->address.hostname = hostname;
+  desc->address.port = port;
+  return true;
+}
+
+void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update) {
+  unordered_map<string, TBackendDescriptor>& members = update.is_planner ?
+      known_recordservice_planners_ :
+      known_recordservice_workers_;
+  unique_lock<mutex> l(recordservice_membership_lock_);
+  if (update.type == TMembershipUpdateType::FULL_LIST) members.clear();
+
+  switch (update.type) {
+    case TMembershipUpdateType::REMOVE:
+      for (int i = 0; i < update.membership.size(); ++i) {
+        members.erase(update.membership[i]);
+      }
+      break;
+
+    case TMembershipUpdateType::ADD:
+    case TMembershipUpdateType::FULL_LIST:
+      for (int i = 0; i < update.membership.size(); ++i) {
+        TBackendDescriptor desc;
+        if (!ServerIdToDescriptor(update.membership[i], &desc)) {
+          LOG(WARNING) << "Could not parse server id: " << update.membership[i] << ".";
+          continue;
+        }
+        members.insert(make_pair(update.membership[i], desc));
+      }
+      break;
+    default:
+      DCHECK(false);
   }
 }
 
@@ -1979,6 +2025,9 @@ Status ImpalaServer::StartRecordServiceServices(ExecEnv* exec_env,
     server->recordservice_worker_server_ = *recordservice_worker;
   }
 
+  // Using zookeeper membership. Don't register with statestore.
+  if (FLAGS_zookeeper_membership) return Status::OK;
+
   // Register with the statestore. Do this after the servers are created.
   if (*recordservice_planner) {
     StatestoreSubscriber::UpdateCallback cb =
@@ -2121,6 +2170,23 @@ void ImpalaServer::EchoOnlyKerberos(string& return_val, const string& params) {
     throw TException(ss.str());
   }
   return_val = params;
+}
+
+string ImpalaServer::CreateServerId(const string& daemon,
+    const string& host, int port) {
+  return Substitute("$0@$1:$2", daemon, host, port);
+}
+
+bool ImpalaServer::ParseServerId(const string& id, string* name,
+    string* host, int* port) {
+  size_t at = id.find('@');
+  if (at == string::npos) return false;
+  size_t colon = id.find(':', at);
+  if (colon == string::npos) return false;
+  *name = id.substr(0, at);
+  *host = id.substr(at + 1, colon - at - 1);
+  *port = atoi(id.substr(colon + 1).c_str());
+  return true;
 }
 
 }
