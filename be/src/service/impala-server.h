@@ -680,11 +680,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
     // True if the query required a coordinator fragment
     bool has_coord;
 
-    // The number of fragments that have completed
-    int64_t num_complete_fragments;
+    // Nominator and denominator for the query process. The unit
+    // for these could be either fragments or bytes.
+    int64_t process_nominator, process_denominator;
 
-    // The total number of fragments
-    int64_t total_fragments;
 
     // The number of rows fetched by the client
     int64_t num_rows_fetched;
@@ -848,6 +847,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   // Compute HMAC using the given 'key' on the 'data'.
   string ComputeHMAC(const std::string& key, const std::string& data);
+
+  // Returns profile for the first HdfsScanNode in the children of 'coord_profile'.
+  // If there's no HdfsScanNode, returns NULL.
+  static RuntimeProfile* GetHdfsScanNodeProfile(RuntimeProfile* coord_profile);
 
   // Guards query_log_ and query_log_index_
   Lock query_log_lock_;

@@ -779,8 +779,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     //  1. Copy the original request
     //  2. Modify it so it contains just enough information for the scan range it is for.
     //  3. Reserialize and compress it.
-    // TODO : we would need to encrypt the TExecRequest object for security. The client
-    // cannot tamper with the task object.
     int buffer_size = 100 * 1024;  // start out with 100KB
     ThriftSerializer serializer(true, buffer_size);
 
@@ -1160,21 +1158,17 @@ void ImpalaServer::Fetch(recordservice::TFetchResult& return_val,
       task_state->serialize_timer = server_profile->GetCounter("RowMaterializationTimer");
       task_state->client_timer = server_profile->GetCounter("ClientFetchWaitTimer");
 
-      RuntimeProfile* coord_profile = exec_state->coord()->query_profile();
-      vector<RuntimeProfile*> children;
-      coord_profile->GetAllChildren(&children);
-      for (int i = 0; i < children.size(); ++i) {
-        if (children[i]->name() != "HDFS_SCAN_NODE (id=0)") continue;
-        RuntimeProfile* profile = children[i];
-        task_state->bytes_assigned_counter = profile->GetCounter("BytesAssigned");
-        task_state->bytes_read_counter = profile->GetCounter("BytesRead");
-        task_state->bytes_read_local_counter = profile->GetCounter("BytesReadLocal");
-        task_state->rows_read_counter = profile->GetCounter("RowsRead");
-        task_state->rows_returned_counter = profile->GetCounter("RowsReturned");
-        task_state->decompression_timer = profile->GetCounter("DecompressionTime");
-        task_state->hdfs_throughput_counter =
+      RuntimeProfile* profile =
+          GetHdfsScanNodeProfile(exec_state->coord()->query_profile());
+      DCHECK_NOTNULL(profile);
+      task_state->bytes_assigned_counter = profile->GetCounter("BytesAssigned");
+      task_state->bytes_read_counter = profile->GetCounter("BytesRead");
+      task_state->bytes_read_local_counter = profile->GetCounter("BytesReadLocal");
+      task_state->rows_read_counter = profile->GetCounter("RowsRead");
+      task_state->rows_returned_counter = profile->GetCounter("RowsReturned");
+      task_state->decompression_timer = profile->GetCounter("DecompressionTime");
+      task_state->hdfs_throughput_counter =
           profile->GetCounter("PerReadThreadRawHdfsThroughput");
-      }
       task_state->counters_initialized = true;
     }
 
@@ -1517,6 +1511,15 @@ string ImpalaServer::ComputeHMAC(const string& key, const string& data) {
       reinterpret_cast<const unsigned char*>(data.c_str()), data.length(),
       reinterpret_cast<unsigned char*>(&result), &result_len);
   return string(reinterpret_cast<const char*>(result), result_len);
+}
+
+RuntimeProfile* ImpalaServer::GetHdfsScanNodeProfile(RuntimeProfile* coord_profile) {
+  vector<RuntimeProfile*> children;
+  coord_profile->GetAllChildren(&children);
+  for (int i = 0; i < children.size(); ++i) {
+    if (children[i]->name() == "HDFS_SCAN_NODE (id=0)") return children[i];
+  }
+  return NULL;
 }
 
 }

@@ -235,13 +235,17 @@ void ImpalaServer::QueryStateToJson(const ImpalaServer::QueryStateRecord& record
   string progress = "N/A";
   if (record.has_coord) {
     stringstream ss;
-    ss << record.num_complete_fragments << " / " << record.total_fragments
+    ss << record.process_nominator << " / " << record.process_denominator
        << " (" << setw(4);
-    if (record.total_fragments == 0) {
+    if (record.process_denominator == 0) {
       ss << "0%)";
     } else {
-      ss << (100.0 * record.num_complete_fragments / (1.f * record.total_fragments))
-         << "%)";
+      float percentage = record.process_nominator / (1.f * record.process_denominator);
+      // In case the unit of nominator/denominator is byte, nominator may be greater
+      // than denominator. This is because sometimes we need to read past the end
+      // of scan range.
+      if (percentage > 1.f) percentage = 1.f;
+      ss << (100.0 * percentage) << "%)";
     }
     progress = ss.str();
   }

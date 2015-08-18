@@ -1664,9 +1664,25 @@ ImpalaServer::QueryStateRecord::QueryStateRecord(const QueryExecState& exec_stat
 
   Coordinator* coord = exec_state.coord();
   if (coord != NULL) {
-    num_complete_fragments = coord->progress().num_complete();
-    total_fragments = coord->progress().total();
     has_coord = true;
+    if (coord->runtime_state()->is_record_service_request()) {
+      // if we are using RecordService, show:
+      // # of bytes processed so far / # of bytes in total.
+      RuntimeProfile* profile =
+          ImpalaServer::GetHdfsScanNodeProfile(coord->query_profile());
+      DCHECK_NOTNULL(profile);
+      RuntimeProfile::Counter* bytes_read_counter = profile->GetCounter("BytesRead");
+      RuntimeProfile::Counter* bytes_total_counter = profile->GetCounter("BytesAssigned");
+      if (bytes_read_counter != NULL && bytes_total_counter != NULL) {
+        process_nominator = bytes_read_counter->value();
+        process_denominator = bytes_total_counter->value();
+      } else {
+        process_nominator = process_denominator = 0;
+      }
+    } else {
+      process_nominator = coord->progress().num_complete();
+      process_denominator = coord->progress().total();
+    }
   }
   query_state = exec_state.query_state();
   num_rows_fetched = exec_state.num_rows_fetched();
