@@ -24,8 +24,12 @@ import os
 import shutil
 import subprocess
 
+BREAKPAD_DEFAULT_HOME = os.environ['IMPALA_TOOLCHAIN'] + "/breakpad-" +\
+   os.environ['IMPALA_BREAKPAD_VERSION']
+
 parser = OptionParser()
-parser.add_option("--dump_syms", dest="dump_syms_binary", default="dump_syms",
+parser.add_option("--dump_syms", dest="dump_syms_binary",
+    default=BREAKPAD_DEFAULT_HOME + "/bin/dump_syms",
     help="Path to dump_syms tool")
 
 options, args = parser.parse_args()
