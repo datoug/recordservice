@@ -303,6 +303,8 @@ done:
     Expr::Close(per_thread_conjunct_ctxs, state_);
     break;
   }
+
+  state_->resource_pool()->ReleaseThreadToken(false);
 }
 
 struct ScopedTask {
