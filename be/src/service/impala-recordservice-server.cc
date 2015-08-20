@@ -723,7 +723,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     scoped_ptr<re2::RE2> path_filter;
     TExecRequest result = PlanRecordServiceRequest(req, &path_filter);
 
-    // TODO: this port should come from the membership information and return all hosts
+    // FIXME: this port should come from the membership information and return all hosts
     // the workers are running on.
     recordservice::TNetworkAddress default_host;
     default_host.hostname = "localhost";
@@ -739,7 +739,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     // Impala, for these queries, will generate one fragment (with a single scan node)
     // and have all the scan ranges in that scan node. We want to generate one task
     // (with the fragment) for each scan range.
-    // TODO: this needs to be revisited. It scales very poorly. For a scan with 1M
+    // FIXME: this needs to be revisited. It scales very poorly. For a scan with 1M
     // blocks (64MB/block = ~61TB dataset), this generates 1M tasks. Even at 100B
     // tasks, this is a 100MB response.
     DCHECK(result.__isset.query_exec_request);
@@ -749,7 +749,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     const int64_t scan_node_id = query_request.per_node_scan_ranges.begin()->first;
     scan_ranges.swap(query_request.per_node_scan_ranges.begin()->second);
 
-    // TODO: log audit events. Is there right? Should we log this on the worker?
+    // FIXME: log audit events. Is there right? Should we log this on the worker?
     //if (IsAuditEventLoggingEnabled()) {
     //  LogAuditRecord(*(exec_state->get()), *(request));
     //}
@@ -853,7 +853,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
         recordservice::TNetworkAddress host;
         DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
         host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
-        // TODO: this port should come from the membership information.
+        // FIXME: this port should come from the membership information.
         host.port = FLAGS_recordservice_worker_port;
         task.local_hosts.push_back(host);
 
@@ -1033,29 +1033,29 @@ void ImpalaServer::ExecTask(recordservice::TExecTaskResult& return_val,
       // Remap client logging levels to server logging levels.
       int level = 0;
       switch (req.logging_level) {
-        case recordservice::LoggingLevel::OFF:
+        case recordservice::TLoggingLevel::OFF:
           level = 0;
           break;
 
-        case recordservice::LoggingLevel::ALL:
-        case recordservice::LoggingLevel::TRACE:
+        case recordservice::TLoggingLevel::ALL:
+        case recordservice::TLoggingLevel::TRACE:
           level = QUERY_VLOG_ROW_LEVEL;
           break;
 
-        case recordservice::LoggingLevel::FATAL:
-        case recordservice::LoggingLevel::ERROR:
+        case recordservice::TLoggingLevel::FATAL:
+        case recordservice::TLoggingLevel::ERROR:
           // Always on, no need to do anything.
           break;
 
-        case recordservice::LoggingLevel::WARN:
+        case recordservice::TLoggingLevel::WARN:
           level = QUERY_VLOG_WARNING_LEVEL;
           break;
 
-        case recordservice::LoggingLevel::INFO:
+        case recordservice::TLoggingLevel::INFO:
           level = QUERY_VLOG_FRAGMENT_LEVEL;
           break;
 
-        case recordservice::LoggingLevel::DEBUG:
+        case recordservice::TLoggingLevel::DEBUG:
           level = QUERY_VLOG_BATCH_LEVEL;
           break;
       }
