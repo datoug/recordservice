@@ -180,7 +180,7 @@ public class HdfsTable extends Table {
   private final String listPartitionsTimerName_;
 
   // LOAD_BLOCK_LOCATION.db_name.tbl_name
-   private final String loadBlockLocationTimerName_;
+  private final String loadBlockLocationTimerName_;
 
   // LOAD_BLOCK_LOCATION_PER_PARTITION.db_name.tbl_name
   private final String loadBlockLocationPerPartitionTimerName_;
