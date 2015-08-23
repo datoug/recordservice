@@ -1665,7 +1665,8 @@ ImpalaServer::QueryStateRecord::QueryStateRecord(const QueryExecState& exec_stat
   Coordinator* coord = exec_state.coord();
   if (coord != NULL) {
     has_coord = true;
-    if (coord->runtime_state()->is_record_service_request()) {
+    RuntimeState* runtime_state = coord->runtime_state();
+    if (runtime_state != NULL && runtime_state->is_record_service_request()) {
       // if we are using RecordService, show:
       // # of bytes processed so far / # of bytes in total.
       RuntimeProfile* profile =
