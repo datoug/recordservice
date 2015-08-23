@@ -80,7 +80,7 @@ Status HdfsFsCache::GetLocalConnection(hdfsFS* fs) {
 }
 
 Status HdfsFsCache::GetDefaultConnection(hdfsFS* fs) {
-  return GetConnection("file:/", fs);
+  return GetConnection("default", fs);
 }
 
 string HdfsFsCache::GetNameNodeFromPath(const string& path, string* err) {
