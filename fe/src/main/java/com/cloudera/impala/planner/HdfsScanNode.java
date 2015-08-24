@@ -674,6 +674,10 @@ public class HdfsScanNode extends ScanNode {
           localHostSet.add(dataNode);
         }
       }
+      // We've found at least one scan range for each node in the cluster, no need
+      // to keep looking.
+      if (localHostSet.size() == cluster.numNodes()) break;
+
       // This range has at least one replica with a colocated impalad, so assume it
       // will be scheduled on one of those nodes.
       if (anyLocal) ++numLocalRanges;
@@ -693,7 +697,7 @@ public class HdfsScanNode extends ScanNode {
     numNodes_ = (cardinality == 0 || totalNodes == 0) ? 1 : totalNodes;
     // For the 5.4.x release, if all scan ranges are local, revert back to the old
     // logic of using the number of datanodes that hold blocks of the table.
-    // Otherwise, some query plans may change drastically between maintence releases.
+    // Otherwise, some query plans may change drastically between maintenance releases.
     // TODO: delete this line to use the new logic for local tables.
     if (numLocalRanges == scanRanges_.size()) numNodes_ = tbl_.getNumNodes();
     LOG.debug("computeNumNodes localRanges=" + numLocalRanges +
