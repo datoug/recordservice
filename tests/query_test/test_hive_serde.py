@@ -57,8 +57,7 @@ class TestScanAllTypes(ImpalaTestSuite):
     """.format(self.TEST_TBL_NAME, test_file_path)
 
     call(["hive", "-e", create_table_stmt])
-    # TODO: is there a better way to do this?
-    self.execute_query("invalidate metadata")
+    self.execute_query("invalidate metadata functional.%s" % (self.TEST_TBL_NAME))
 
   def teardown_method(self, method):
     call(["hive", "-e", "DROP TABLE functional.%s" % (self.TEST_TBL_NAME)])
