@@ -6,5 +6,5 @@ To build this repo:
   - Make sure RECORD_SERVICE_HOME is set to the home of that repo.
   - Follow the normal Impala build instructions.
 
-Last rebase: 5/12/2015 
-  51c7bf92ecf4a254687d8fef228f51c08b30c950: Add flag to skip
+Last rebase: 5/22/2015 
+  84c1f835f3ade162d53632542e6a08a809f98eaa: IMPALA-1916: Replace Status::OK
