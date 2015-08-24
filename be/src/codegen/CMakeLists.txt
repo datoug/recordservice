@@ -25,7 +25,7 @@ add_library(CodeGen
   subexpr-elimination.cc
   instruction-counter.cc
 )
-add_dependencies(CodeGen thrift-cpp)
+add_dependencies(CodeGen thrift-deps)
 
 # output cross compile to ir metadata
 # TODO: this doesn't track dependences right.  We need to specify that
@@ -56,7 +56,7 @@ set(IR_NO_SSE_OUTPUT_FILE "${LLVM_IR_OUTPUT_DIRECTORY}/impala-no-sse.ll")
 # impala will pick the correct file to load.
 add_custom_command(
   OUTPUT ${IR_SSE_OUTPUT_FILE}
-  COMMAND ${LLVM_CLANG_EXECUTABLE} ${CLANG_IR_CXX_FLAGS} "-msse4.2" ${CODEGEN_INCLUDE_FLAGS} ${IR_INPUT_FILES} -o ${IR_SSE_TMP_OUTPUT_FILE}
+  COMMAND ${LLVM_CLANG_EXECUTABLE} ${CLANG_IR_CXX_FLAGS} "-msse4.2" ${CLANG_INCLUDE_FLAGS} ${IR_INPUT_FILES} -o ${IR_SSE_TMP_OUTPUT_FILE}
   COMMAND ${LLVM_OPT_EXECUTABLE} --instnamer < ${IR_SSE_TMP_OUTPUT_FILE} > ${IR_SSE_OUTPUT_FILE}
   COMMAND rm ${IR_SSE_TMP_OUTPUT_FILE}
   DEPENDS CodeGen Util Exec Exprs Udf
@@ -65,7 +65,7 @@ add_custom_command(
 # Compile without sse enabled.
 add_custom_command(
   OUTPUT ${IR_NO_SSE_OUTPUT_FILE}
-  COMMAND ${LLVM_CLANG_EXECUTABLE} ${CLANG_IR_CXX_FLAGS} ${CODEGEN_INCLUDE_FLAGS} ${IR_INPUT_FILES} -o ${IR_NO_SSE_TMP_OUTPUT_FILE}
+  COMMAND ${LLVM_CLANG_EXECUTABLE} ${CLANG_IR_CXX_FLAGS} ${CLANG_INCLUDE_FLAGS} ${IR_INPUT_FILES} -o ${IR_NO_SSE_TMP_OUTPUT_FILE}
   COMMAND ${LLVM_OPT_EXECUTABLE} --instnamer < ${IR_NO_SSE_TMP_OUTPUT_FILE} > ${IR_NO_SSE_OUTPUT_FILE}
   COMMAND rm ${IR_NO_SSE_TMP_OUTPUT_FILE}
   DEPENDS CodeGen Util Exec Exprs Udf

@@ -75,7 +75,7 @@ add_library(Util
   url-parser.cc
   url-coding.cc
 )
-add_dependencies(Util thrift-cpp)
+add_dependencies(Util thrift-deps)
 
 add_library(Webserver STATIC
   ${SQUEASEL_SRC_DIR}/squeasel.c

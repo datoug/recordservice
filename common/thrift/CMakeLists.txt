@@ -190,11 +190,16 @@ add_custom_command(OUTPUT MetricDefs.thrift
 THRIFT_GEN(THRIFT_ALL_FILES ${SRC_FILES})
 THRIFT_GEN_DS(THRIFT_DATA_SRC_FILES ${EXT_DATA_SRC_FILES})
 
-
 add_custom_target(thrift-generated-files-error DEPENDS ErrorCodes.thrift)
+add_custom_target(thrift-generated-files-metrics DEPENDS MetricDefs.thrift)
 
 # Add a custom target that generates all the thrift files
 add_custom_target(thrift-cpp ALL DEPENDS ${THRIFT_ALL_FILES})
+add_dependencies(thrift-cpp thrift-generated-files-metrics thrift-generated-files-error)
 
 add_custom_target(thrift-ext-data-src ALL DEPENDS ${THRIFT_DATA_SRC_FILES})
 add_dependencies(thrift-ext-data-src thrift-cpp)
+
+# Combined target for all thrift dependencies
+add_custom_target(thrift-deps ALL)
+add_dependencies(thrift-deps thrift-ext-data-src)

@@ -182,7 +182,7 @@ if [[ -z "$JDBC_DRIVER" ]]; then
   echo Could not find Postgres JDBC driver in >&2
   exit 1
 fi
-export HIVE_AUX_JARS_PATH="$JDBC_DRIVER"
+export HIVE_AUX_JARS_PATH="${IMPALA_FE_DIR}/target"
 export AUX_CLASSPATH=$HADOOP_LZO/build/hadoop-lzo-0.4.15.jar
 ### Tell hive not to use jline
 export HADOOP_USER_CLASSPATH_FIRST=true
@@ -196,6 +196,7 @@ export AUX_CLASSPATH=$AUX_CLASSPATH:$HBASE_HOME/lib/hbase-client-${IMPALA_HBASE_
 export AUX_CLASSPATH=$AUX_CLASSPATH:$HBASE_HOME/lib/hbase-server-${IMPALA_HBASE_VERSION}.jar
 export AUX_CLASSPATH=$AUX_CLASSPATH:$HBASE_HOME/lib/hbase-protocol-${IMPALA_HBASE_VERSION}.jar
 export AUX_CLASSPATH=$AUX_CLASSPATH:$HBASE_HOME/lib/hbase-hadoop-compat-${IMPALA_HBASE_VERSION}.jar
+export AUX_CLASSPATH=$AUX_CLASSPATH:$JDBC_DRIVER
 
 export HBASE_CONF_DIR=$HIVE_CONF_DIR
 

@@ -25,7 +25,7 @@
 #include <stack>
 
 #include "gutil/macros.h"
-#include "util/spinlock.h"
+#include "util/locks.h"
 
 namespace impala {
 
