@@ -241,6 +241,7 @@ int64_t Coordinator::BackendExecState::UpdateNumScanRangesCompleted() {
 Coordinator::Coordinator(ExecEnv* exec_env, RuntimeProfile::EventSequence* events)
   : exec_env_(exec_env),
     has_called_wait_(false),
+    lock_("Coordinator"),
     returned_all_results_(false),
     executor_(NULL), // Set in Prepare()
     query_mem_tracker_(), // Set in Exec()
@@ -330,7 +331,7 @@ Status Coordinator::Exec(QuerySchedule& schedule,
   // to keep things simple, make async Cancel() calls wait until plan fragment
   // execution has been initiated, otherwise we might try to cancel fragment
   // execution at backends where it hasn't even started
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
 
   // we run the root fragment ourselves if it is unpartitioned
   bool has_coordinator_fragment =
@@ -377,6 +378,8 @@ Status Coordinator::Exec(QuerySchedule& schedule,
 
     executor_.reset(NULL);
   }
+
+  if (runtime_state() != NULL) runtime_state()->lock_tracker()->RegisterLock(&lock_);
 
   // Initialize the execution profile structures.
   InitExecProfile(request);
@@ -465,13 +468,13 @@ Status Coordinator::Exec(QuerySchedule& schedule,
 }
 
 Status Coordinator::GetStatus() {
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   return query_status_;
 }
 
 Status Coordinator::UpdateStatus(const Status& status, const TUniqueId* instance_id) {
   {
-    lock_guard<mutex> l(lock_);
+    lock_guard<Lock> l(lock_);
 
     // The query is done and we are just waiting for remote fragments to clean up.
     // Ignore their cancelled updates.
@@ -767,11 +770,11 @@ Status Coordinator::FinalizeQuery() {
 }
 
 Status Coordinator::WaitForAllBackends() {
-  unique_lock<mutex> l(lock_);
+  unique_lock<Lock> l(lock_);
   while (num_remaining_backends_ > 0 && query_status_.ok()) {
     VLOG_QUERY << "Coordinator waiting for backends to finish, "
                << num_remaining_backends_ << " remaining";
-    backend_completion_cv_.wait(l);
+    backend_completion_cv_.Wait(&l);
   }
   if (query_status_.ok()) {
     VLOG_QUERY << "All backends finished successfully.";
@@ -1117,7 +1120,7 @@ Status Coordinator::ExecRemoteFragment(void* exec_state_arg) {
 }
 
 void Coordinator::Cancel(const Status* cause) {
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   // if the query status indicates an error, cancellation has already been initiated
   if (!query_status_.ok()) return;
   // prevent others from cancelling a second time
@@ -1198,7 +1201,7 @@ void Coordinator::CancelRemoteFragments() {
   }
 
   // notify that we completed with an error
-  backend_completion_cv_.notify_all();
+  backend_completion_cv_.NotifyAll();
 }
 
 Status Coordinator::UpdateFragmentExecStatus(const TReportExecStatusParams& params) {
@@ -1258,7 +1261,7 @@ Status Coordinator::UpdateFragmentExecStatus(const TReportExecStatusParams& para
   }
 
   if (params.done && params.__isset.insert_exec_status) {
-    lock_guard<mutex> l(lock_);
+    lock_guard<Lock> l(lock_);
     // Merge in table update data (partitions written to, files to be moved as part of
     // finalization)
     BOOST_FOREACH(const PartitionStatusMap::value_type& partition,
@@ -1299,7 +1302,7 @@ Status Coordinator::UpdateFragmentExecStatus(const TReportExecStatusParams& para
   }
 
   if (params.done) {
-    lock_guard<mutex> l(lock_);
+    lock_guard<Lock> l(lock_);
     exec_state->stopwatch.Stop();
     DCHECK_GT(num_remaining_backends_, 0);
     VLOG_QUERY << "Backend " << params.backend_num << " completed, "
@@ -1318,7 +1321,7 @@ Status Coordinator::UpdateFragmentExecStatus(const TReportExecStatusParams& para
       }
     }
     if (--num_remaining_backends_ == 0) {
-      backend_completion_cv_.notify_all();
+      backend_completion_cv_.NotifyAll();
     }
   }
 
@@ -1525,7 +1528,7 @@ void Coordinator::ReportQuerySummary() {
 string Coordinator::GetErrorLog() {
   ErrorLogMap merged;
   {
-    lock_guard<mutex> l(lock_);
+    lock_guard<Lock> l(lock_);
     if (executor_.get() != NULL && executor_->runtime_state() != NULL &&
         !executor_->runtime_state()->ErrorLogIsEmpty()) {
       MergeErrorMaps(&merged, executor_->runtime_state()->error_log());

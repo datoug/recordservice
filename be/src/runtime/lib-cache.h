@@ -24,6 +24,7 @@
 #include "common/atomic.h"
 #include "common/object-pool.h"
 #include "common/status.h"
+#include "util/locks.h"
 
 namespace impala {
 
@@ -121,7 +122,7 @@ class LibCache {
 
   /// Protects lib_cache_. For lock ordering, this lock must always be taken before
   /// the per entry lock.
-  boost::mutex lock_;
+  Lock lock_;
 
   /// Maps HDFS library path => cache entry.
   /// Entries in the cache need to be explicitly deleted.

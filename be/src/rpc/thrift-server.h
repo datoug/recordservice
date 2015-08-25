@@ -16,7 +16,6 @@
 #ifndef IMPALA_RPC_THRIFT_SERVER_H
 #define IMPALA_RPC_THRIFT_SERVER_H
 
-#include <boost/thread/mutex.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/unordered_map.hpp>
@@ -177,7 +176,7 @@ class ThriftServer {
   ConnectionHandlerIf* connection_handler_;
 
   /// Protects connection_contexts_
-  boost::mutex connection_contexts_lock_;
+  Lock connection_contexts_lock_;
 
   /// Map of active connection context to a shared_ptr containing that context; when an
   /// item is removed from the map, it is automatically freed.

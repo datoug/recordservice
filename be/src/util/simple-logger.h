@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IMPALA_SERVICE_SIMPLE_LOGGER_H
-#define IMPALA_SERVICE_SIMPLE_LOGGER_H
+#ifndef IMPALA_UTIL_SIMPLE_LOGGER_H
+#define IMPALA_UTIL_SIMPLE_LOGGER_H
 
-#include <boost/thread/thread.hpp>
 #include <fstream>
+
+#include "util/locks.h"
 
 #include "common/status.h"
 
@@ -46,7 +47,7 @@ class SimpleLogger {
 
  private:
   /// Protects log_file_, num_log_file_entries_ and log_file_name_
-  boost::mutex log_file_lock_;
+  Lock log_file_lock_;
 
   /// Directory to log to
   std::string log_dir_;

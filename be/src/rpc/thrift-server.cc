@@ -225,7 +225,7 @@ void* ThriftServer::ThriftServerEventProcessor::createContext(shared_ptr<TProtoc
     connection_ptr->network_address =
         MakeNetworkAddress(socket->getPeerAddress(), socket->getPeerPort());
 
-    lock_guard<mutex> l(thrift_server_->connection_contexts_lock_);
+    lock_guard<Lock> l(thrift_server_->connection_contexts_lock_);
     uuid connection_uuid = thrift_server_->uuid_generator_();
     UUIDToTUniqueId(connection_uuid, &connection_ptr->connection_id);
 
@@ -263,7 +263,7 @@ void ThriftServer::ThriftServerEventProcessor::deleteContext(void* serverContext
   }
 
   {
-    lock_guard<mutex> l(thrift_server_->connection_contexts_lock_);
+    lock_guard<Lock> l(thrift_server_->connection_contexts_lock_);
     thrift_server_->connection_contexts_.erase(__connection_context__);
   }
 
@@ -285,6 +285,8 @@ ThriftServer::ThriftServer(const string& name, const shared_ptr<TProcessor>& pro
       server_(NULL),
       processor_(processor),
       connection_handler_(NULL),
+      connection_contexts_lock_(
+          "ThriftServer::ConnectionContexts", LockTracker::global()),
       auth_provider_(auth_provider) {
   if (auth_provider_ == NULL) {
     auth_provider_ = AuthManager::GetInstance()->GetInternalAuthProvider();

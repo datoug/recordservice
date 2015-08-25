@@ -19,7 +19,6 @@
 #include <list>
 #include <string>
 #include <boost/unordered_map.hpp>
-#include <boost/thread/mutex.hpp>
 #include <boost/bind.hpp>
 
 #include "util/lock-tracker.h"

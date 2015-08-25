@@ -21,6 +21,7 @@
 
 #include "common/logging.h"
 #include "util/debug-util.h"
+#include "util/lock-tracker.h"
 #include "util/time.h"
 #include "util/webserver.h"
 
@@ -37,6 +38,7 @@ const string RPC_TIME_STATS_METRIC_KEY = "rpc-method.$0.call_duration";
 // web-based summary page.
 class RpcEventHandlerManager {
  public:
+  RpcEventHandlerManager() : lock_("RpcEventHandlerManager", LockTracker::global()) {}
   // Adds an event handler to the list of those tracked
   void RegisterEventHandler(RpcEventHandler* event_handler);
 
@@ -54,7 +56,7 @@ class RpcEventHandlerManager {
 
  private:
   // Protects event_handlers_
-  mutex lock_;
+  Lock lock_;
 
   // List of all event handlers in the system - once an event handler is registered, it
   // should never be deleted. Event handlers are owned by the TProcessor which calls them,
@@ -82,13 +84,13 @@ void impala::InitRpcEventTracing(Webserver* webserver) {
 
 void RpcEventHandlerManager::RegisterEventHandler(RpcEventHandler* event_handler) {
   DCHECK(event_handler != NULL);
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   event_handlers_.push_back(event_handler);
 }
 
 void RpcEventHandlerManager::JsonCallback(const Webserver::ArgumentMap& args,
     Document* document) {
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   Value servers(kArrayType);
   BOOST_FOREACH(RpcEventHandler* handler, event_handlers_) {
     Value server(kObjectType);
@@ -104,7 +106,7 @@ void RpcEventHandlerManager::ResetCallback(const Webserver::ArgumentMap& args,
   bool reset_all_servers = (server_it == args.end());
   Webserver::ArgumentMap::const_iterator method_it = args.find("method");
   bool reset_all_in_server = (method_it == args.end());
-  lock_guard<mutex> l(lock_);
+  lock_guard<Lock> l(lock_);
   BOOST_FOREACH(RpcEventHandler* handler, event_handlers_) {
     if (reset_all_servers || handler->server_name() == server_it->second) {
       if (reset_all_in_server) {
@@ -118,7 +120,7 @@ void RpcEventHandlerManager::ResetCallback(const Webserver::ArgumentMap& args,
 }
 
 void RpcEventHandler::Reset(const string& method_name) {
-  lock_guard<mutex> l(method_map_lock_);
+  lock_guard<Lock> l(method_map_lock_);
   MethodMap::iterator it = method_map_.find(method_name);
   if (it == method_map_.end()) return;
   it->second->time_stats->Reset();
@@ -126,7 +128,7 @@ void RpcEventHandler::Reset(const string& method_name) {
 }
 
 void RpcEventHandler::ResetAll() {
-  lock_guard<mutex> l(method_map_lock_);
+  lock_guard<Lock> l(method_map_lock_);
   BOOST_FOREACH(const MethodMap::value_type& method, method_map_) {
     method.second->time_stats->Reset();
     method.second->num_in_flight = 0L;
@@ -134,12 +136,13 @@ void RpcEventHandler::ResetAll() {
 }
 
 RpcEventHandler::RpcEventHandler(const string& server_name, MetricGroup* metrics) :
+    method_map_lock_("RpcEventHandler", LockTracker::global()),
     server_name_(server_name), metrics_(metrics) {
   if (handler_manager.get() != NULL) handler_manager->RegisterEventHandler(this);
 }
 
 void RpcEventHandler::ToJson(Value* server, Document* document) {
-  lock_guard<mutex> l(method_map_lock_);
+  lock_guard<Lock> l(method_map_lock_);
   Value name(server_name_.c_str(), document->GetAllocator());
   server->AddMember("name", name, document->GetAllocator());
   Value methods(kArrayType);
@@ -163,7 +166,7 @@ void* RpcEventHandler::getContext(const char* fn_name, void* server_context) {
       reinterpret_cast<ThriftServer::ConnectionContext*>(server_context);
   MethodMap::iterator it;
   {
-    lock_guard<mutex> l(method_map_lock_);
+    lock_guard<Lock> l(method_map_lock_);
     it = method_map_.find(fn_name);
     if (it == method_map_.end()) {
       MethodDescriptor* descriptor = new MethodDescriptor();

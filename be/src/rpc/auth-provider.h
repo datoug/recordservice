@@ -17,7 +17,6 @@
 
 #include <string>
 #include <boost/scoped_ptr.hpp>
-#include <boost/thread/mutex.hpp>
 #include <sasl/sasl.h>
 
 #include "common/status.h"

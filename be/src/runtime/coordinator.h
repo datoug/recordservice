@@ -230,7 +230,7 @@ class Coordinator {
   ProgressUpdater progress_;
 
   /// protects all fields below
-  boost::mutex lock_;
+  Lock lock_;
 
   /// Overall status of the entire query; set to the first reported fragment error
   /// status or to CANCELLED, if Cancel() is called.
@@ -271,7 +271,7 @@ class Coordinator {
   /// If there is no coordinator fragment, Wait simply waits until all
   /// backends report completion by notifying on backend_completion_cv_.
   /// Tied to lock_.
-  boost::condition_variable backend_completion_cv_;
+  ConditionVariable backend_completion_cv_;
 
   /// Count of the number of backends for which done != true. When this
   /// hits 0, any Wait()'ing thread is notified

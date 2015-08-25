@@ -18,7 +18,7 @@
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/filesystem.hpp>
 
-#include "util/locks.h"
+#include "util/lock-tracker.h"
 
 #include "common/names.h"
 
@@ -62,7 +62,8 @@ void SimpleLogger::GenerateLogFileName() {
 
 SimpleLogger::SimpleLogger(const string& log_dir, const string& log_file_name_prefix,
     uint64_t max_entries_per_file)
-    : log_dir_(log_dir),
+    : log_file_lock_("SimpleLogger", LockTracker::global()),
+      log_dir_(log_dir),
       log_file_name_prefix_(log_file_name_prefix),
       num_log_file_entries_(0),
       max_entries_per_file_(max_entries_per_file) {
@@ -80,7 +81,7 @@ Status SimpleLogger::Init() {
 }
 
 Status SimpleLogger::AppendEntry(const std::string& entry) {
-  lock_guard<mutex> l(log_file_lock_);
+  lock_guard<Lock> l(log_file_lock_);
   if (num_log_file_entries_ > max_entries_per_file_) {
     num_log_file_entries_ = 0;
     GenerateLogFileName();
@@ -94,7 +95,7 @@ Status SimpleLogger::AppendEntry(const std::string& entry) {
 }
 
 Status SimpleLogger::Flush() {
-  lock_guard<mutex> l(log_file_lock_);
+  lock_guard<Lock> l(log_file_lock_);
   return FlushInternal();
 }
 

@@ -24,6 +24,7 @@
 #include "util/dynamic-util.h"
 #include "util/hash-util.h"
 #include "util/hdfs-util.h"
+#include "util/lock-tracker.h"
 #include "util/path-builder.h"
 #include "util/test-info.h"
 
@@ -89,7 +90,8 @@ struct LibCache::LibCacheEntry {
   ~LibCacheEntry();
 };
 
-LibCache::LibCache() : current_process_handle_(NULL) {
+LibCache::LibCache()
+  : current_process_handle_(NULL), lock_("LibCache", LockTracker::global()) {
 }
 
 LibCache::~LibCache() {
@@ -219,7 +221,7 @@ Status LibCache::CheckSymbolExists(const string& hdfs_lib_file, LibType type,
 }
 
 void LibCache::SetNeedsRefresh(const string& hdfs_lib_file) {
-  unique_lock<mutex> lib_cache_lock(lock_);
+  unique_lock<Lock> lib_cache_lock(lock_);
   LibMap::iterator it = lib_cache_.find(hdfs_lib_file);
   if (it == lib_cache_.end()) return;
   LibCacheEntry* entry = it->second;
@@ -230,7 +232,7 @@ void LibCache::SetNeedsRefresh(const string& hdfs_lib_file) {
 }
 
 void LibCache::RemoveEntry(const string& hdfs_lib_file) {
-  unique_lock<mutex> lib_cache_lock(lock_);
+  unique_lock<Lock> lib_cache_lock(lock_);
   LibMap::iterator it = lib_cache_.find(hdfs_lib_file);
   if (it == lib_cache_.end()) return;
   RemoveEntryInternal(hdfs_lib_file, it);
@@ -260,7 +262,7 @@ void LibCache::RemoveEntryInternal(const string& hdfs_lib_file,
 }
 
 void LibCache::DropCache() {
-  unique_lock<mutex> lib_cache_lock(lock_);
+  unique_lock<Lock> lib_cache_lock(lock_);
   BOOST_FOREACH(LibMap::value_type& v, lib_cache_) {
     bool can_delete = false;
     {
@@ -308,7 +310,7 @@ Status LibCache::GetCacheEntryInternal(const string& hdfs_lib_file, LibType type
 
   // Check if this file is already cached or an error occured on another thread while
   // loading the library.
-  unique_lock<mutex> lib_cache_lock(lock_);
+  unique_lock<Lock> lib_cache_lock(lock_);
   LibMap::iterator it = lib_cache_.find(hdfs_lib_file);
   if (it != lib_cache_.end()) {
     {
