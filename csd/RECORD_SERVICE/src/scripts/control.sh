@@ -31,9 +31,13 @@ log "CMD: $CMD"
 
 export HADOOP_CONF_DIR=$CONF_DIR/hadoop-conf
 export HIVE_CONF_DIR=$CONF_DIR/hive-conf
+export USER=recordservice
 
 log "HADOOP_CONF_DIR: $HADOOP_CONF_DIR"
 log "HIVE_CONF_DIR: $HIVE_CONF_DIR"
+log "USER: $USER"
+
+KEYTAB_FILE=$HADOOP_CONF_DIR/../record_service.keytab
 
 case $CMD in
   (start)
@@ -52,6 +56,10 @@ case $CMD in
     log "recordservice_webserver_port: $WEBSERVICE_PORT"
     log "webserver_doc_root: $RECORDSERVICE_HOME"
     log "log_dir: $LOG_DIR"
+    log "principal: $PRINCIPAL"
+    log "keytab_file: $KEYTAB_FILE"
+    log "v: $V"
+    log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
 
     exec $RECORD_SERVICE_BIN_HOME/recordserviced \
       -recordservice_planner_port=$PLANNER_PORT \
@@ -67,7 +75,14 @@ case $CMD in
       -recordservice_webserver_port=$WEBSERVICE_PORT \
       -webserver_doc_root=$RECORDSERVICE_HOME \
       -log_dir=$LOG_DIR \
-      -abort_on_config_error=false
+      -abort_on_config_error=false \
+      -principal=$PRINCIPAL \
+      -keytab_file=$KEYTAB_FILE \
+      -lineage_event_log_dir=$LOG_DIR/lineage \
+      -audit_event_log_dir=$LOG_DIR/audit \
+      -profile_log_dir=$LOG_DIR/profiles/ \
+      -v=$V \
+      -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL
     ;;
 
   (stopAll)

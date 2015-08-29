@@ -26,7 +26,8 @@
   },
   "runAs" : {
     "user" : "recordservice",
-    "group" : "recordservice"
+    "group" : "recordservice",
+    "principal" : "recordservice"
     // TODO: add it to hive/impala group
   },
   "icon" : "images/icon.png",
@@ -58,9 +59,6 @@
     }
   ],
   // TODO: add more configs
-  // kerberos_reinit_interval
-  // principal
-  // keytab_file
   "parameters" : [
     {
       "name" : "recordservice_planner_port",
@@ -104,20 +102,12 @@
       "default" : "recordserviced"
     },
     {
-      "name" : "hostname",
-      "label" : "hostname",
-      "description" : "hostname",
-      "required" : "true",
-      "type" : "string",
-      "default" : ""
-    },
-    {
       "name" : "state_store_host",
       "label" : "statestore hostname",
       "description" : "statestore hostname",
       "required" : "true",
       "type" : "string",
-      "default" : "vd0214.halxg.cloudera.com"
+      "default" : ""
     },
     {
       "name" : "state_store_port",
@@ -133,7 +123,7 @@
       "description" : "catalog service hostname",
       "required" : "true",
       "type" : "string",
-      "default" : "vd0214.halxg.cloudera.com"
+      "default" : ""
     },
     {
       "name" : "catalog_service_port",
@@ -151,7 +141,6 @@
       "type" : "port",
       "default" : 35010
     },
-    // TODO: create log dir for recordservice use only
     {
       "name" : "log_dir",
       "label" : "log directory for recordservice",
@@ -159,6 +148,39 @@
       "required" : "true",
       "type" : "string",
       "default" : "/var/log/recordserviced"
+    },
+    {
+      "name" : "v",
+      "label" : "Logging level",
+      "description" : "Higher is more verbose",
+      "required" : "true",
+      "type" : "long",
+      "min" : "0",
+      "default" : "1"
+    },
+    {
+      "name" : "principal_primary",
+      "label" : "principal primary for kerberos",
+      "description" : "principal primary for kerberos",
+      "required" : "true",
+      "type" : "string",
+      "default" : "recordservice"
+    },
+    {
+      "name" : "realm",
+      "label" : "realm for kerberos",
+      "description" : "realm for kerberos",
+      "required" : "true",
+      "type" : "string",
+      "default" : ""
+    },
+    {
+      "name" : "kerberos_reinit_interval",
+      "label" : "kerberos reinit interval",
+      "description" : "kerberos reinit interval",
+      "required" : "true",
+      "type" : "long",
+      "default" : "100"
     }
   ],
   "roles" : [
@@ -172,6 +194,13 @@
         "dir" : "/var/log/recordserviced",
         "filename" : "recordserviced.INFO"
       },
+      "kerberosPrincipals" : [
+        {
+          "name" : "recordservice_principal",
+          "primary" : "${principal_primary}",
+          "instance" : "${host}"
+        }
+      ],
       "startRunner" : {
         "program" : "scripts/control.sh",
         "args" : [ "start" ],
@@ -187,7 +216,10 @@
           "CATALOG_SERVICE_HOST" : "${catalog_service_host}",
           "CATALOG_SERVICE_PORT" : "${catalog_service_port}",
           "WEBSERVICE_PORT" : "${webservice_port}",
-          "LOG_DIR" : "${log_dir}"
+          "LOG_DIR" : "${log_dir}",
+          "PRINCIPAL" : "${principal_primary}/${host}@${realm}",
+          "V" : "${v}",
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
         }
       },
       "stopRunner" : {
@@ -197,6 +229,14 @@
           "MAIN_PROCESS" : "recordserviced"
         },
         "timeout" : 180000
+      },
+      "cgroup" : {
+        "cpu" : {
+          "autoConfigured" : true
+        },
+        "blkio" : {
+          "autoConfigured" : true
+        }
       }
     }
   ]
