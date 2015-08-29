@@ -183,9 +183,9 @@ namespace impala {
 // was relative to the local time zone. In log version 1.1, this was changed to be
 // relative to UTC. The same time zone change was made for the audit log, but the
 // version was kept at 1.0 because there is no known consumer of the timestamp.
-const string PROFILE_LOG_FILE_PREFIX = "impala_profile_log_1.1-";
-const string AUDIT_EVENT_LOG_FILE_PREFIX = "impala_audit_event_log_1.0-";
-const string LINEAGE_LOG_FILE_PREFIX = "impala_lineage_log_1.0-";
+const string PROFILE_LOG_FILE_PREFIX = "profile_log_1.1-";
+const string AUDIT_EVENT_LOG_FILE_PREFIX = "audit_event_log_1.0-";
+const string LINEAGE_LOG_FILE_PREFIX = "lineage_log_1.0-";
 
 const uint32_t MAX_CANCELLATION_QUEUE_SIZE = 65536;
 
@@ -280,13 +280,15 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
     }
   }
 
-  status = TmpFileMgr::Init();
-  if (!status.ok()) {
-    LOG(ERROR) << status.GetDetail();
-    if (FLAGS_abort_on_config_error) {
-      LOG(ERROR) << "Aborting Impala Server startup due to improperly "
-                 << "configured scratch directories.";
-      exit(1);
+  if (!exec_env->is_record_service()) {
+    status = TmpFileMgr::Init();
+    if (!status.ok()) {
+      LOG(ERROR) << status.GetDetail();
+      if (FLAGS_abort_on_config_error) {
+        LOG(ERROR) << "Aborting Impala Server startup due to improperly "
+                  << "configured scratch directories.";
+        exit(1);
+      }
     }
   }
 
@@ -432,6 +434,14 @@ Status ImpalaServer::LogLineageRecord(const TExecRequest& request) {
   return status;
 }
 
+string GetLogPrefix() {
+  if (ExecEnv::GetInstance()->is_record_service()) {
+    return "recordservice_";
+  } else {
+    return "impala_";
+  }
+}
+
 bool ImpalaServer::IsLineageLoggingEnabled() {
   return !FLAGS_lineage_event_log_dir.empty();
 }
@@ -441,8 +451,9 @@ Status ImpalaServer::InitLineageLogging() {
     LOG(INFO) << "Lineage logging is disabled";
     return Status::OK();
   }
+  string prefix = GetLogPrefix() + LINEAGE_LOG_FILE_PREFIX;
   lineage_logger_.reset(new SimpleLogger(FLAGS_lineage_event_log_dir,
-      LINEAGE_LOG_FILE_PREFIX, FLAGS_max_lineage_log_file_size));
+      prefix, FLAGS_max_lineage_log_file_size));
   RETURN_IF_ERROR(lineage_logger_->Init());
   lineage_logger_flush_thread_.reset(new Thread("impala-server",
         "lineage-log-flush", &ImpalaServer::LineageLoggerFlushThread, this));
@@ -533,8 +544,9 @@ Status ImpalaServer::InitAuditEventLogging() {
     LOG(INFO) << "Event logging is disabled";
     return Status::OK();
   }
+  string prefix = GetLogPrefix() + AUDIT_EVENT_LOG_FILE_PREFIX;
   audit_event_logger_.reset(new SimpleLogger(FLAGS_audit_event_log_dir,
-     AUDIT_EVENT_LOG_FILE_PREFIX, FLAGS_max_audit_event_log_file_size));
+     prefix, FLAGS_max_audit_event_log_file_size));
   RETURN_IF_ERROR(audit_event_logger_->Init());
   audit_event_logger_flush_thread_.reset(new Thread("impala-server",
         "audit-event-log-flush", &ImpalaServer::AuditEventLoggerFlushThread, this));
@@ -590,8 +602,10 @@ Status ImpalaServer::InitProfileLogging() {
     ss << FLAGS_log_dir << "/profiles/";
     FLAGS_profile_log_dir = ss.str();
   }
+
+  string prefix = GetLogPrefix() + PROFILE_LOG_FILE_PREFIX;
   profile_logger_.reset(new SimpleLogger(FLAGS_profile_log_dir,
-      PROFILE_LOG_FILE_PREFIX, FLAGS_max_profile_log_file_size));
+      prefix, FLAGS_max_profile_log_file_size));
   RETURN_IF_ERROR(profile_logger_->Init());
   profile_log_file_flush_thread_.reset(new Thread("impala-server", "log-flush-thread",
       &ImpalaServer::LogFileFlushThread, this));

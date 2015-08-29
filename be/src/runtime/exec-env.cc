@@ -136,7 +136,6 @@ DECLARE_string(ssl_client_ca_certificate);
 const static string PSEUDO_DISTRIBUTED_CONFIG_KEY =
     "yarn.scheduler.include-port-in-node-name";
 
-static const string BACKENDS_WEB_PAGE = "/backends";
 static const string BACKENDS_TEMPLATE = "backends.tmpl";
 
 namespace impala {
@@ -444,8 +443,13 @@ Status ExecEnv::StartServices() {
     RETURN_IF_ERROR(webserver_->Start());
     Webserver::UrlCallback backends_callback =
         bind<void>(mem_fn(&ExecEnv::BackendsUrlCallback), this, _1, _2);
-    webserver_->RegisterUrlCallback(BACKENDS_WEB_PAGE, BACKENDS_TEMPLATE,
-        backends_callback);
+    if (is_record_service()) {
+      webserver_->RegisterUrlCallback("/membership", BACKENDS_TEMPLATE,
+          backends_callback);
+    } else {
+      webserver_->RegisterUrlCallback("/backends", BACKENDS_TEMPLATE,
+          backends_callback);
+    }
   } else {
     LOG(INFO) << "Not starting webserver";
   }

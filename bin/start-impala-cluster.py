@@ -229,9 +229,6 @@ def build_rm_args(instance_num):
   return RM_ARGS % (llama_address, cgroup_path, fs_cfg_path)
 
 def start_impalad_instances(cluster_size):
-  if (options.start_recordservice and cluster_size != 1):
-    raise RuntimeError, "If starting record service, cluster size must be 1 (\"-s 1\")"
-
   # Start each impalad instance and optionally redirect the output to a log file.
   for i in range(options.cluster_size):
     if i == 0:

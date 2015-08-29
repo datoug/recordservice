@@ -163,7 +163,10 @@ Status PlanFragmentExecutor::Prepare(const TExecPlanFragmentParams& request) {
   DCHECK(!params.request_pool.empty());
   runtime_state_->InitMemTrackers(query_id_, &params.request_pool,
       bytes_limit, rm_reservation_size_bytes);
-  RETURN_IF_ERROR(runtime_state_->CreateBlockMgr());
+  if (!runtime_state_->is_record_service_request()) {
+    // Doesn't run any spilling operators, no need to create block mgr.
+    RETURN_IF_ERROR(runtime_state_->CreateBlockMgr());
+  }
 
   // Reserve one main thread from the pool
   if (!runtime_state_->is_record_service_request()) {
