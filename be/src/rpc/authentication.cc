@@ -559,7 +559,7 @@ void SaslAuthProvider::RunKinit(Promise<Status>* first_kinit) {
   }
 }
 
-Status InitAuth(const string& appname) {
+Status InitAuth(const string& appname, bool is_recordservice) {
   // We only set up Sasl things if we are indeed going to be using Sasl.
   // Checking of these flags for sanity is done later, but this check is good
   // enough at this early stage:
@@ -666,7 +666,7 @@ Status InitAuth(const string& appname) {
     }
   }
 
-  RETURN_IF_ERROR(AuthManager::GetInstance()->Init());
+  RETURN_IF_ERROR(AuthManager::GetInstance()->Init(is_recordservice));
   return Status::OK();
 }
 
@@ -695,7 +695,7 @@ Status CheckReplayCacheDirPermissions() {
 }
 
 Status SaslAuthProvider::InitKerberos(const string& principal,
-    const string& keytab_file) {
+    const string& keytab_file, bool is_recordservice) {
   principal_ = principal;
   keytab_file_ = keytab_file;
   // The logic here is that needs_kinit_ is false unless we are the internal
@@ -723,7 +723,7 @@ Status SaslAuthProvider::InitKerberos(const string& principal,
   realm_ = names[2];
 
   RETURN_IF_ERROR(CheckReplayCacheDirPermissions());
-  RETURN_IF_ERROR(InitKerberosEnv());
+  RETURN_IF_ERROR(InitKerberosEnv(is_recordservice));
 
   LOG(INFO) << "Using " << (is_internal_ ? "internal" : "external")
             << " kerberos principal \"" << service_name_ << "/"
@@ -765,7 +765,7 @@ static Status EnvAppend(const string& attr, const string& thing, const string& t
   return Status::OK();
 }
 
-Status SaslAuthProvider::InitKerberosEnv() {
+Status SaslAuthProvider::InitKerberosEnv(bool is_recordservice) {
   DCHECK(!principal_.empty());
 
   // Called only during setup; no locking required.
@@ -789,7 +789,7 @@ Status SaslAuthProvider::InitKerberosEnv() {
   // 'impala', the kinit we perform is going to blow away credentials for the
   // current user.  Not setting this isn't technically fatal, so ignore errors.
   // Use '/tmp/krb5cc_recordservice_internal' if it is recordservice.
-  if (ExecEnv::GetInstance()->is_record_service()) {
+  if (is_recordservice) {
     (void) setenv("KRB5CCNAME", "/tmp/krb5cc_recordservice_internal", 1);
   } else {
     (void) setenv("KRB5CCNAME", "/tmp/krb5cc_impala_internal", 1);
@@ -971,7 +971,7 @@ Status NoAuthProvider::WrapClientTransport(const string& hostname,
   return Status::OK();
 }
 
-Status AuthManager::Init() {
+Status AuthManager::Init(bool is_recordservice) {
   bool use_ldap = false;
   const string excl_msg = "--$0 and --$1 are mutually exclusive "
       "and should not be set together";
@@ -1071,7 +1071,7 @@ Status AuthManager::Init() {
     SaslAuthProvider* sap = NULL;
     internal_auth_provider_.reset(sap = new SaslAuthProvider(true));
     RETURN_IF_ERROR(sap->InitKerberos(kerberos_internal_principal,
-        FLAGS_keytab_file));
+        FLAGS_keytab_file, is_recordservice));
     LOG(INFO) << "Internal communication is authenticated with Kerberos";
   } else {
     internal_auth_provider_.reset(new NoAuthProvider());
@@ -1087,7 +1087,7 @@ Status AuthManager::Init() {
     external_auth_provider_.reset(sap = new SaslAuthProvider(false));
     if (!kerberos_external_principal.empty()) {
       RETURN_IF_ERROR(sap->InitKerberos(kerberos_external_principal,
-          FLAGS_keytab_file));
+          FLAGS_keytab_file, is_recordservice));
       LOG(INFO) << "External communication is authenticated with Kerberos";
     }
     if (use_ldap) {

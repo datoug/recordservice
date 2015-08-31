@@ -89,7 +89,8 @@ class SaslAuthProvider : public AuthProvider {
   /// Initializes kerberos items and checks for sanity.  Failures can occur on a
   /// malformed principal or when setting some environment variables.  Called
   /// prior to Start().
-  Status InitKerberos(const std::string& principal, const std::string& keytab_path);
+  Status InitKerberos(const std::string& principal, const std::string& keytab_path,
+      bool is_recordservice);
 
   /// Initializes ldap - just record that we're going to use it.  Called prior to
   /// Start().
@@ -150,7 +151,7 @@ class SaslAuthProvider : public AuthProvider {
   static bool env_setup_complete_;
 
   /// One-time kerberos-specific environment variable setup.  Called by InitKerberos().
-  Status InitKerberosEnv();
+  Status InitKerberosEnv(bool is_recordservice);
 };
 
 /// This provider implements no authentication, so any connection is immediately
@@ -175,7 +176,7 @@ class NoAuthProvider : public AuthProvider {
 /// The first entry point to the authentication subsystem.  Performs initialization
 /// of Sasl, the global AuthManager, and the two authentication providers.  Appname
 /// should generally be argv[0].
-Status InitAuth(const std::string& appname);
+Status InitAuth(const std::string& appname, bool is_recordservice);
 
 }
 

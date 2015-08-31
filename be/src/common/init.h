@@ -25,7 +25,7 @@ namespace impala {
 /// Callers that want to override default gflags variables should do so before calling
 /// this method. No logging should be performed until after this method returns.
 void InitCommonRuntime(int argc, char** argv, bool init_jvm,
-    TestInfo::Mode m = TestInfo::NON_TEST);
+    bool is_recordservice = false, TestInfo::Mode m = TestInfo::NON_TEST);
 
 }
 

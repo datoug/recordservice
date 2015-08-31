@@ -40,7 +40,7 @@ class AuthManager {
 
   /// Set up internal and external AuthProvider classes.  This does a bunch of flag
   /// checking and calls each AuthProvider->Start().
-  Status Init();
+  Status Init(bool is_recordservice = false);
 
   /// Returns the authentication provider to use for "external" communication
   /// such as the impala shell, jdbc, odbc, etc. This only applies to the server

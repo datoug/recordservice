@@ -122,7 +122,7 @@ static void MaintenanceThread() {
 }
 
 void impala::InitCommonRuntime(int argc, char** argv, bool init_jvm,
-    TestInfo::Mode test_mode) {
+    bool is_recordservice, TestInfo::Mode test_mode) {
   CpuInfo::Init();
   DiskInfo::Init();
   MemInfo::Init();
@@ -151,7 +151,7 @@ void impala::InitCommonRuntime(int argc, char** argv, bool init_jvm,
   impala::InitGoogleLoggingSafe(argv[0]);
   impala::InitThreading();
   impala::TimestampParser::Init();
-  EXIT_IF_ERROR(impala::InitAuth(argv[0]));
+  EXIT_IF_ERROR(impala::InitAuth(argv[0], is_recordservice));
 
   // Initialize maintenance_thread after InitGoogleLoggingSafe and InitThreading.
   maintenance_thread.reset(

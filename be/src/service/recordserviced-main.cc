@@ -50,7 +50,7 @@ DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
 
 int main(int argc, char** argv) {
-  InitCommonRuntime(argc, argv, true);
+  InitCommonRuntime(argc, argv, true, true);
 
   if (FLAGS_recordservice_worker_port == 0 && FLAGS_recordservice_planner_port == 0) {
     LOG(ERROR) << "Cannot start recordservice daemon that is not "
