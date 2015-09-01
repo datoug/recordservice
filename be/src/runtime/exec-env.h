@@ -54,8 +54,7 @@ class LockTracker;
 class ExecEnv {
  public:
   // Id is the server id that needs to be unique across the cluster.
-  ExecEnv(const std::string& server_id, bool is_record_service = false,
-      bool running_record_service = false);
+  ExecEnv(const std::string& server_id, bool is_record_service = false);
 
   // Ctor used for tests.
   ExecEnv(const std::string& hostname, int backend_port, int subscriber_port,
@@ -118,11 +117,6 @@ class ExecEnv {
   /// Returns true if this daemon is recordserviced.
   bool is_record_service() const { return is_record_service_; }
 
-  /// Returns true if this daemon is running the RecordService services
-  /// (could be impalad).
-  /// TODO: remove.
-  bool running_record_service() const { return running_record_service_; }
-
   /// Returns true if the Llama in use is pseudo-distributed, used for development
   /// purposes. The pseudo-distributed version has special requirements for specifying
   /// resource locations.
@@ -131,10 +125,6 @@ class ExecEnv {
  protected:
   /// True if this daemon is recordserviced
   const bool is_record_service_;
-
-  /// True if this is impalad but running the RecordService services.
-  /// TODO: remove when recordserviced is ready.
-  const bool running_record_service_;
 
   /// ID for this process that needs to be unique across all instances in each of
   /// the services this daemon is part of. This ID is used for membership registration

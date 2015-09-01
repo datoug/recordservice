@@ -68,7 +68,7 @@ parser.add_option("--jvm_args", dest="jvm_args", default="",
                   help="Additional arguments to pass to the JVM(s) during startup.")
 
 parser.add_option("--start_recordservice", dest="start_recordservice", action="store_true",
-                  default=False, help="Starts recordserviced along with impalad")
+                  default=True, help="Starts recordserviced along with impalad")
 parser.add_option("--num_planner_servers", type="int", dest="num_planner_servers",
                   default=1, help="Number of daemons that run the planner service.")
 
@@ -93,7 +93,6 @@ IMPALAD_PORTS = ("-beeswax_port=%d -hs2_port=%d  -be_port=%d "
                  "-llama_callback_port=%d")
 JVM_ARGS = "-jvm_debug_port=%s -jvm_args=%s"
 BE_LOGGING_ARGS = "-log_filename=%s -log_dir=%s -v=%s -logbufsecs=5"
-RECORD_SERVICE_ARGS = "-start_recordservice=%s"
 RM_ARGS = ("-enable_rm=true -llama_addresses=%s -cgroup_hierarchy_path=%s "
            "-fair_scheduler_allocation_path=%s")
 CLUSTER_WAIT_TIMEOUT_IN_SECONDS = 240
@@ -208,12 +207,6 @@ def build_jvm_args(instance_num):
   BASE_JVM_DEBUG_PORT = 30000
   return JVM_ARGS % (BASE_JVM_DEBUG_PORT + instance_num, options.jvm_args)
 
-def build_recordservice_args(start_recordservice):
-  if (start_recordservice):
-    return RECORD_SERVICE_ARGS % ("false")
-  else:
-    return RECORD_SERVICE_ARGS % ("true")
-
 def build_rm_args(instance_num):
   if not options.enable_rm: return ""
   try:
@@ -240,12 +233,11 @@ def start_impalad_instances(cluster_size):
       # Yes, this is a hack, but it's easier than modifying the minikdc...
       sleep(2)
 
-    args = "%s %s %s %s %s %s" %\
+    args = "%s %s %s %s %s" %\
           (build_impalad_logging_args(i, service_name),
            build_jvm_args(i),
            build_impalad_port_args(i),
            options.impalad_args.replace("#ID", str(i)),
-           build_recordservice_args(options.start_recordservice),
            build_rm_args(i))
     stderr_log_file_path = os.path.join(options.log_dir, '%s-error.log' % service_name)
     exec_impala_process(IMPALAD_PATH, args, stderr_log_file_path)

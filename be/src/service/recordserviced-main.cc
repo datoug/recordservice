@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
       FLAGS_recordservice_worker_port : FLAGS_recordservice_planner_port)));
   string service_id = Substitute("recordserviced@$0",
       TNetworkAddressToString(service_address));
-  ExecEnv exec_env(service_id, true, true);
+  ExecEnv exec_env(service_id, true);
 
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
@@ -109,5 +109,9 @@ int main(int argc, char** argv) {
 
   if (recordservice_planner != NULL) recordservice_planner->Join();
   if (recordservice_worker != NULL) recordservice_worker->Join();
+
+  delete recordservice_planner;
+  delete recordservice_worker;
+
   return 0;
 }

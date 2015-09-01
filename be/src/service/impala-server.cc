@@ -353,7 +353,7 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
       TimestampValue::LocalTime().DebugString());
 
   // Initialize recordservice metrics
-  if (exec_env->running_record_service()) {
+  if (exec_env->is_record_service()) {
     RecordServiceMetrics::CreateMetrics(
         exec_env->metrics()->GetChildGroup("record-service"));
   }
@@ -371,10 +371,7 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
 
     // If we are running the RecordService services in this daemon, don't register
     // to the catalog yet. Only register if this starts up a planner service.
-    // FIXME: this is a hack for now. recordserviced should not export the HS2 and
-    // beeswax services and the code should be updated so that if any services that
-    // need the catalog is started, we register to this topic.
-    if (!exec_env->running_record_service()) RegisterToCatalogTopic();
+    if (!exec_env->is_record_service()) RegisterToCatalogTopic();
   }
 
   EXIT_IF_ERROR(UpdateCatalogMetrics());

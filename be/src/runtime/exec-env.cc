@@ -142,10 +142,8 @@ namespace impala {
 
 ExecEnv* ExecEnv::exec_env_ = NULL;
 
-ExecEnv::ExecEnv(const string& server_id, bool is_record_service,
-    bool running_record_service)
+ExecEnv::ExecEnv(const string& server_id, bool is_record_service)
   : is_record_service_(is_record_service),
-    running_record_service_(running_record_service),
     server_id_(server_id),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
@@ -195,7 +193,6 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service,
 ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
                  int webserver_port, const string& statestore_host, int statestore_port)
   : is_record_service_(false),
-    running_record_service_(false),
     server_id_(Substitute("impalad@$0:$1", hostname, backend_port)),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
@@ -328,7 +325,7 @@ void ExecEnv::BackendsUrlCallback(const Webserver::ArgumentMap& args,
     scheduler_->GetAllKnownBackends(&backends);
     PopulateDocument(document, "backends", backends);
   }
-  if (running_record_service()) {
+  if (is_record_service()) {
     // Populate RecordService planner/workers.
     DCHECK(impala_server() != NULL);
     Scheduler::BackendList planners;

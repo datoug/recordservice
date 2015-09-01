@@ -66,7 +66,7 @@
       "description" : "record service planner port number",
       "required" : "true",
           "type" : "port",
-          "default" : 40010
+          "default" : 40000
     },
     {
       "name" : "recordservice_worker_port",
@@ -74,7 +74,7 @@
       "description" : "record service worker port number",
       "required" : "true",
       "type" : "port",
-      "default" : 40110
+      "default" : 40100
     },
     {
       "name" : "state_store_subscriber_port",
@@ -139,7 +139,7 @@
       "description" : "webservice port for debug",
       "required" : "true",
       "type" : "port",
-      "default" : 35010
+      "default" : 35000
     },
     {
       "name" : "log_dir",
@@ -164,7 +164,7 @@
       "description" : "principal primary for kerberos",
       "required" : "true",
       "type" : "string",
-      "default" : "recordservice"
+      "default" : "impala"
     },
     {
       "name" : "realm",

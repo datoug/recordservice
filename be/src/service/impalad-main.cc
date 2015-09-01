@@ -56,9 +56,6 @@ DECLARE_string(principal);
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
 
-// FIXME: remove this flag when recordserviced is ready.
-DEFINE_bool(start_recordservice, true, "Start RecordService services");
-
 // Start a test thrift service. This service is used to test authentication and should
 // not be on for production.
 DEFINE_int32(test_service_port, 0, "Port to start test service on. 0 to not start.");
@@ -81,16 +78,13 @@ int main(int argc, char** argv) {
   string service_id = ImpalaServer::CreateServerId(
       "impalad", FLAGS_hostname, FLAGS_be_port);
 
-  ExecEnv exec_env(service_id, false, FLAGS_start_recordservice);
+  ExecEnv exec_env(service_id, false);
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
 
   ThriftServer* beeswax_server = NULL;
   ThriftServer* hs2_server = NULL;
   ThriftServer* be_server = NULL;
-
-  ThriftServer* recordservice_planner = NULL;
-  ThriftServer* recordservice_worker = NULL;
 
   ThriftServer* test_server = NULL;
 
@@ -99,11 +93,6 @@ int main(int argc, char** argv) {
       FLAGS_be_port, &beeswax_server, &hs2_server, &be_server,
       &server));
 
-  if (FLAGS_start_recordservice) {
-    EXIT_IF_ERROR(ImpalaServer::StartRecordServiceServices(&exec_env, server,
-        FLAGS_recordservice_planner_port, FLAGS_recordservice_worker_port,
-        &recordservice_planner, &recordservice_worker));
-  }
   if (FLAGS_test_service_port != 0) {
     EXIT_IF_ERROR(ImpalaServer::StartTestService(
         server, FLAGS_test_service_port, &test_server));
@@ -122,14 +111,6 @@ int main(int argc, char** argv) {
   // this blocks until the beeswax and hs2 servers terminate
   EXIT_IF_ERROR(beeswax_server->Start());
   EXIT_IF_ERROR(hs2_server->Start());
-  if (recordservice_planner != NULL) {
-    EXIT_IF_ERROR(recordservice_planner->Start());
-    RecordServiceMetrics::RUNNING_PLANNER->set_value(true);
-  }
-  if (recordservice_worker != NULL) {
-    EXIT_IF_ERROR(recordservice_worker->Start());
-    RecordServiceMetrics::RUNNING_WORKER->set_value(true);
-  }
   if (test_server != NULL) EXIT_IF_ERROR(test_server->Start());
 
   ImpaladMetrics::IMPALA_SERVER_READY->set_value(true);
@@ -137,8 +118,6 @@ int main(int argc, char** argv) {
 
   beeswax_server->Join();
   hs2_server->Join();
-  if (recordservice_planner != NULL) recordservice_planner->Join();
-  if (recordservice_worker != NULL) recordservice_worker->Join();
   if (test_server != NULL) test_server->Join();
 
   delete be_server;
