@@ -20,6 +20,7 @@
 #include <gflags/gflags.h>
 #include <gutil/strings/substitute.h>
 
+#include "catalog/catalog.h"
 #include "common/logging.h"
 #include "resourcebroker/resource-broker.h"
 #include "runtime/client-cache.h"
@@ -163,12 +164,13 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service)
     hdfs_op_thread_pool_(
         CreateHdfsOpThreadPool("hdfs-worker-pool", FLAGS_num_hdfs_worker_threads, 1024)),
     request_pool_service_(new RequestPoolService(metrics_.get())),
-    frontend_(new Frontend()),
+    frontend_(new Frontend(is_record_service)),
     enable_webserver_(FLAGS_enable_webserver),
     tz_database_(TimezoneDatabase()),
     is_fe_tests_(false),
     backend_address_(MakeNetworkAddress(FLAGS_hostname, FLAGS_be_port)),
     is_pseudo_distributed_llama_(false) {
+  if (is_record_service) catalog_.reset(new Catalog());
   if (FLAGS_enable_rm) InitRm();
   InitStatestoreSubscriber();
 
@@ -210,7 +212,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
     thread_mgr_(new ThreadResourceMgr),
     hdfs_op_thread_pool_(
         CreateHdfsOpThreadPool("hdfs-worker-pool", FLAGS_num_hdfs_worker_threads, 1024)),
-    frontend_(new Frontend()),
+    frontend_(new Frontend(false)),
     enable_webserver_(FLAGS_enable_webserver && webserver_port > 0),
     tz_database_(TimezoneDatabase()),
     is_fe_tests_(false),
@@ -237,6 +239,8 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
 }
 
 void ExecEnv::InitStatestoreSubscriber() {
+  // recordserviced does not use the statestore.
+  if (is_record_service_) return;
   DCHECK(statestore_subscriber_.get() == NULL);
   TNetworkAddress subscriber_address =
       MakeNetworkAddress(FLAGS_hostname, is_record_service_ ?

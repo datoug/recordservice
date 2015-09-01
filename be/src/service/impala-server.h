@@ -284,10 +284,6 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   void MembershipCallback(const StatestoreSubscriber::TopicDeltaMap&
       incoming_topic_deltas, std::vector<TTopicDelta>* subscriber_topic_updates);
 
-  void RecordServiceMembershipCallback(
-      const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
-      std::vector<TTopicDelta>* subscriber_topic_updates);
-
   void CatalogUpdateCallback(const StatestoreSubscriber::TopicDeltaMap& topic_deltas,
       std::vector<TTopicDelta>* topic_updates);
 

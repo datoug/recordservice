@@ -208,6 +208,7 @@ public class CatalogServiceCatalog extends Catalog {
    * Returns all known objects in the Catalog (Tables, Views, Databases, and
    * Functions). Some metadata may be skipped for objects that have a catalog
    * version < the specified "fromVersion".
+   * Skips builtins.
    */
   public TGetAllCatalogObjectsResponse getCatalogObjects(long fromVersion) {
     TGetAllCatalogObjectsResponse resp = new TGetAllCatalogObjectsResponse();
@@ -225,6 +226,7 @@ public class CatalogServiceCatalog extends Catalog {
               "cache. Skipping database and all child objects for this update.");
           continue;
         }
+        if (db.isSystemDb()) continue;
         TCatalogObject catalogDb = new TCatalogObject(TCatalogObjectType.DATABASE,
             db.getCatalogVersion());
         catalogDb.setDb(db.toThrift());
@@ -416,6 +418,7 @@ public class CatalogServiceCatalog extends Catalog {
         }
       }
       dbCache_.set(newDbCache);
+      addDb(builtinsDb_);
       // Submit tables for background loading.
       for (TTableName tblName: tblsToBackgroundLoad) {
         tableLoadingMgr_.backgroundLoad(tblName);
@@ -964,5 +967,28 @@ public class CatalogServiceCatalog extends Catalog {
    */
   public TableId getNextTableId() { return new TableId(nextTableId_.getAndIncrement()); }
   public SentryProxy getSentryProxy() { return sentryProxy_; }
-  public AuthorizationPolicy getAuthPolicy() { return authPolicy_; }
+
+  @Override
+  public boolean isReady() {
+    return true;
+  }
+  @Override
+  public void setIsReady() {
+    // no-op
+  }
+
+  @Override
+  public boolean loadTableMetadata(Set<TableName> tbls, long timeoutMs)
+      throws CatalogException {
+    Set<TableName> missingTbls = getMissingTbls(tbls);
+    long startTimeMs = System.currentTimeMillis();
+    for (TableName t: missingTbls) {
+      // TODO: add timeout to getOrLoadTable.
+      getOrLoadTable(t.getDb(), t.getTbl());
+      if (timeoutMs > 0 && System.currentTimeMillis() - startTimeMs > timeoutMs) {
+        return false;
+      }
+    }
+    return true;
+  }
 }

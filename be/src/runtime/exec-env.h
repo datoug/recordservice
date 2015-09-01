@@ -29,6 +29,7 @@
 
 namespace impala {
 
+class Catalog;
 class DataStreamMgr;
 class DiskIoMgr;
 class HBaseTableFactory;
@@ -94,6 +95,7 @@ class ExecEnv {
   HdfsOpThreadPool* hdfs_op_thread_pool() { return hdfs_op_thread_pool_.get(); }
   ImpalaServer* impala_server() { return impala_server_; }
   Frontend* frontend() { return frontend_.get(); };
+  Catalog* catalog() { return catalog_.get(); };
 
   void set_enable_webserver(bool enable) { enable_webserver_ = enable; }
 
@@ -150,6 +152,9 @@ class ExecEnv {
   boost::scoped_ptr<HdfsOpThreadPool> hdfs_op_thread_pool_;
   boost::scoped_ptr<RequestPoolService> request_pool_service_;
   boost::scoped_ptr<Frontend> frontend_;
+
+  // Only set if this is recordserviced for the in-process catalog instance.
+  boost::scoped_ptr<Catalog> catalog_;
 
   /// Not owned by this class
   ImpalaServer* impala_server_;

@@ -15,13 +15,20 @@
 package com.cloudera.impala.catalog;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.log4j.Logger;
+import org.apache.thrift.TException;
 
 import com.cloudera.impala.analysis.FunctionName;
+import com.cloudera.impala.analysis.TableName;
 import com.cloudera.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import com.cloudera.impala.thrift.TCatalogObject;
 import com.cloudera.impala.thrift.TFunction;
@@ -74,7 +81,7 @@ public abstract class Catalog {
           new ConcurrentHashMap<String, Db>());
 
   // DB that contains all builtins
-  private static Db builtinsDb_;
+  protected static Db builtinsDb_;
 
   // Cache of data sources.
   protected final CatalogObjectCache<DataSource> dataSources_;
@@ -319,6 +326,69 @@ public abstract class Catalog {
    */
   public void close() { metaStoreClientPool_.close(); }
 
+  public AuthorizationPolicy getAuthPolicy() { return authPolicy_; }
+
+  /**
+   * Called to indicate the catalog is ready to serve requests. This means it has
+   * built up the initial list of catalog objects.
+   */
+  abstract public void setIsReady();
+
+  /**
+   * Returns if the catalog is ready to serve requests.
+   */
+  abstract public boolean isReady();
+
+  /**
+   * Loads the missing metadata in 'tbls', waiting for at most timeoutMs.
+   * Returns true if all the metadata was loaded and false if it timed out.
+   */
+  abstract public boolean loadTableMetadata(Set<TableName> tbls, long timeoutMs)
+      throws CatalogException;
+
+  /**
+   * Returns the HDFS path where the metastore would create the given table. If the table
+   * has a "location" set, that will be returned. Otherwise the path will be resolved
+   * based on the location of the parent database. The metastore folder hierarchy is:
+   * <warehouse directory>/<db name>.db/<table name>
+   * Except for items in the default database which will be:
+   * <warehouse directory>/<table name>
+   * This method handles both of these cases.
+   */
+  public Path getTablePath(org.apache.hadoop.hive.metastore.api.Table msTbl)
+      throws NoSuchObjectException, MetaException, TException {
+    MetaStoreClient client = getMetaStoreClient();
+    try {
+      // If the table did not have its path set, build the path based on the the
+      // location property of the parent database.
+      if (msTbl.getSd().getLocation() == null || msTbl.getSd().getLocation().isEmpty()) {
+        String dbLocation =
+            client.getHiveClient().getDatabase(msTbl.getDbName()).getLocationUri();
+        return new Path(dbLocation, msTbl.getTableName().toLowerCase());
+      } else {
+        return new Path(msTbl.getSd().getLocation());
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+
+  /**
+   * Given a set of table names, returns the set of table names that are missing
+   * metadata (are not yet loaded).
+   */
+  public Set<TableName> getMissingTbls(Set<TableName> tableNames) {
+    Set<TableName> missingTbls = new HashSet<TableName>();
+    for (TableName tblName: tableNames) {
+      Db db = getDb(tblName.getDb());
+      if (db == null) continue;
+      Table tbl = db.getTable(tblName.getTbl());
+      if (tbl == null) continue;
+      if (!tbl.isLoaded()) missingTbls.add(tblName);
+    }
+    return missingTbls;
+  }
 
   /**
    * Returns a managed meta store client from the client connection pool.

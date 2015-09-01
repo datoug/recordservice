@@ -14,15 +14,12 @@
 
 package com.cloudera.impala.catalog;
 
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.log4j.Logger;
-import org.apache.thrift.TException;
 
-import com.cloudera.impala.catalog.MetaStoreClientPool.MetaStoreClient;
+import com.cloudera.impala.analysis.TableName;
 import com.cloudera.impala.common.ImpalaException;
 import com.cloudera.impala.thrift.TCatalogObject;
 import com.cloudera.impala.thrift.TCatalogObjectType;
@@ -35,6 +32,7 @@ import com.cloudera.impala.thrift.TTable;
 import com.cloudera.impala.thrift.TUniqueId;
 import com.cloudera.impala.thrift.TUpdateCatalogCacheRequest;
 import com.cloudera.impala.thrift.TUpdateCatalogCacheResponse;
+import com.google.common.base.Joiner;
 
 /**
  * Thread safe Catalog for an Impalad.  The Impalad catalog can be updated either via
@@ -83,6 +81,10 @@ public class ImpaladCatalog extends Catalog {
 
   // Object that is used to synchronize on and signal when a catalog update is received.
   private final Object catalogUpdateEventNotifier_ = new Object();
+
+  // Max time to wait for a catalog update notification.
+  private final long MAX_CATALOG_UPDATE_WAIT_TIME_MS = 2 * 1000;
+
 
   /**
    * C'tor used by tests that need to validate the ImpaladCatalog outside of the
@@ -161,14 +163,32 @@ public class ImpaladCatalog extends Catalog {
    * wait. Does not protect against spurious wakeups, so this should be called in a loop.
    *
    */
-  public void waitForCatalogUpdate(long timeoutMs) {
-    synchronized (catalogUpdateEventNotifier_) {
-      try {
-        catalogUpdateEventNotifier_.wait(timeoutMs);
-      } catch (InterruptedException e) {
-        // Ignore
+  @Override
+  public boolean loadTableMetadata(Set<TableName> missingTbls, long timeoutMs) {
+    long startTimeMs = System.currentTimeMillis();
+    // Wait until all the required tables are loaded in the Impalad's catalog cache.
+    while (!missingTbls.isEmpty()) {
+      // Check if the timeout has been reached.
+      if (timeoutMs > 0 && System.currentTimeMillis() - startTimeMs > timeoutMs) {
+        return false;
       }
+
+      LOG.trace(String.format("Waiting for table(s) to complete loading: %s",
+          Joiner.on(", ").join(missingTbls)));
+
+      synchronized (catalogUpdateEventNotifier_) {
+        try {
+          // Wait for updates from statestore.
+          catalogUpdateEventNotifier_.wait(MAX_CATALOG_UPDATE_WAIT_TIME_MS);
+        } catch (InterruptedException e) {
+          // Ignore
+        }
+      }
+
+      missingTbls = getMissingTbls(missingTbls);
+      // TODO: Check for query cancellation here.
     }
+    return true;
   }
 
   /**
@@ -191,33 +211,6 @@ public class ImpaladCatalog extends Catalog {
       throw new TableLoadingException("Missing metadata for table: " + tableName, cause);
     }
     return table;
-  }
-
-  /**
-   * Returns the HDFS path where the metastore would create the given table. If the table
-   * has a "location" set, that will be returned. Otherwise the path will be resolved
-   * based on the location of the parent database. The metastore folder hierarchy is:
-   * <warehouse directory>/<db name>.db/<table name>
-   * Except for items in the default database which will be:
-   * <warehouse directory>/<table name>
-   * This method handles both of these cases.
-   */
-  public Path getTablePath(org.apache.hadoop.hive.metastore.api.Table msTbl)
-      throws NoSuchObjectException, MetaException, TException {
-    MetaStoreClient client = getMetaStoreClient();
-    try {
-      // If the table did not have its path set, build the path based on the the
-      // location property of the parent database.
-      if (msTbl.getSd().getLocation() == null || msTbl.getSd().getLocation().isEmpty()) {
-        String dbLocation =
-            client.getHiveClient().getDatabase(msTbl.getDbName()).getLocationUri();
-        return new Path(dbLocation, msTbl.getTableName().toLowerCase());
-      } else {
-        return new Path(msTbl.getSd().getLocation());
-      }
-    } finally {
-      client.release();
-    }
   }
 
   /**
@@ -440,9 +433,10 @@ public class ImpaladCatalog extends Catalog {
    * received and processed a valid catalog topic update from the StateStore),
    * false otherwise.
    */
+  @Override
   public boolean isReady() { return isReady_.get(); }
 
   // Only used for testing.
+  @Override
   public void setIsReady() { isReady_.set(true); }
-  public AuthorizationPolicy getAuthPolicy() { return authPolicy_; }
 }

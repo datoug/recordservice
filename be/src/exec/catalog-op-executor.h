@@ -22,6 +22,7 @@
 
 namespace impala {
 
+class Catalog;
 class ExecEnv;
 class Frontend;
 class Status;
@@ -31,10 +32,13 @@ class RuntimeProfile;
 /// This includes DDL statements such as CREATE and ALTER as well as statements such
 /// as INVALIDATE METADATA. One CatalogOpExecutor is typically created per catalog
 /// operation.
+///
+/// In the case of impalad, the operation is executed by issuing an RPC to the
+/// catalogd. In the case of recordserviced, it is executed against the in process
+/// catalog (via JNI).
 class CatalogOpExecutor {
  public:
-  CatalogOpExecutor(ExecEnv* env, Frontend* fe, RuntimeProfile* profile)
-      : env_(env), fe_(fe), profile_(profile) {}
+  CatalogOpExecutor(ExecEnv* env, Frontend* fe, RuntimeProfile* profile);
 
   /// Executes the given catalog operation against the catalog server.
   Status Exec(const TCatalogOpRequest& catalog_op);
@@ -97,8 +101,13 @@ class CatalogOpExecutor {
   /// Result of executing a DDL request using the CatalogService
   boost::scoped_ptr<TCatalogUpdateResult> catalog_update_result_;
 
+  // Unowned.
   ExecEnv* env_;
+  // Unowned.
   Frontend* fe_;
+  // Unowned. non-NULL for recordserviced indicating there is a JniCatalog
+  // running in this process.
+  Catalog* catalog_;
   RuntimeProfile* profile_;
 
   /// Handles additional BE work that needs to be done for drop function and data source,

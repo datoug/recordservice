@@ -52,9 +52,13 @@ import org.slf4j.LoggerFactory;
 import com.cloudera.impala.analysis.ToSqlUtils;
 import com.cloudera.impala.authorization.AuthorizationConfig;
 import com.cloudera.impala.authorization.ImpalaInternalAdminUser;
+import com.cloudera.impala.authorization.SentryConfig;
 import com.cloudera.impala.authorization.User;
+import com.cloudera.impala.catalog.CatalogException;
+import com.cloudera.impala.catalog.CatalogServiceCatalog;
 import com.cloudera.impala.catalog.DataSource;
 import com.cloudera.impala.catalog.Function;
+import com.cloudera.impala.catalog.ImpaladCatalog;
 import com.cloudera.impala.catalog.Role;
 import com.cloudera.impala.common.FileSystemUtil;
 import com.cloudera.impala.common.ImpalaException;
@@ -102,6 +106,7 @@ import com.cloudera.impala.thrift.TUpdateMembershipRequest;
 import com.cloudera.impala.util.GlogAppender;
 import com.cloudera.impala.util.TSessionStateUtil;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -126,9 +131,11 @@ public class JniFrontend {
   /**
    * Create a new instance of the Jni Frontend.
    */
-  public JniFrontend(boolean lazy, String serverName, String authorizationPolicyFile,
-      String sentryConfigFile, String authPolicyProviderClass, int impalaLogLevel,
-      int otherLogLevel) throws InternalException {
+  public JniFrontend(boolean loadInBackground, String serverName,
+      String authorizationPolicyFile, String sentryConfigFile,
+      String authPolicyProviderClass, int impalaLogLevel,
+      int otherLogLevel, boolean isRecordService, int numMetadataLoadingThreads)
+      throws InternalException {
     GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
         TLogLevel.values()[otherLogLevel]);
 
@@ -146,7 +153,30 @@ public class JniFrontend {
     }
     LOG.info(JniUtil.getJavaVersion());
 
-    frontend_ = new Frontend(authConfig);
+    if (isRecordService) {
+      // Check if the Sentry Service is configured. If so, create a configuration object.
+      SentryConfig sentryConfig = null;
+      if (!Strings.isNullOrEmpty(sentryConfigFile)) {
+        sentryConfig = new SentryConfig(sentryConfigFile);
+        sentryConfig.loadConfig();
+      }
+      // recordserviced directly uses CatalogServiceCatalog, meaning it does not
+      // use the statestored to load metadata but goes directly to the other
+      // services (HDFS, HMS, etc).
+      // TODO: rename CatalogServiceCatalog
+      CatalogServiceCatalog catalog = new CatalogServiceCatalog(
+          loadInBackground, numMetadataLoadingThreads, sentryConfig,
+          JniCatalog.generateId());
+      try {
+        catalog.reset();
+      } catch (CatalogException e) {
+        LOG.error("Error initializing catalog: ", e.getMessage());
+        throw new InternalException("Error initializing catalog.", e);
+      }
+      frontend_ = new Frontend(authConfig, catalog);
+    } else {
+      frontend_ = new Frontend(authConfig, new ImpaladCatalog());
+    }
   }
 
   /**

@@ -32,7 +32,7 @@ DECLARE_string(sentry_config);
 DECLARE_int32(non_impala_java_vlog);
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
-DECLARE_bool(zookeeper_membership);
+DECLARE_int32(num_metadata_loading_threads);
 
 DEFINE_bool(load_catalog_at_startup, false, "if true, load all catalog data at startup");
 
@@ -58,10 +58,11 @@ DEFINE_string(authorized_proxy_user_config, "",
     "users. For example: hue=user1,user2;admin=*");
 DEFINE_string(authorized_proxy_user_config_delimiter, ",",
     "Specifies the delimiter used in authorized_proxy_user_config. ");
-Frontend::Frontend() {
+
+Frontend::Frontend(bool is_record_service) {
   JniMethodDescriptor methods[] = {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;II)V", &fe_ctor_},
+        "Ljava/lang/String;IIZI)V", &fe_ctor_},
     {"initZooKeeper", "(Ljava/lang/String;ZZZ)V", &init_zookeeper_id_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
     {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
@@ -114,7 +115,8 @@ Frontend::Frontend() {
 
   jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
       policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
-      FlagToTLogLevel(FLAGS_non_impala_java_vlog));
+      FlagToTLogLevel(FLAGS_non_impala_java_vlog), is_record_service,
+      FLAGS_num_metadata_loading_threads);
 
   EXIT_IF_EXC(jni_env);
   EXIT_IF_ERROR(JniUtil::LocalToGlobalRef(jni_env, fe, &fe_));
@@ -125,7 +127,9 @@ Status Frontend::InitZooKeeper() {
       (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
 
   // Not using zookeeper.
-  if (!enable_delegation_tokens && !FLAGS_zookeeper_membership) return Status::OK();
+  if (!enable_delegation_tokens && !ExecEnv::GetInstance()->is_record_service()) {
+    return Status::OK();
+  }
 
   JNIEnv* jni_env = getJNIEnv();
   JniLocalFrame jni_frame;
@@ -141,6 +145,7 @@ Status Frontend::InitZooKeeper() {
 
 Status Frontend::UpdateCatalogCache(const TUpdateCatalogCacheRequest& req,
     TUpdateCatalogCacheResponse* resp) {
+  DCHECK(!ExecEnv::GetInstance()->is_record_service());
   return JniUtil::CallJniMethod(fe_, update_catalog_cache_id_, req, resp);
 }
 

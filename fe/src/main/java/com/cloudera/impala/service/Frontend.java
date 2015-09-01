@@ -20,8 +20,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -42,8 +40,8 @@ import org.apache.hive.service.cli.thrift.TGetTablesReq;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.cloudera.impala.analysis.Analyzer;
 import com.cloudera.impala.analysis.AnalysisContext;
+import com.cloudera.impala.analysis.Analyzer;
 import com.cloudera.impala.analysis.CreateDataSrcStmt;
 import com.cloudera.impala.analysis.CreateDropRoleStmt;
 import com.cloudera.impala.analysis.CreateUdaStmt;
@@ -154,27 +152,25 @@ public class Frontend {
   private final static Logger LOG = LoggerFactory.getLogger(Frontend.class);
   // Time to wait for missing tables to be loaded before timing out.
   private final long MISSING_TBL_LOAD_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
-
-  // Max time to wait for a catalog update notification.
-  private final long MAX_CATALOG_UPDATE_WAIT_TIME_MS = 2 * 1000;
-
-  //TODO: Make the reload interval configurable.
+  // TODO: Make the reload interval configurable.
   private static final int AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS = 5 * 60;
 
-  private ImpaladCatalog impaladCatalog_;
+  // TODO: this should be a singleton except for tests. Add a test only API
+  // and verify this is a singleton.
+  private static Frontend INSTANCE;
+
+  private Catalog impaladCatalog_;
   private final AuthorizationConfig authzConfig_;
   private final AtomicReference<AuthorizationChecker> authzChecker_;
   private final ScheduledExecutorService policyReader_ =
       Executors.newScheduledThreadPool(1);
 
-  public Frontend(AuthorizationConfig authorizationConfig) {
-    this(authorizationConfig, new ImpaladCatalog());
-  }
+  public static Frontend Instance() { return INSTANCE; }
 
   /**
    * C'tor used by tests to pass in a custom ImpaladCatalog.
    */
-  public Frontend(AuthorizationConfig authorizationConfig, ImpaladCatalog catalog) {
+  public Frontend(AuthorizationConfig authorizationConfig, Catalog catalog) {
     authzConfig_ = authorizationConfig;
     impaladCatalog_ = catalog;
     authzChecker_ = new AtomicReference<AuthorizationChecker>(
@@ -189,6 +185,7 @@ public class Frontend {
           new AuthorizationPolicyReader(authzConfig_),
           delay, AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS, TimeUnit.SECONDS);
     }
+    INSTANCE = this;
   }
 
   /**
@@ -212,13 +209,15 @@ public class Frontend {
     }
   }
 
-  public ImpaladCatalog getCatalog() { return impaladCatalog_; }
+  public Catalog getCatalog() { return impaladCatalog_; }
   public AuthorizationChecker getAuthzChecker() { return authzChecker_.get(); }
 
   public TUpdateCatalogCacheResponse updateCatalogCache(
       TUpdateCatalogCacheRequest req) throws CatalogException {
-    ImpaladCatalog catalog = impaladCatalog_;
+    // Should not get these if not impalad.
+    Preconditions.checkState(impaladCatalog_ instanceof ImpaladCatalog);
 
+    ImpaladCatalog catalog = (ImpaladCatalog)impaladCatalog_;
     // If this is not a delta, this update should replace the current
     // Catalog contents so create a new catalog and populate it.
     if (!req.is_delta) catalog = new ImpaladCatalog();
@@ -703,22 +702,6 @@ public class Frontend {
   }
 
   /**
-   * Given a set of table names, returns the set of table names that are missing
-   * metadata (are not yet loaded).
-   */
-  private Set<TableName> getMissingTbls(Set<TableName> tableNames) {
-    Set<TableName> missingTbls = new HashSet<TableName>();
-    for (TableName tblName: tableNames) {
-      Db db = getCatalog().getDb(tblName.getDb());
-      if (db == null) continue;
-      Table tbl = db.getTable(tblName.getTbl());
-      if (tbl == null) continue;
-      if (!tbl.isLoaded()) missingTbls.add(tblName);
-    }
-    return missingTbls;
-  }
-
-  /**
    * Requests the catalog server load the given set of tables and waits until
    * these tables show up in the local catalog, or the given timeout has been reached.
    * The timeout is specified in milliseconds, with a value <= 0 indicating no timeout.
@@ -733,34 +716,26 @@ public class Frontend {
    */
   private boolean requestTblLoadAndWait(Set<TableName> requestedTbls, long timeoutMs)
       throws InternalException {
-    Set<TableName> missingTbls = getMissingTbls(requestedTbls);
+    Set<TableName> missingTbls = getCatalog().getMissingTbls(requestedTbls);
     // There are no missing tables, return and avoid making an RPC to the CatalogServer.
     if (missingTbls.isEmpty()) return true;
 
-    // Call into the CatalogServer and request the required tables be loaded.
-    LOG.info(String.format("Requesting prioritized load of table(s): %s",
-        Joiner.on(", ").join(missingTbls)));
-    TStatus status = FeSupport.PrioritizeLoad(missingTbls);
-    if (status.getStatus_code() != TErrorCode.OK) {
-      throw new InternalException("Error requesting prioritized load: " +
-          Joiner.on("\n").join(status.getError_msgs()));
-    }
-
-    long startTimeMs = System.currentTimeMillis();
-    // Wait until all the required tables are loaded in the Impalad's catalog cache.
-    while (!missingTbls.isEmpty()) {
-      // Check if the timeout has been reached.
-      if (timeoutMs > 0 && System.currentTimeMillis() - startTimeMs > timeoutMs) {
-        return false;
-      }
-
-      LOG.trace(String.format("Waiting for table(s) to complete loading: %s",
+    if (getCatalog() instanceof ImpaladCatalog) {
+      // Call into the CatalogServer and request the required tables be loaded.
+      LOG.info(String.format("Requesting prioritized load of table(s): %s",
           Joiner.on(", ").join(missingTbls)));
-      getCatalog().waitForCatalogUpdate(MAX_CATALOG_UPDATE_WAIT_TIME_MS);
-      missingTbls = getMissingTbls(missingTbls);
-      // TODO: Check for query cancellation here.
+      TStatus status = FeSupport.PrioritizeLoad(missingTbls);
+      if (status.getStatus_code() != TErrorCode.OK) {
+        throw new InternalException("Error requesting prioritized load: " +
+            Joiner.on("\n").join(status.getError_msgs()));
+      }
     }
-    return true;
+
+    try {
+      return getCatalog().loadTableMetadata(missingTbls, timeoutMs);
+    } catch (CatalogException e) {
+      throw new InternalException("Could not load metadata.", e);
+    }
   }
 
   /**

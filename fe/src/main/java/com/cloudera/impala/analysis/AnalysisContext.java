@@ -15,14 +15,13 @@
 package com.cloudera.impala.analysis;
 
 import java.io.StringReader;
-import java.util.List;
 import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.cloudera.impala.authorization.AuthorizationConfig;
-import com.cloudera.impala.catalog.ImpaladCatalog;
+import com.cloudera.impala.catalog.Catalog;
 import com.cloudera.impala.common.AnalysisException;
 import com.cloudera.impala.thrift.TAccessEvent;
 import com.cloudera.impala.thrift.TQueryCtx;
@@ -33,14 +32,14 @@ import com.google.common.base.Preconditions;
  */
 public class AnalysisContext {
   private final static Logger LOG = LoggerFactory.getLogger(AnalysisContext.class);
-  private final ImpaladCatalog catalog_;
+  private final Catalog catalog_;
   private final TQueryCtx queryCtx_;
   private final AuthorizationConfig authzConfig_;
 
   // Set in analyze()
   private AnalysisResult analysisResult_;
 
-  public AnalysisContext(ImpaladCatalog catalog, TQueryCtx queryCtx,
+  public AnalysisContext(Catalog catalog, TQueryCtx queryCtx,
       AuthorizationConfig authzConfig) {
     catalog_ = catalog;
     queryCtx_ = queryCtx;

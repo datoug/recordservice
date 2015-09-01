@@ -24,10 +24,10 @@ import org.slf4j.LoggerFactory;
 
 import com.cloudera.impala.analysis.TableName;
 import com.cloudera.impala.authorization.User;
+import com.cloudera.impala.catalog.Catalog;
 import com.cloudera.impala.catalog.Column;
 import com.cloudera.impala.catalog.Db;
 import com.cloudera.impala.catalog.Function;
-import com.cloudera.impala.catalog.ImpaladCatalog;
 import com.cloudera.impala.catalog.PrimitiveType;
 import com.cloudera.impala.catalog.ScalarType;
 import com.cloudera.impala.catalog.Table;
@@ -258,7 +258,7 @@ public class MetadataOp {
     PatternMatcher columnPattern = PatternMatcher.createJdbcPatternMatcher(columnName);
     PatternMatcher fnPattern = PatternMatcher.createJdbcPatternMatcher(functionName);
 
-    ImpaladCatalog catalog = fe.getCatalog();
+    Catalog catalog = fe.getCatalog();
     for (String dbName: fe.getDbNames(null, user)) {
       if (!schemaPattern.matches(dbName)) continue;
 

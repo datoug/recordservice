@@ -18,6 +18,7 @@ import org.apache.hive.service.cli.thrift.TGetTablesReq;
 import org.junit.Test;
 
 import com.cloudera.impala.authorization.AuthorizationConfig;
+import com.cloudera.impala.catalog.ImpaladCatalog;
 import com.cloudera.impala.catalog.PrimitiveType;
 import com.cloudera.impala.common.AnalysisException;
 import com.cloudera.impala.common.ImpalaException;
@@ -45,7 +46,8 @@ public class FrontendTest {
 
   @Test
   public void TestCatalogNotReady() throws ImpalaException {
-    Frontend fe = new Frontend(AuthorizationConfig.createAuthDisabledConfig());
+    Frontend fe = new Frontend(AuthorizationConfig.createAuthDisabledConfig(),
+        new ImpaladCatalog());
     TQueryCtx queryCtx = TestUtils.createQueryContext("default", "fake_user");
 
     // Queries that do not touch catalog objects should succeed.

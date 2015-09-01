@@ -66,34 +66,48 @@ public class JniCatalog {
   // A unique identifier for this instance of the Catalog Service.
   private static final TUniqueId catalogServiceId_ = generateId();
 
-  private static TUniqueId generateId() {
+  public static TUniqueId generateId() {
     UUID uuid = UUID.randomUUID();
     return new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
   }
 
+  /**
+   * Creates and initializes a JniCatalog which includes an underlying
+   * CatalogServiceCatalog. In the case of catalogd, this will create a new
+   * CatalogServiceCatalog with the specified configs. In the case of RecordService
+   * planners, this will reuse the same CatalogServiceCatalog created in JniFrontend.
+   * (Impalad does not use this class at all.)
+   */
   public JniCatalog(boolean loadInBackground, int numMetadataLoadingThreads,
       String sentryServiceConfig, int impalaLogLevel, int otherLogLevel)
       throws InternalException {
-    Preconditions.checkArgument(numMetadataLoadingThreads > 0);
-    // This trick saves having to pass a TLogLevel enum, which is an object and more
-    // complex to pass through JNI.
-    GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
-        TLogLevel.values()[otherLogLevel]);
+    if (Frontend.Instance() != null &&
+        Frontend.Instance().getCatalog() instanceof CatalogServiceCatalog) {
+      // In this case, we already have a CatalogServiceCatalog instance, just use that.
+      // recordserviced runs with this configuration.
+      catalog_ = (CatalogServiceCatalog)Frontend.Instance().getCatalog();
+    } else {
+      Preconditions.checkArgument(numMetadataLoadingThreads > 0);
+      // This trick saves having to pass a TLogLevel enum, which is an object and more
+      // complex to pass through JNI.
+      GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
+          TLogLevel.values()[otherLogLevel]);
 
-    // Check if the Sentry Service is configured. If so, create a configuration object.
-    SentryConfig sentryConfig = null;
-    if (!Strings.isNullOrEmpty(sentryServiceConfig)) {
-      sentryConfig = new SentryConfig(sentryServiceConfig);
-      sentryConfig.loadConfig();
-    }
-    LOG.info(JniUtil.getJavaVersion());
+      // Check if the Sentry Service is configured. If so, create a configuration object.
+      SentryConfig sentryConfig = null;
+      if (!Strings.isNullOrEmpty(sentryServiceConfig)) {
+        sentryConfig = new SentryConfig(sentryServiceConfig);
+        sentryConfig.loadConfig();
+      }
+      LOG.info(JniUtil.getJavaVersion());
 
-    catalog_ = new CatalogServiceCatalog(loadInBackground,
-        numMetadataLoadingThreads, sentryConfig, getServiceId());
-    try {
-      catalog_.reset();
-    } catch (CatalogException e) {
-      LOG.error("Error initialializing Catalog. Please run 'invalidate metadata'", e);
+      catalog_ = new CatalogServiceCatalog(loadInBackground,
+          numMetadataLoadingThreads, sentryConfig, getServiceId());
+      try {
+        catalog_.reset();
+      } catch (CatalogException e) {
+        LOG.error("Error initialializing Catalog. Please run 'invalidate metadata'", e);
+      }
     }
     catalogOpExecutor_ = new CatalogOpExecutor(catalog_);
   }

@@ -39,6 +39,7 @@ import com.cloudera.impala.authorization.PrivilegeRequest;
 import com.cloudera.impala.authorization.PrivilegeRequestBuilder;
 import com.cloudera.impala.authorization.User;
 import com.cloudera.impala.catalog.AuthorizationException;
+import com.cloudera.impala.catalog.Catalog;
 import com.cloudera.impala.catalog.CatalogException;
 import com.cloudera.impala.catalog.Column;
 import com.cloudera.impala.catalog.DataSourceTable;
@@ -46,7 +47,6 @@ import com.cloudera.impala.catalog.DatabaseNotFoundException;
 import com.cloudera.impala.catalog.Db;
 import com.cloudera.impala.catalog.HBaseTable;
 import com.cloudera.impala.catalog.HdfsTable;
-import com.cloudera.impala.catalog.ImpaladCatalog;
 import com.cloudera.impala.catalog.Table;
 import com.cloudera.impala.catalog.TableLoadingException;
 import com.cloudera.impala.catalog.Type;
@@ -164,7 +164,7 @@ public class Analyzer {
   private static class GlobalState {
     // TODO: Consider adding an "exec-env"-like global singleton that contains the
     // catalog and authzConfig.
-    public final ImpaladCatalog catalog;
+    public final Catalog catalog;
     public final TQueryCtx queryCtx;
     public final AuthorizationConfig authzConfig;
     public final DescriptorTable descTbl = new DescriptorTable();
@@ -286,7 +286,7 @@ public class Analyzer {
     // profiling
     private final EventSequence timeline = new EventSequence("Planner Timeline");
 
-    public GlobalState(ImpaladCatalog catalog, TQueryCtx queryCtx,
+    public GlobalState(Catalog catalog, TQueryCtx queryCtx,
         AuthorizationConfig authzConfig) {
       this.catalog = catalog;
       this.queryCtx = queryCtx;
@@ -337,7 +337,7 @@ public class Analyzer {
   // conjunct evaluating to false.
   private boolean hasEmptySpjResultSet_ = false;
 
-  public Analyzer(ImpaladCatalog catalog, TQueryCtx queryCtx,
+  public Analyzer(Catalog catalog, TQueryCtx queryCtx,
       AuthorizationConfig authzConfig) {
     ancestors_ = Lists.newArrayList();
     globalState_ = new GlobalState(catalog, queryCtx, authzConfig);
@@ -1131,7 +1131,7 @@ public class Analyzer {
     return globalState_.descTbl;
   }
 
-  public ImpaladCatalog getCatalog() throws AnalysisException {
+  public Catalog getCatalog() throws AnalysisException {
     if (!globalState_.catalog.isReady()) {
       throw new AnalysisException("This Impala daemon is not ready to accept user " +
           "requests. Status: Waiting for catalog update from the StateStore.");

@@ -17,6 +17,7 @@
 #include <sstream>
 
 #include "exec/incr-stats-util.h"
+#include "catalog/catalog.h"
 #include "common/status.h"
 #include "runtime/lib-cache.h"
 #include "service/impala-server.h"
@@ -39,11 +40,27 @@ using strings::Substitute;
 DECLARE_int32(catalog_service_port);
 DECLARE_string(catalog_service_host);
 
+CatalogOpExecutor::CatalogOpExecutor(ExecEnv* env, Frontend* fe, RuntimeProfile* profile)
+  : env_(env), fe_(fe), catalog_(env->catalog()), profile_(profile) {
+}
+
 Status CatalogOpExecutor::Exec(const TCatalogOpRequest& request) {
   Status status;
   DCHECK(profile_ != NULL);
   RuntimeProfile::Counter* exec_timer = ADD_TIMER(profile_, "CatalogOpExecTimer");
   SCOPED_TIMER(exec_timer);
+  if (catalog_ != NULL) {
+    switch (request.op_type) {
+      case TCatalogOpType::DDL:
+        exec_response_.reset(new TDdlExecResponse());
+        RETURN_IF_ERROR(catalog_->ExecDdl(request.ddl_params, exec_response_.get()));
+        return Status(exec_response_->result.status);
+      default:
+        return Status(Substitute("TCatalogOpType: $0 is not supported.",
+            request.op_type));
+    }
+  }
+
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
   CatalogServiceConnection client(env_->catalogd_client_cache(), address, &status);
@@ -86,6 +103,8 @@ Status CatalogOpExecutor::ExecComputeStats(
     const TComputeStatsParams& compute_stats_params,
     const TTableSchema& tbl_stats_schema, const TRowSet& tbl_stats_data,
     const TTableSchema& col_stats_schema, const TRowSet& col_stats_data) {
+  DCHECK(!env_->is_record_service());
+
   // Create a new DDL request to alter the table's statistics.
   TCatalogOpRequest catalog_op_req;
   catalog_op_req.__isset.ddl_params = true;
@@ -244,6 +263,7 @@ void CatalogOpExecutor::SetColumnStats(const TTableSchema& col_stats_schema,
 
 Status CatalogOpExecutor::GetCatalogObject(const TCatalogObject& object_desc,
     TCatalogObject* result) {
+  DCHECK(!env_->is_record_service());
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
   Status status;
@@ -262,6 +282,7 @@ Status CatalogOpExecutor::GetCatalogObject(const TCatalogObject& object_desc,
 
 Status CatalogOpExecutor::PrioritizeLoad(const TPrioritizeLoadRequest& req,
     TPrioritizeLoadResponse* result) {
+  DCHECK(!env_->is_record_service());
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
   Status status;
@@ -272,6 +293,7 @@ Status CatalogOpExecutor::PrioritizeLoad(const TPrioritizeLoadRequest& req,
 }
 
 Status CatalogOpExecutor::SentryAdminCheck(const TSentryAdminCheckRequest& req) {
+  DCHECK(!env_->is_record_service());
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
   Status cnxn_status;
