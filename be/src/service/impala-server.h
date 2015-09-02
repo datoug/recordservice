@@ -276,6 +276,10 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// associated with the closed connection.
   virtual void ConnectionEnd(const ThriftServer::ConnectionContext& session_context);
 
+  // For RecordService, check if num of connections has exceeded the maximum, and throw
+  // TRecordServiceException if that's the case.
+  void CheckConnectionLimit(int64_t num_connections, int64_t max, const string& service);
+
   /// Called when a membership update is received from the statestore. Looks for
   /// active nodes that have failed, and cancels any queries running on them.
   ///  - incoming_topic_deltas: all changes to registered statestore topics

@@ -526,6 +526,26 @@ static void PopulateResultSchema(const TResultSetMetadata& metadata,
 }
 
 recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
+  shared_ptr<SessionState> session;
+  const TUniqueId& session_id = ThriftServer::GetThreadConnectionId();
+  Status status = GetSessionState(session_id, &session);
+  if (!status.ok()) {
+    ThrowRecordServiceException(recordservice::TErrorCode::INTERNAL_ERROR,
+        "Could not get session.", status.msg().GetFullMessageDetails());
+  }
+  if (session->session_type == TSessionType::RECORDSERVICE_PLANNER) {
+    CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_PLANNER_SESSIONS->value(),
+        recordservice_planner_server_->num_worker_threads(),
+        RECORD_SERVICE_PLANNER_SERVER_NAME);
+  } else if (session->session_type == TSessionType::RECORDSERVICE_WORKER) {
+    CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->value(),
+        recordservice_worker_server_->num_worker_threads(),
+        RECORD_SERVICE_WORKER_SERVER_NAME);
+  } else {
+    stringstream ss;
+    ss << "Unexpected session type: " << session->session_type;
+    ThrowRecordServiceException(recordservice::TErrorCode::INTERNAL_ERROR, ss.str());
+  }
   return recordservice::TProtocolVersion::V1;
 }
 

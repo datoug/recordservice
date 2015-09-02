@@ -1736,9 +1736,10 @@ bool ImpalaServer::QueryStateRecord::operator() (
 // Checks if num_connections + 1 == max. If so, we are going to saturate the handler
 // threads if we accept this connections. Instead, reject this one, and therefore all
 // subsequent ones until an existing connection closes. This prevents DOS.
-// FIXME: Something is messed up where this exception gets converted to just
+// TODO: Something is messed up where this exception gets converted to just
 // a TTransportException.
-void CheckConnectionLimit(int64_t num_connections, int64_t max, const string& service) {
+void ImpalaServer::CheckConnectionLimit(int64_t num_connections, int64_t max,
+    const string& service) {
   if (num_connections + 1 == max) {
     LOG(WARNING) << "Rejecting client connection for " << service
                  << " due to exhausted handler threads.";
@@ -1754,6 +1755,13 @@ void ImpalaServer::ConnectionStart(
       connection_context.server_name == RECORD_SERVICE_PLANNER_SERVER_NAME;
   bool is_record_service_worker =
       connection_context.server_name == RECORD_SERVICE_WORKER_SERVER_NAME;
+
+  // To prevent clients from hanging when there are too many client connections, we use
+  // additional threads that just fail connections over the limit. For the first
+  // 'num_extra_connections' connections, we fail the connection in GetProtocolVersion()
+  // with SERVER_BUSY and any additional are failed with a general connection error.
+  const int num_extra_connections = 6;
+
   if (is_beeswax || is_record_service_planner || is_record_service_worker) {
     // Beeswax/RecordService only allows for one session per connection, so we
     // can share the session ID with the connection ID
@@ -1768,14 +1776,14 @@ void ImpalaServer::ConnectionStart(
       session_state->session_type = TSessionType::BEESWAX;
     } else if (is_record_service_planner) {
       DCHECK_NOTNULL(recordservice_planner_server_);
-      CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_PLANNER_SESSIONS->value(),
-          recordservice_planner_server_->num_worker_threads(),
+      CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->value(),
+          recordservice_planner_server_->num_worker_threads() + num_extra_connections,
           RECORD_SERVICE_PLANNER_SERVER_NAME);
       session_state->session_type = TSessionType::RECORDSERVICE_PLANNER;
     } else if (is_record_service_worker) {
       DCHECK_NOTNULL(recordservice_worker_server_);
       CheckConnectionLimit(RecordServiceMetrics::NUM_OPEN_WORKER_SESSIONS->value(),
-          recordservice_worker_server_->num_worker_threads(),
+          recordservice_worker_server_->num_worker_threads() + num_extra_connections,
           RECORD_SERVICE_WORKER_SERVER_NAME);
       session_state->session_type = TSessionType::RECORDSERVICE_WORKER;
     }
