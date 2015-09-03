@@ -33,6 +33,8 @@ export HADOOP_CONF_DIR=$CONF_DIR/hadoop-conf
 export HIVE_CONF_DIR=$CONF_DIR/hive-conf
 export USER=recordservice
 
+env
+
 log "HADOOP_CONF_DIR: $HADOOP_CONF_DIR"
 log "HIVE_CONF_DIR: $HIVE_CONF_DIR"
 log "USER: $USER"
@@ -61,28 +63,37 @@ case $CMD in
     log "v: $V"
     log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
 
-    exec $RECORD_SERVICE_BIN_HOME/recordserviced \
+    ARGS="\
       -recordservice_planner_port=$PLANNER_PORT \
       -recordservice_worker_port=$WORKER_PORT \
-      -state_store_subscriber_port=$STATESTORE_SUB_PORT \
-      -statestore_subscriber_timeout_seconds=$STATESTORE_SUB_TIMEOUT_SEC \
       -log_filename=$LOG_FILENAME \
       -hostname=$HOSTNAME \
-      -state_store_host=$STATESTORE_HOST \
-      -state_store_port=$STATESTORE_PORT \
-      -catalog_service_host=$CATALOG_SERVICE_HOST \
-      -catalog_service_port=$CATALOG_SERVICE_PORT \
       -recordservice_webserver_port=$WEBSERVICE_PORT \
       -webserver_doc_root=$RECORDSERVICE_HOME \
       -log_dir=$LOG_DIR \
       -abort_on_config_error=false \
-      -principal=$PRINCIPAL \
-      -keytab_file=$KEYTAB_FILE \
       -lineage_event_log_dir=$LOG_DIR/lineage \
       -audit_event_log_dir=$LOG_DIR/audit \
       -profile_log_dir=$LOG_DIR/profiles/ \
       -v=$V \
-      -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL
+      -state_store_subscriber_port=$STATESTORE_SUB_PORT \
+      -statestore_subscriber_timeout_seconds=$STATESTORE_SUB_TIMEOUT_SEC \
+      -state_store_host=$STATESTORE_HOST \
+      -state_store_port=$STATESTORE_PORT \
+      -catalog_service_host=$CATALOG_SERVICE_HOST \
+      -catalog_service_port=$CATALOG_SERVICE_PORT
+      "
+    if env | grep -q ^recordservice_principal=
+    then
+      echo "Starting kerberized cluster"
+      exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
+        -principal=$PRINCIPAL \
+        -keytab_file=$KEYTAB_FILE \
+        -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL
+    else
+      exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS
+    fi
+
     ;;
 
   (stopAll)
