@@ -57,15 +57,18 @@ void ImpalaServer::RegisterWebserverCallbacks(Webserver* webserver) {
   webserver->RegisterUrlCallback("/sessions", "sessions.tmpl",
       sessions_json_callback);
 
-  Webserver::UrlCallback catalog_callback =
-      bind<void>(mem_fn(&ImpalaServer::CatalogUrlCallback), this, _1, _2);
-  webserver->RegisterUrlCallback("/catalog", "catalog.tmpl",
-      catalog_callback);
+  if (!ExecEnv::GetInstance()->is_record_service() ||
+      ExecEnv::GetInstance()->running_planner()) {
+    Webserver::UrlCallback catalog_callback =
+        bind<void>(mem_fn(&ImpalaServer::CatalogUrlCallback), this, _1, _2);
+    webserver->RegisterUrlCallback("/catalog", "catalog.tmpl",
+        catalog_callback);
 
-  Webserver::UrlCallback catalog_objects_callback =
-      bind<void>(mem_fn(&ImpalaServer::CatalogObjectsUrlCallback), this, _1, _2);
-  webserver->RegisterUrlCallback("/catalog_object", "catalog_object.tmpl",
-      catalog_objects_callback, false);
+    Webserver::UrlCallback catalog_objects_callback =
+        bind<void>(mem_fn(&ImpalaServer::CatalogObjectsUrlCallback), this, _1, _2);
+    webserver->RegisterUrlCallback("/catalog_object", "catalog_object.tmpl",
+        catalog_objects_callback, false);
+  }
 
   Webserver::UrlCallback profile_callback =
       bind<void>(mem_fn(&ImpalaServer::QueryProfileUrlCallback), this, _1, _2);

@@ -370,7 +370,9 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
     if (!exec_env->is_record_service()) RegisterToCatalogTopic();
   }
 
-  EXIT_IF_ERROR(UpdateCatalogMetrics());
+  if (!exec_env->is_record_service() || exec_env->running_planner()) {
+    EXIT_IF_ERROR(UpdateCatalogMetrics());
+  }
 
   // Initialise the cancellation thread pool with 5 (by default) threads. The max queue
   // size is deliberately set so high that it should never fill; if it does the
@@ -395,7 +397,10 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
   }
 
   exec_env_->SetImpalaServer(this);
-  if (exec_env_->is_record_service()) status = exec_env_->frontend()->InitZooKeeper();
+  if (exec_env_->is_record_service()) {
+    status = exec_env_->frontend()->InitZooKeeper();
+    if (exec_env_->running_planner()) ImpaladMetrics::CATALOG_READY->set_value(true);
+  }
   if (!status.ok()) {
     LOG(ERROR) << "Could not initialize zookeeper. Exiting.";
     exit(1);
@@ -1586,6 +1591,7 @@ void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update
       known_recordservice_workers_;
   unique_lock<shared_mutex> l(recordservice_membership_lock_);
   if (update.type == TMembershipUpdateType::FULL_LIST) {
+    LOG(INFO) << "Clearing membership.";
     members.clear();
     if (!update.is_planner) recordservice_workers_host_to_ports_.clear();
   }
@@ -1598,6 +1604,7 @@ void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update
     }
     switch (update.type) {
       case TMembershipUpdateType::REMOVE:
+        LOG(INFO) << "Removing " << update.membership[i] << " from membership.";
         members.erase(update.membership[i]);
         if (!update.is_planner) {
           unordered_map<string, unordered_set<int> >::iterator it =
@@ -1612,6 +1619,7 @@ void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update
 
       case TMembershipUpdateType::ADD:
       case TMembershipUpdateType::FULL_LIST:
+        LOG(INFO) << "Adding " << update.membership[i] << " to membership.";
         members.insert(make_pair(update.membership[i], desc));
         if (!update.is_planner) {
           recordservice_workers_host_to_ports_[desc.address.hostname].insert(

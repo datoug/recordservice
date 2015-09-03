@@ -72,8 +72,6 @@ DEFINE_string(state_store_host, "localhost",
     "hostname where StatestoreService is running");
 DEFINE_int32(state_store_subscriber_port, 23000,
     "port where StatestoreSubscriberService should be exported");
-DEFINE_int32(recordservice_state_store_subscriber_port, 33000,
-    "port where RecordService StatestoreSubscriberService should be exported");
 DEFINE_int32(num_hdfs_worker_threads, 16,
     "(Advanced) The number of threads in the global HDFS operation pool");
 
@@ -138,25 +136,21 @@ const static string PSEUDO_DISTRIBUTED_CONFIG_KEY =
     "yarn.scheduler.include-port-in-node-name";
 
 static const string BACKENDS_TEMPLATE = "backends.tmpl";
+static const string MEMBERSHIP_TEMPLATE = "membership.tmpl";
 
 namespace impala {
 
 ExecEnv* ExecEnv::exec_env_ = NULL;
 
-ExecEnv::ExecEnv(const string& server_id, bool is_record_service)
-  : is_record_service_(is_record_service),
+ExecEnv::ExecEnv(const string& server_id, bool running_planner, bool running_worker)
+  : running_planner_(running_planner),
+    running_worker_(running_worker),
     server_id_(server_id),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
-    impalad_client_cache_(
-        new ImpalaInternalServiceClientCache(
-            "", !FLAGS_ssl_client_ca_certificate.empty())),
-    catalogd_client_cache_(
-        new CatalogServiceClientCache(
-            "", !FLAGS_ssl_client_ca_certificate.empty())),
     htable_factory_(new HBaseTableFactory()),
     disk_io_mgr_(new DiskIoMgr()),
-    webserver_(new Webserver(is_record_service)),
+    webserver_(new Webserver(is_record_service())),
     metrics_(new MetricGroup("impala-metrics")),
     mem_tracker_(NULL),
     thread_mgr_(new ThreadResourceMgr),
@@ -164,19 +158,28 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service)
     hdfs_op_thread_pool_(
         CreateHdfsOpThreadPool("hdfs-worker-pool", FLAGS_num_hdfs_worker_threads, 1024)),
     request_pool_service_(new RequestPoolService(metrics_.get())),
-    frontend_(new Frontend(is_record_service)),
+    frontend_(new Frontend(running_planner, running_worker)),
     enable_webserver_(FLAGS_enable_webserver),
     tz_database_(TimezoneDatabase()),
     is_fe_tests_(false),
     backend_address_(MakeNetworkAddress(FLAGS_hostname, FLAGS_be_port)),
     is_pseudo_distributed_llama_(false) {
-  if (is_record_service) catalog_.reset(new Catalog());
+  if (running_planner) {
+    catalog_.reset(new Catalog());
+  } else if (!is_record_service()) {
+    impalad_client_cache_.reset(
+        new ImpalaInternalServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty()));
+    catalogd_client_cache_.reset(
+        new CatalogServiceClientCache(
+            "", !FLAGS_ssl_client_ca_certificate.empty()));
+  }
   if (FLAGS_enable_rm) InitRm();
   InitStatestoreSubscriber();
 
   // Initialize the scheduler either dynamically (with a statestore) or statically (with
   // a standalone single backend)
-  if (FLAGS_use_statestore && !is_record_service_) {
+  if (FLAGS_use_statestore && !is_record_service()) {
     scheduler_.reset(new SimpleScheduler(statestore_subscriber_.get(),
         statestore_subscriber_->id(), backend_address_, metrics_.get(),
         webserver_.get(), resource_broker_.get(), request_pool_service_.get()));
@@ -194,7 +197,8 @@ ExecEnv::ExecEnv(const string& server_id, bool is_record_service)
 
 ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
                  int webserver_port, const string& statestore_host, int statestore_port)
-  : is_record_service_(false),
+  : running_planner_(false),
+    running_worker_(false),
     server_id_(Substitute("impalad@$0:$1", hostname, backend_port)),
     lock_tracker_(new LockTracker(true)),
     stream_mgr_(new DataStreamMgr()),
@@ -212,7 +216,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
     thread_mgr_(new ThreadResourceMgr),
     hdfs_op_thread_pool_(
         CreateHdfsOpThreadPool("hdfs-worker-pool", FLAGS_num_hdfs_worker_threads, 1024)),
-    frontend_(new Frontend(false)),
+    frontend_(new Frontend(false, false)),
     enable_webserver_(FLAGS_enable_webserver && webserver_port > 0),
     tz_database_(TimezoneDatabase()),
     is_fe_tests_(false),
@@ -222,7 +226,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
   if (FLAGS_enable_rm) InitRm();
   InitStatestoreSubscriber();
 
-  if (FLAGS_use_statestore && statestore_port > 0 && !is_record_service_) {
+  if (FLAGS_use_statestore && statestore_port > 0 && !is_record_service()) {
     scheduler_.reset(new SimpleScheduler(statestore_subscriber_.get(),
         statestore_subscriber_->id(), backend_address_, metrics_.get(),
         webserver_.get(), resource_broker_.get(), request_pool_service_.get()));
@@ -240,12 +244,10 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
 
 void ExecEnv::InitStatestoreSubscriber() {
   // recordserviced does not use the statestore.
-  if (is_record_service_) return;
+  if (is_record_service()) return;
   DCHECK(statestore_subscriber_.get() == NULL);
   TNetworkAddress subscriber_address =
-      MakeNetworkAddress(FLAGS_hostname, is_record_service_ ?
-          FLAGS_recordservice_state_store_subscriber_port :
-          FLAGS_state_store_subscriber_port);
+      MakeNetworkAddress(FLAGS_hostname, FLAGS_state_store_subscriber_port);
   TNetworkAddress statestore_address =
       MakeNetworkAddress(FLAGS_state_store_host, FLAGS_state_store_port);
   statestore_subscriber_.reset(new StatestoreSubscriber(
@@ -323,12 +325,6 @@ void PopulateDocument(Document* document, const char* topic,
 
 void ExecEnv::BackendsUrlCallback(const Webserver::ArgumentMap& args,
     Document* document) {
-  if (scheduler_ != NULL) {
-    Scheduler::BackendList backends;
-    // Populate impalad backends.
-    scheduler_->GetAllKnownBackends(&backends);
-    PopulateDocument(document, "backends", backends);
-  }
   if (is_record_service()) {
     // Populate RecordService planner/workers.
     DCHECK(impala_server() != NULL);
@@ -337,6 +333,11 @@ void ExecEnv::BackendsUrlCallback(const Webserver::ArgumentMap& args,
     impala_server()->GetRecordServiceMembership(&planners, &workers);
     PopulateDocument(document, "planners", planners);
     PopulateDocument(document, "workers", workers);
+  } else if (scheduler_ != NULL) {
+    Scheduler::BackendList backends;
+    // Populate impalad backends.
+    scheduler_->GetAllKnownBackends(&backends);
+    PopulateDocument(document, "backends", backends);
   }
 }
 
@@ -400,8 +401,10 @@ Status ExecEnv::StartServices() {
   }
 
   metrics_->Init(enable_webserver_ ? webserver_.get() : NULL);
-  impalad_client_cache_->InitMetrics(metrics_.get(), "impala-server.backends");
-  catalogd_client_cache_->InitMetrics(metrics_.get(), "catalog.server");
+  if (!is_record_service()) {
+    impalad_client_cache_->InitMetrics(metrics_.get(), "impala-server.backends");
+    catalogd_client_cache_->InitMetrics(metrics_.get(), "catalog.server");
+  }
   RETURN_IF_ERROR(RegisterMemoryMetrics(metrics_.get(), true));
 
 #ifndef ADDRESS_SANITIZER
@@ -444,11 +447,11 @@ Status ExecEnv::StartServices() {
     RETURN_IF_ERROR(webserver_->Start());
     Webserver::UrlCallback backends_callback =
         bind<void>(mem_fn(&ExecEnv::BackendsUrlCallback), this, _1, _2);
-    if (is_record_service()) {
-      webserver_->RegisterUrlCallback("/membership", BACKENDS_TEMPLATE,
-          backends_callback);
-    } else {
+    if (!is_record_service()) {
       webserver_->RegisterUrlCallback("/backends", BACKENDS_TEMPLATE,
+          backends_callback);
+    } else if (running_planner()) {
+      webserver_->RegisterUrlCallback("/membership", MEMBERSHIP_TEMPLATE,
           backends_callback);
     }
   } else {

@@ -59,11 +59,11 @@ DEFINE_string(authorized_proxy_user_config, "",
 DEFINE_string(authorized_proxy_user_config_delimiter, ",",
     "Specifies the delimiter used in authorized_proxy_user_config. ");
 
-Frontend::Frontend(bool is_record_service) {
+Frontend::Frontend(bool running_planner, bool running_worker) {
   JniMethodDescriptor methods[] = {
     {"<init>", "(ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;"
-        "Ljava/lang/String;IIZI)V", &fe_ctor_},
-    {"initZooKeeper", "(Ljava/lang/String;ZZZ)V", &init_zookeeper_id_},
+        "Ljava/lang/String;IIZZI)V", &fe_ctor_},
+    {"initZooKeeper", "(Ljava/lang/String;Z)V", &init_zookeeper_id_},
     {"createExecRequest", "([B)[B", &create_exec_request_id_},
     {"createRecordServiceExecRequest", "([B)[B", &create_rs_exec_request_id_},
     {"getExplainPlan", "([B)Ljava/lang/String;", &get_explain_plan_id_},
@@ -115,7 +115,8 @@ Frontend::Frontend(bool is_record_service) {
 
   jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
       policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
-      FlagToTLogLevel(FLAGS_non_impala_java_vlog), is_record_service,
+      FlagToTLogLevel(FLAGS_non_impala_java_vlog),
+      running_planner, running_worker,
       FLAGS_num_metadata_loading_threads);
 
   EXIT_IF_EXC(jni_env);
@@ -130,11 +131,8 @@ Status Frontend::InitZooKeeper() {
 
   jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
       (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
-  jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
-  jboolean running_recordservice_worker = FLAGS_recordservice_worker_port != 0;
   jstring sid = jni_env->NewStringUTF(ExecEnv::GetInstance()->server_id().c_str());
-  jni_env->CallObjectMethod(fe_, init_zookeeper_id_, sid, enable_delegation_tokens,
-      running_recordservice_planner, running_recordservice_worker);
+  jni_env->CallObjectMethod(fe_, init_zookeeper_id_, sid, enable_delegation_tokens);
   RETURN_ERROR_IF_EXC(jni_env);
   return Status::OK();
 }

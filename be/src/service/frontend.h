@@ -33,7 +33,7 @@ class Frontend {
  public:
   /// Does all the work of initialising the JNI method stubs. If any method can't be found,
   /// or if there is any further exception, the constructor will terminate the process.
-  Frontend(bool is_record_service);
+  Frontend(bool running_planner, bool running_worker);
 
   /// Initializes zookeeper if it is enabled (for delegation tokens or
   /// zookeeper membership).

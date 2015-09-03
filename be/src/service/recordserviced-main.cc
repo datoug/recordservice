@@ -52,7 +52,10 @@ DECLARE_int32(recordservice_worker_port);
 int main(int argc, char** argv) {
   InitCommonRuntime(argc, argv, true, true);
 
-  if (FLAGS_recordservice_worker_port == 0 && FLAGS_recordservice_planner_port == 0) {
+  bool running_planner = FLAGS_recordservice_planner_port != 0;
+  bool running_worker = FLAGS_recordservice_worker_port != 0;
+
+  if (!running_planner && !running_worker) {
     LOG(ERROR) << "Cannot start recordservice daemon that is not "
                << "running the planner or worker services.";
     exit(1);
@@ -76,7 +79,7 @@ int main(int argc, char** argv) {
       FLAGS_recordservice_worker_port : FLAGS_recordservice_planner_port)));
   string service_id = Substitute("recordserviced@$0",
       TNetworkAddressToString(service_address));
-  ExecEnv exec_env(service_id, true);
+  ExecEnv exec_env(service_id, running_planner, running_worker);
 
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());

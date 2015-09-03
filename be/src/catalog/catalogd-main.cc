@@ -40,6 +40,7 @@ DECLARE_int32(catalog_service_port);
 DECLARE_int32(webserver_port);
 DECLARE_bool(enable_webserver);
 DECLARE_int32(state_store_subscriber_port);
+DECLARE_string(hostname);
 DECLARE_string(ssl_server_certificate);
 DECLARE_string(ssl_private_key);
 
@@ -51,6 +52,7 @@ using namespace apache::thrift;
 int main(int argc, char** argv) {
   FLAGS_webserver_port = 25020;
   FLAGS_state_store_subscriber_port = 23020;
+  GetHostname(&FLAGS_hostname);
   InitCommonRuntime(argc, argv, true);
   InitFeSupport();
 

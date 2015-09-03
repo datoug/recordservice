@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
   string service_id = ImpalaServer::CreateServerId(
       "impalad", FLAGS_hostname, FLAGS_be_port);
 
-  ExecEnv exec_env(service_id, false);
+  ExecEnv exec_env(service_id);
   StartThreadInstrumentation(exec_env.metrics(), exec_env.webserver());
   InitRpcEventTracing(exec_env.webserver());
 

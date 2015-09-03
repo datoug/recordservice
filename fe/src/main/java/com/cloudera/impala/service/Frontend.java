@@ -159,6 +159,7 @@ public class Frontend {
   // and verify this is a singleton.
   private static Frontend INSTANCE;
 
+  // Catalog for this FE. Can be NULL if running a non-planner service.
   private Catalog impaladCatalog_;
   private final AuthorizationConfig authzConfig_;
   private final AtomicReference<AuthorizationChecker> authzChecker_;
@@ -167,23 +168,24 @@ public class Frontend {
 
   public static Frontend Instance() { return INSTANCE; }
 
-  /**
-   * C'tor used by tests to pass in a custom ImpaladCatalog.
-   */
   public Frontend(AuthorizationConfig authorizationConfig, Catalog catalog) {
     authzConfig_ = authorizationConfig;
     impaladCatalog_ = catalog;
-    authzChecker_ = new AtomicReference<AuthorizationChecker>(
-        new AuthorizationChecker(authzConfig_, impaladCatalog_.getAuthPolicy()));
-    // If authorization is enabled, reload the policy on a regular basis.
-    if (authzConfig_.isEnabled() && authzConfig_.isFileBasedPolicy()) {
-      // Stagger the reads across nodes
-      Random randomGen = new Random(UUID.randomUUID().hashCode());
-      int delay = AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS + randomGen.nextInt(60);
+    if (catalog != null) {
+      authzChecker_ = new AtomicReference<AuthorizationChecker>(
+          new AuthorizationChecker(authzConfig_, impaladCatalog_.getAuthPolicy()));
+      // If authorization is enabled, reload the policy on a regular basis.
+      if (authzConfig_.isEnabled() && authzConfig_.isFileBasedPolicy()) {
+        // Stagger the reads across nodes
+        Random randomGen = new Random(UUID.randomUUID().hashCode());
+        int delay = AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS + randomGen.nextInt(60);
 
-      policyReader_.scheduleAtFixedRate(
-          new AuthorizationPolicyReader(authzConfig_),
-          delay, AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS, TimeUnit.SECONDS);
+        policyReader_.scheduleAtFixedRate(
+            new AuthorizationPolicyReader(authzConfig_),
+            delay, AUTHORIZATION_POLICY_RELOAD_INTERVAL_SECS, TimeUnit.SECONDS);
+      }
+    } else {
+      authzChecker_ = null;
     }
     INSTANCE = this;
   }

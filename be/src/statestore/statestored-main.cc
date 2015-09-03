@@ -34,6 +34,7 @@
 DECLARE_int32(state_store_port);
 DECLARE_int32(webserver_port);
 DECLARE_bool(enable_webserver);
+DECLARE_string(hostname);
 DECLARE_string(principal);
 DECLARE_string(ssl_server_certificate);
 DECLARE_string(ssl_private_key);
@@ -46,6 +47,7 @@ using namespace apache::thrift;
 int main(int argc, char** argv) {
   // Override default for webserver port
   FLAGS_webserver_port = 25010;
+  GetHostname(&FLAGS_hostname);
   InitCommonRuntime(argc, argv, false);
 
   MemTracker mem_tracker;

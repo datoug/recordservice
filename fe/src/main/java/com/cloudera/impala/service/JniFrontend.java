@@ -128,14 +128,21 @@ public class JniFrontend {
   private static final long MIN_DFS_CLIENT_FILE_BLOCK_STORAGE_LOCATIONS_TIMEOUT_MS =
       10 * 1000;
 
+  // True if running the RecordService planner/worker services.
+  private final boolean runningPlanner_;
+  private final boolean runningWorker_;
+
   /**
    * Create a new instance of the Jni Frontend.
    */
   public JniFrontend(boolean loadInBackground, String serverName,
       String authorizationPolicyFile, String sentryConfigFile,
-      String authPolicyProviderClass, int impalaLogLevel,
-      int otherLogLevel, boolean isRecordService, int numMetadataLoadingThreads)
-      throws InternalException {
+      String authPolicyProviderClass, int impalaLogLevel, int otherLogLevel,
+      boolean runningPlanner, boolean runningWorker,
+      int numMetadataLoadingThreads) throws InternalException {
+    runningPlanner_ = runningPlanner;
+    runningWorker_ = runningWorker;
+
     GlogAppender.Install(TLogLevel.values()[impalaLogLevel],
         TLogLevel.values()[otherLogLevel]);
 
@@ -153,27 +160,33 @@ public class JniFrontend {
     }
     LOG.info(JniUtil.getJavaVersion());
 
-    if (isRecordService) {
-      // Check if the Sentry Service is configured. If so, create a configuration object.
-      SentryConfig sentryConfig = null;
-      if (!Strings.isNullOrEmpty(sentryConfigFile)) {
-        sentryConfig = new SentryConfig(sentryConfigFile);
-        sentryConfig.loadConfig();
+    if (runningPlanner_ || runningWorker_) {
+      if (runningPlanner_) {
+        // Check if the Sentry Service is configured. If so, create a configuration
+        // object.
+        SentryConfig sentryConfig = null;
+        if (!Strings.isNullOrEmpty(sentryConfigFile)) {
+          sentryConfig = new SentryConfig(sentryConfigFile);
+          sentryConfig.loadConfig();
+        }
+        // recordserviced directly uses CatalogServiceCatalog, meaning it does not
+        // use the statestored to load metadata but goes directly to the other
+        // services (HDFS, HMS, etc).
+        // TODO: rename CatalogServiceCatalog
+        CatalogServiceCatalog catalog = new CatalogServiceCatalog(
+            loadInBackground, numMetadataLoadingThreads, sentryConfig,
+            JniCatalog.generateId());
+        try {
+          catalog.reset();
+        } catch (CatalogException e) {
+          LOG.error("Error initializing catalog: ", e.getMessage());
+          throw new InternalException("Error initializing catalog.", e);
+        }
+        frontend_ = new Frontend(authConfig, catalog);
+      } else {
+        // Just running worker, no need to start catalog.
+        frontend_ = new Frontend(authConfig, null);
       }
-      // recordserviced directly uses CatalogServiceCatalog, meaning it does not
-      // use the statestored to load metadata but goes directly to the other
-      // services (HDFS, HMS, etc).
-      // TODO: rename CatalogServiceCatalog
-      CatalogServiceCatalog catalog = new CatalogServiceCatalog(
-          loadInBackground, numMetadataLoadingThreads, sentryConfig,
-          JniCatalog.generateId());
-      try {
-        catalog.reset();
-      } catch (CatalogException e) {
-        LOG.error("Error initializing catalog: ", e.getMessage());
-        throw new InternalException("Error initializing catalog.", e);
-      }
-      frontend_ = new Frontend(authConfig, catalog);
     } else {
       frontend_ = new Frontend(authConfig, new ImpaladCatalog());
     }
@@ -182,19 +195,19 @@ public class JniFrontend {
   /**
    * Initializes zookeeper for delegation tokens and/or membership.
    */
-  public void initZooKeeper(String serviceId, boolean enableDelegationTokens,
-      boolean runningPlanner, boolean runningWorker) throws InternalException {
+  public void initZooKeeper(String serviceId, boolean enableDelegationTokens)
+      throws InternalException {
     ZooKeeperSession zkSession = null;
     // Start up zookeeper/curator connection.
     try {
-      zkSession = new ZooKeeperSession(CONF, serviceId, runningPlanner, runningWorker);
+      zkSession = new ZooKeeperSession(CONF, serviceId, runningPlanner_, runningWorker_);
     } catch (IOException e) {
       throw new InternalException("Could not start up zookeeper session.", e);
     }
 
     if (enableDelegationTokens) {
       try {
-        DelegationTokenManager.init(CONF, runningPlanner, zkSession);
+        DelegationTokenManager.init(CONF, runningPlanner_, zkSession);
       } catch (IOException e) {
         throw new InternalException("Could not initialize delegation token manager", e);
       }
