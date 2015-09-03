@@ -101,11 +101,9 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   stmt << " FROM " << hdfs_table_->database() << "." << hdfs_table_->name();
 
-  // TODO: change impala -> "record-service-planner" when we've got kerberos working
-  // right.
   ThriftClient<recordservice::RecordServicePlannerClient> planner(
       FLAGS_hostname, FLAGS_recordservice_planner_port,
-      "impala",
+      ImpalaServer::RECORD_SERVICE_PLANNER_SERVER_NAME,
       AuthManager::GetInstance()->GetExternalAuthProvider());
   RETURN_IF_ERROR(planner.Open());
 
@@ -116,6 +114,8 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   params.request_type = recordservice::TRequestType::Sql;
   params.__set_sql_stmt(stmt.str());
   recordservice::TPlanRequestResult result;
+
+  QUERY_VLOG_FRAGMENT(state->logger()) << "PlanRequest request: " << params.sql_stmt;
 
   try {
     planner.iface()->PlanRequest(result, params);
@@ -137,6 +137,9 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 
   scoped_ptr<Codec> decompressor;
   Codec::CreateDecompressor(NULL, false, THdfsCompression::LZ4, &decompressor);
+
+  QUERY_VLOG_FRAGMENT(state->logger()) << "PlanRequest returned "
+      << result.tasks.size() << " tasks.";
 
   TRecordServiceTask rs_task;
   TExecRequest exec_req;
@@ -163,6 +166,10 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   }
 
   task_id_ = 0;
+  if (tasks_.size() == 0) {
+    done_ = true;
+    materialized_row_batches_->Shutdown();
+  }
 
   return Status::OK();
 }
@@ -170,6 +177,7 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
 Status RecordServiceScanNode::Open(RuntimeState* state) {
   SCOPED_TIMER(runtime_profile_->total_time_counter());
   RETURN_IF_ERROR(ExecNode::Open(state));
+  if (done_) return Status::OK();
 
   num_scanner_threads_started_counter_ =
       ADD_COUNTER(runtime_profile(), NUM_SCANNER_THREADS_STARTED, TUnit::UNIT);
@@ -210,6 +218,7 @@ Status RecordServiceScanNode::GetNext(RuntimeState* state,
       COUNTER_SET(rows_returned_counter_, num_rows_returned_);
       *eos = true;
       done_ = true;
+      materialized_row_batches_->Shutdown();
     }
     delete materialized_batch;
   } else {
@@ -260,12 +269,10 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
 
   // Connect to the local RecordService worker. Thrift clients are not thread safe.
   // TODO: pool these.
-  // TODO: change impala -> "record-service-worker" when we've got kerberos working
-  // right.
-  AuthProvider* auth_provider = AuthManager::GetInstance()->GetExternalAuthProvider();
   ThriftClient<recordservice::RecordServiceWorkerClient> client(
       FLAGS_hostname, FLAGS_recordservice_worker_port,
-      "impala", auth_provider);
+      ImpalaServer::RECORD_SERVICE_WORKER_SERVER_NAME,
+      AuthManager::GetInstance()->GetExternalAuthProvider());
 
   while (true) {
     if (status.ok()) status = client.Open();

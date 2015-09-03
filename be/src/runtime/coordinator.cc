@@ -36,6 +36,7 @@
 #include <errno.h>
 
 #include "common/logging.h"
+#include "common/query-logging.h"
 #include "exprs/expr.h"
 #include "exec/data-sink.h"
 #include "runtime/client-cache.h"
@@ -360,6 +361,9 @@ Status Coordinator::Exec(QuerySchedule& schedule,
         -1, -1, "Output exprs", runtime_state()->instance_mem_tracker(), false));
     RETURN_IF_ERROR(Expr::Prepare(
         *output_expr_ctxs, runtime_state(), row_desc(), output_expr_tracker));
+
+    DCHECK(runtime_state() != NULL);
+    runtime_state()->lock_tracker()->RegisterLock(&lock_);
   } else {
     // The coordinator instance may require a query mem tracker even if there is no
     // coordinator fragment. For example, result-caching tracks memory via the query mem
@@ -378,8 +382,6 @@ Status Coordinator::Exec(QuerySchedule& schedule,
 
     executor_.reset(NULL);
   }
-
-  if (runtime_state() != NULL) runtime_state()->lock_tracker()->RegisterLock(&lock_);
 
   // Initialize the execution profile structures.
   InitExecProfile(request);
@@ -425,8 +427,14 @@ Status Coordinator::Exec(QuerySchedule& schedule,
               params, instance_idx, backend_debug_options, obj_pool()));
       backend_exec_states_[backend_num] = exec_state;
       ++backend_num;
-      VLOG(2) << "Exec(): starting instance: fragment_idx=" << fragment_idx
-              << " instance_id=" << params.instance_ids[instance_idx];
+      if (runtime_state() != NULL) {
+        QUERY_VLOG_FRAGMENT(runtime_state()->logger())
+            << "Exec(): starting instance: fragment_idx=" << fragment_idx
+            << " instance_id=" << params.instance_ids[instance_idx];
+      } else {
+        VLOG(2) << "Exec(): starting instance: fragment_idx=" << fragment_idx
+                << " instance_id=" << params.instance_ids[instance_idx];
+      }
     }
     fragment_profiles_[fragment_idx].num_instances = num_hosts;
 
@@ -1421,7 +1429,11 @@ void Coordinator::UpdateExecSummary(int fragment_idx, int instance_idx,
     // TODO: we don't track cpu time per node now. Do that.
     exec_summary.__isset.exec_stats = true;
   }
-  VLOG(2) << PrintExecSummary(exec_summary_);
+  if (runtime_state() != NULL) {
+    QUERY_VLOG_FRAGMENT(runtime_state()->logger()) << PrintExecSummary(exec_summary_);
+  } else {
+    VLOG(2) << PrintExecSummary(exec_summary_);
+  }
 }
 
 // This function appends summary information to the query_profile_ before

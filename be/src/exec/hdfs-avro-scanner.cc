@@ -506,8 +506,9 @@ Status HdfsAvroScanner::InitNewRange() {
   if (codegend_decode_avro_data_ == NULL) {
     scan_node_->IncNumScannersCodegenDisabled();
   } else {
-    VLOG(2) << "HdfsAvroScanner (node_id=" << scan_node_->id()
-            << ") using llvm codegend functions.";
+    QUERY_VLOG_FRAGMENT(state_->logger())
+        << "HdfsAvroScanner (node_id=" << scan_node_->id()
+        << ") using llvm codegend functions.";
     scan_node_->IncNumScannersCodegenEnabled();
   }
 
@@ -837,8 +838,9 @@ Function* HdfsAvroScanner::CodegenMaterializeTuple(HdfsScanNode* node,
         break;
       default:
         // Unsupported type, can't codegen
-        VLOG(1) << "Failed to codegen MaterializeTuple() due to unsupported type: "
-                << element.schema->type;
+        QUERY_VLOG_FRAGMENT(node->runtime_state()->logger())
+            << "Failed to codegen MaterializeTuple() due to unsupported type: "
+            << element.schema->type;
         fn->eraseFromParent();
         return NULL;
     }

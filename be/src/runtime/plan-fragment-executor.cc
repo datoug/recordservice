@@ -84,7 +84,6 @@ Status PlanFragmentExecutor::Prepare(const TExecPlanFragmentParams& request) {
 
   VLOG_QUERY << "Prepare(): query_id=" << PrintId(query_id_) << " instance_id="
              << PrintId(request.fragment_instance_ctx.fragment_instance_id);
-  VLOG(2) << "params:\n" << ThriftDebugString(params);
 
   if (request.__isset.reserved_resource) {
     VLOG_QUERY << "Executing fragment in reserved resource:\n"
@@ -98,6 +97,8 @@ Status PlanFragmentExecutor::Prepare(const TExecPlanFragmentParams& request) {
 
   runtime_state_.reset(
       new RuntimeState(request, cgroup, exec_env_));
+  QUERY_VLOG_FRAGMENT(runtime_state_->logger())
+      << "TExecPlanFragmentParams:\n" << ThriftDebugString(params);
 
   // total_time_counter() is in the runtime_state_ so start it up now.
   SCOPED_TIMER(profile()->total_time_counter());
@@ -267,7 +268,7 @@ Status PlanFragmentExecutor::Prepare(const TExecPlanFragmentParams& request) {
 
   row_batch_.reset(new RowBatch(plan_->row_desc(), runtime_state_->batch_size(),
         runtime_state_->instance_mem_tracker()));
-  VLOG(2) << "plan_root=\n" << plan_->DebugString();
+  QUERY_VLOG_FRAGMENT(runtime_state_->logger()) << "plan_root=\n" << plan_->DebugString();
   prepared_ = true;
   return Status::OK();
 }

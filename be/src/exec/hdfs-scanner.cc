@@ -107,8 +107,9 @@ Status HdfsScanner::InitializeWriteTuplesFn(HdfsPartitionDescriptor* partition,
     scan_node_->IncNumScannersCodegenDisabled();
     return Status::OK();
   }
-  VLOG(2) << scanner_name << "(node_id=" << scan_node_->id()
-          << ") using llvm codegend functions.";
+  QUERY_VLOG_FRAGMENT(state_->logger())
+      << scanner_name << "(node_id=" << scan_node_->id()
+      << ") using llvm codegend functions.";
   scan_node_->IncNumScannersCodegenEnabled();
   return Status::OK();
 }
