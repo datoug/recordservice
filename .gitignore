@@ -46,3 +46,5 @@ compile_commands.json
 
 fe/src/test/resources/hive-log4j.properties
 fe/src/test/resources/sentry-site.xml
+
+csd/RECORD_SERVICE/target

@@ -47,14 +47,8 @@ case $CMD in
     log "Starting RecordService"
     log "recordservice_planner_port: $PLANNER_PORT"
     log "recordservice_worker_port: $WORKER_PORT"
-    log "state_store_subscriber_port: $STATESTORE_SUB_PORT"
-    log "statestore_subscriber_timeout_seconds: $STATESTORE_SUB_TIMEOUT_SEC"
     log "log_filename: $LOG_FILENAME"
     log "hostname: $HOSTNAME"
-    log "state_store_host: $STATESTORE_HOST"
-    log "state_store_port: $STATESTORE_PORT"
-    log "catalog_service_host: $CATALOG_SERVICE_HOST"
-    log "catalog_service_port: $CATALOG_SERVICE_PORT"
     log "recordservice_webserver_port: $WEBSERVICE_PORT"
     log "webserver_doc_root: $RECORDSERVICE_HOME"
     log "log_dir: $LOG_DIR"
@@ -75,13 +69,7 @@ case $CMD in
       -lineage_event_log_dir=$LOG_DIR/lineage \
       -audit_event_log_dir=$LOG_DIR/audit \
       -profile_log_dir=$LOG_DIR/profiles/ \
-      -v=$V \
-      -state_store_subscriber_port=$STATESTORE_SUB_PORT \
-      -statestore_subscriber_timeout_seconds=$STATESTORE_SUB_TIMEOUT_SEC \
-      -state_store_host=$STATESTORE_HOST \
-      -state_store_port=$STATESTORE_PORT \
-      -catalog_service_host=$CATALOG_SERVICE_HOST \
-      -catalog_service_port=$CATALOG_SERVICE_PORT
+      -v=$V
       "
     if env | grep -q ^recordservice_principal=
     then
