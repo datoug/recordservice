@@ -395,8 +395,9 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
   }
 
   exec_env_->SetImpalaServer(this);
-  status = exec_env_->frontend()->InitZooKeeper();
+  if (exec_env_->is_record_service()) status = exec_env_->frontend()->InitZooKeeper();
   if (!status.ok()) {
+    LOG(ERROR) << "Could not initialize zookeeper. Exiting.";
     exit(1);
   }
 }

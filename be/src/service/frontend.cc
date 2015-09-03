@@ -123,17 +123,13 @@ Frontend::Frontend(bool is_record_service) {
 }
 
 Status Frontend::InitZooKeeper() {
-  jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
-      (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
-
-  // Not using zookeeper.
-  if (!enable_delegation_tokens && !ExecEnv::GetInstance()->is_record_service()) {
-    return Status::OK();
-  }
-
+  DCHECK(ExecEnv::GetInstance()->is_record_service());
   JNIEnv* jni_env = getJNIEnv();
   JniLocalFrame jni_frame;
   RETURN_IF_ERROR(jni_frame.push(jni_env));
+
+  jboolean enable_delegation_tokens = !FLAGS_principal.empty() &&
+      (FLAGS_recordservice_worker_port != 0 || FLAGS_recordservice_planner_port != 0);
   jboolean running_recordservice_planner = FLAGS_recordservice_planner_port != 0;
   jboolean running_recordservice_worker = FLAGS_recordservice_worker_port != 0;
   jstring sid = jni_env->NewStringUTF(ExecEnv::GetInstance()->server_id().c_str());
