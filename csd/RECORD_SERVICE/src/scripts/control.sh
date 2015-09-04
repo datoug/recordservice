@@ -53,59 +53,73 @@ log "USER: $USER"
 
 KEYTAB_FILE=$HADOOP_CONF_DIR/../record_service.keytab
 
+# The following parameters are provided in descriptor/service.sdl.
+log "Starting RecordService"
+log "recordservice_planner_port: $PLANNER_PORT"
+log "recordservice_worker_port: $WORKER_PORT"
+log "log_filename: $LOG_FILENAME"
+log "hostname: $HOSTNAME"
+log "recordservice_webserver_port: $WEBSERVICE_PORT"
+log "webserver_doc_root: $RECORDSERVICE_HOME"
+log "log_dir: $LOG_DIR"
+log "principal: $RECORD_SERVICE_PRINCIPAL"
+log "keytab_file: $KEYTAB_FILE"
+log "v: $V"
+log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
+
+# Add zk quorum to hdfs-site.xml
+add_to_hdfs_site recordservice.zookeeper.connectString $ZK_QUORUM
+
+# FIXME this is not secure.
+add_to_hdfs_site recordservice.zookeeper.acl world:anyone:cdrwa
+
+ARGS="\
+  -log_filename=$LOG_FILENAME \
+  -hostname=$HOSTNAME \
+  -recordservice_webserver_port=$WEBSERVICE_PORT \
+  -webserver_doc_root=$RECORDSERVICE_HOME \
+  -log_dir=$LOG_DIR \
+  -abort_on_config_error=false \
+  -lineage_event_log_dir=$LOG_DIR/lineage \
+  -audit_event_log_dir=$LOG_DIR/audit \
+  -profile_log_dir=$LOG_DIR/profiles/ \
+  -v=$V
+  "
+if env | grep -q ^RECORD_SERVICE_PRINCIPAL=
+then
+  log "Starting kerberized cluster"
+  ARGS=$ARGS"\
+    -principal=$RECORD_SERVICE_PRINCIPAL \
+    -keytab_file=$KEYTAB_FILE \
+    -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL\
+    "
+fi
+
 case $CMD in
-  (start)
-    # The following parameters are provided in descriptor/service.sdl.
-    log "Starting RecordService"
-    log "recordservice_planner_port: $PLANNER_PORT"
-    log "recordservice_worker_port: $WORKER_PORT"
-    log "log_filename: $LOG_FILENAME"
-    log "hostname: $HOSTNAME"
-    log "recordservice_webserver_port: $WEBSERVICE_PORT"
-    log "webserver_doc_root: $RECORDSERVICE_HOME"
-    log "log_dir: $LOG_DIR"
-    log "principal: $RECORD_SERVICE_PRINCIPAL"
-    log "keytab_file: $KEYTAB_FILE"
-    log "v: $V"
-    log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
-
-    # Add zk quorum to hdfs-site.xml
-    add_to_hdfs_site recordservice.zookeeper.connectString $ZK_QUORUM
-
-    # FIXME this is not secure.
-    add_to_hdfs_site recordservice.zookeeper.acl world:anyone:cdrwa
-
-    ARGS="\
+  (start_planner_worker)
+    log "Starting recordserviced running planner and worker services"
+    exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
       -recordservice_planner_port=$PLANNER_PORT \
-      -recordservice_worker_port=$WORKER_PORT \
-      -log_filename=$LOG_FILENAME \
-      -hostname=$HOSTNAME \
-      -recordservice_webserver_port=$WEBSERVICE_PORT \
-      -webserver_doc_root=$RECORDSERVICE_HOME \
-      -log_dir=$LOG_DIR \
-      -abort_on_config_error=false \
-      -lineage_event_log_dir=$LOG_DIR/lineage \
-      -audit_event_log_dir=$LOG_DIR/audit \
-      -profile_log_dir=$LOG_DIR/profiles/ \
-      -v=$V
-      "
-    if env | grep -q ^RECORD_SERVICE_PRINCIPAL=
-    then
-      echo "Starting kerberized cluster"
-      exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
-        -principal=$RECORD_SERVICE_PRINCIPAL \
-        -keytab_file=$KEYTAB_FILE \
-        -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL
-    else
-      exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS
-    fi
+      -recordservice_worker_port=$WORKER_PORT
+  ;;
 
-    ;;
+  (start_planner)
+    log "Starting recordserviced running planner and worker services"
+    exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
+      -recordservice_planner_port=$PLANNER_PORT \
+      -recordservice_worker_port=0
+  ;;
+  
+  (start_worker)
+    log "Starting recordserviced running worker services"
+    exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
+      -recordservice_planner_port=0 \
+      -recordservice_worker_port=$WORKER_PORT
+  ;;
 
   (stopAll)
-    # MAIN_PROCESS is provided in descriptor/service.sdl.
-    log "Stop mainprocess [$MAIN_PROCESS]"
-    exec killall -w $MAIN_PROCESS
+    log "Stopping recordserviced"
+    exec killall -w recordserviced
     ;;
 
   (*)

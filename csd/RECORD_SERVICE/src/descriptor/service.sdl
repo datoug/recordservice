@@ -15,9 +15,9 @@
 // limitations under the License.
 {
   "name" : "RECORD_SERVICE",
-  "label" : "Record Service",
+  "label" : "Record Service (Beta)",
   "description" : "The Record Service",
-  "version" : "1.0",
+  "version" : "0.1.0",
   "compatibility" : {
     "cdhVersion" : {
       "min" : "5",
@@ -73,20 +73,20 @@
       "default" : 40100
     },
     {
-      "name" : "log_filename",
-      "label" : "log filename",
-      "description" : "log filename",
-      "required" : "true",
-      "type" : "string",
-      "default" : "recordserviced"
-    },
-    {
       "name" : "webservice_port",
       "label" : "webservice port for debug",
       "description" : "webservice port for debug",
       "required" : "true",
       "type" : "port",
       "default" : 35000
+    },
+    {
+      "name" : "log_filename",
+      "label" : "log filename",
+      "description" : "log filename",
+      "required" : "true",
+      "type" : "string",
+      "default" : "recordserviced"
     },
     {
       "name" : "log_dir",
@@ -132,7 +132,7 @@
       ],
       "startRunner" : {
         "program" : "scripts/control.sh",
-        "args" : [ "start" ],
+        "args" : [ "start_planner_worker" ],
         "environmentVariables" : {
           "PLANNER_PORT" : "${recordservice_planner_port}",
           "WORKER_PORT" : "${recordservice_worker_port}",
@@ -147,11 +147,95 @@
       "stopRunner" : {
         "program" : "scripts/control.sh",
         "args" : [ "stopAll" ],
-        "environmentVariables" : {
-          "MAIN_PROCESS" : "recordserviced"
-        },
         "timeout" : 180000
       },
+      "topology" : { "minInstances" : 0 },
+      "cgroup" : {
+        "cpu" : {
+          "autoConfigured" : true
+        },
+        "blkio" : {
+          "autoConfigured" : true
+        }
+      }
+    },
+    {
+      "name" : "RECORD_SERVICE_PLANNER",
+      "label" : "Record Service Planner",
+      "pluralLabel" : "Record Service Planners",
+      "logging" : {
+        "dir" : "/var/log/recordserviced",
+        "filename" : "recordserviced.INFO"
+      },
+      "kerberosPrincipals" : [
+        {
+          "name" : "RECORD_SERVICE_PRINCIPAL",
+          "primary" : "${principal}",
+          "instance" : "${host}"
+        }
+      ],
+      "startRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "start_planner" ],
+        "environmentVariables" : {
+          "PLANNER_PORT" : "${recordservice_planner_port}",
+          "LOG_FILENAME" : "${log_filename}",
+          "HOSTNAME" : "${host}",
+          "WEBSERVICE_PORT" : "${webservice_port}",
+          "LOG_DIR" : "${log_dir}",
+          "V" : "${v}",
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
+        }
+      },
+      "stopRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "stopAll" ],
+        "timeout" : 180000
+      },
+      "topology" : { "minInstances" : 0 },
+      "cgroup" : {
+        "cpu" : {
+          "autoConfigured" : true
+        },
+        "blkio" : {
+          "autoConfigured" : true
+        }
+      }
+    },
+    {
+      "name" : "RECORD_SERVICE_WORKER",
+      "label" : "Record Service Worker",
+      "pluralLabel" : "Record Service Workers",
+      "logging" : {
+        "dir" : "/var/log/recordserviced",
+        "filename" : "recordserviced.INFO"
+      },
+      "kerberosPrincipals" : [
+        {
+          "name" : "RECORD_SERVICE_PRINCIPAL",
+          "primary" : "${principal}",
+          "instance" : "${host}"
+        }
+      ],
+      "startRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "start_worker" ],
+        "environmentVariables" : {
+          "WORKER_PORT" : "${recordservice_worker_port}",
+          "LOG_FILENAME" : "${log_filename}",
+          "HOSTNAME" : "${host}",
+          "WEBSERVICE_PORT" : "${webservice_port}",
+          "LOG_DIR" : "${log_dir}",
+          "V" : "${v}",
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
+        }
+      },
+      "stopRunner" : {
+        "program" : "scripts/control.sh",
+        "args" : [ "stopAll" ],
+        "timeout" : 180000
+      },
+      "topology" : { "minInstances" : 0 },
       "cgroup" : {
         "cpu" : {
           "autoConfigured" : true
