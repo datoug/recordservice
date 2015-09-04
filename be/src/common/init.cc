@@ -134,8 +134,9 @@ void impala::InitCommonRuntime(int argc, char** argv, bool init_jvm,
   // which might use SSSE3 instructions (see IMPALA-160).
   CpuInfo::VerifyCpuRequirements();
 
-  // Set the default hostname. The user can override this with the hostname flag.
-  GetHostname(&FLAGS_hostname);
+  if (FLAGS_hostname.empty()) {
+    EXIT_WITH_ERROR("hostname must be specified. Set with the --hostname startup flag.");
+  }
 
   google::SetVersionString(impala::GetBuildVersion());
   google::ParseCommandLineFlags(&argc, &argv, true);

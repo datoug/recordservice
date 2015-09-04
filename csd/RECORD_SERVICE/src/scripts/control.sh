@@ -67,9 +67,10 @@ log "keytab_file: $KEYTAB_FILE"
 log "v: $V"
 log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
 
+# The HDFS default has the wrong units so configure this.
+add_to_hdfs_site dfs.client.file-block-storage-locations.timeout.millis 5000000
 # Add zk quorum to hdfs-site.xml
 add_to_hdfs_site recordservice.zookeeper.connectString $ZK_QUORUM
-
 # FIXME this is not secure.
 add_to_hdfs_site recordservice.zookeeper.acl world:anyone:cdrwa
 
@@ -104,14 +105,14 @@ case $CMD in
   ;;
 
   (start_planner)
-    log "Starting recordserviced running planner and worker services"
+    log "Starting recordserviced running planner service"
     exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
       -recordservice_planner_port=$PLANNER_PORT \
       -recordservice_worker_port=0
   ;;
   
   (start_worker)
-    log "Starting recordserviced running worker services"
+    log "Starting recordserviced running worker service"
     exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
       -recordservice_planner_port=0 \
       -recordservice_worker_port=$WORKER_PORT

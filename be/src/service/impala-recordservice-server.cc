@@ -813,6 +813,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     // Do the same for hosts.
     vector<TNetworkAddress> all_hosts;
     all_hosts.swap(query_request.host_list);
+    ResolveRecordServiceWorkerPorts(&all_hosts);
 
     for (int i = 0; i < scan_ranges.size(); ++i) {
       recordservice::TTask task;
@@ -853,13 +854,18 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
         recordservice::TNetworkAddress host;
         DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
         host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
-        // FIXME: this port should come from the membership information.
-        host.port = FLAGS_recordservice_worker_port;
-        task.local_hosts.push_back(host);
-
+        host.port = all_hosts[loc.host_idx].port;
         // Populate query_request.host_list and remap indices.
         query_request.host_list.push_back(all_hosts[loc.host_idx]);
         loc.host_idx = query_request.host_list.size() - 1;
+
+        if (host.port == -1) {
+          // This indicates that we have DNs where there is no RecordService
+          // worker running. Don't set those nodes are being local.
+          VLOG(2) << "No RecordService worker running on host: " << host.hostname;
+          continue;
+        }
+        task.local_hosts.push_back(host);
       }
 
       // Add the scan range.

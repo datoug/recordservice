@@ -53,9 +53,6 @@ DECLARE_int32(hs2_port);
 DECLARE_int32(be_port);
 DECLARE_string(principal);
 
-DECLARE_int32(recordservice_planner_port);
-DECLARE_int32(recordservice_worker_port);
-
 // Start a test thrift service. This service is used to test authentication and should
 // not be on for production.
 DEFINE_int32(test_service_port, 0, "Port to start test service on. 0 to not start.");

@@ -22,9 +22,8 @@
 
 // This will be defaulted to the host name returned by the OS.
 // This name is used in the principal generated for Kerberos authorization.
-DEFINE_string(hostname, "", "Hostname to use for this daemon, also used as part of "
-              "the Kerberos principal, if enabled. If not set, the system default will be"
-              " used");
+DEFINE_string(hostname, "localhost", "Hostname to use for this daemon, also used as part "
+              "of the Kerberos principal, if enabled.");
 
 DEFINE_int32(be_port, 22000, "port on which ImpalaInternalService is exported");
 

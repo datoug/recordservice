@@ -35,8 +35,12 @@ using namespace impala;
 using namespace llvm;
 using namespace strings;
 
-DECLARE_int32(recordservice_planner_port);
-DECLARE_int32(recordservice_worker_port);
+DEFINE_string(recordservice_planner_client_host, "localhost",
+    "Host of running RecordService planner.");
+DEFINE_int32(recordservice_planner_client_port, 40000,
+    "Port of running RecordService planner.");
+DEFINE_int32(recordservice_worker_client_port, 40100,
+    "Port of running RecordService worker");
 
 namespace impala {
   // Minimal implementation of < for set lookup.
@@ -102,7 +106,7 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   stmt << " FROM " << hdfs_table_->database() << "." << hdfs_table_->name();
 
   ThriftClient<recordservice::RecordServicePlannerClient> planner(
-      FLAGS_hostname, FLAGS_recordservice_planner_port,
+      FLAGS_recordservice_planner_client_host, FLAGS_recordservice_planner_client_port,
       ImpalaServer::RECORD_SERVICE_PLANNER_SERVER_NAME,
       AuthManager::GetInstance()->GetExternalAuthProvider());
   RETURN_IF_ERROR(planner.Open());
@@ -270,7 +274,7 @@ void RecordServiceScanNode::ScannerThread(int task_id) {
   // Connect to the local RecordService worker. Thrift clients are not thread safe.
   // TODO: pool these.
   ThriftClient<recordservice::RecordServiceWorkerClient> client(
-      FLAGS_hostname, FLAGS_recordservice_worker_port,
+      FLAGS_hostname, FLAGS_recordservice_worker_client_port,
       ImpalaServer::RECORD_SERVICE_WORKER_SERVER_NAME,
       AuthManager::GetInstance()->GetExternalAuthProvider());
 

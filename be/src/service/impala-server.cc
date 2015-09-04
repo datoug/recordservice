@@ -1584,29 +1584,61 @@ void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update
   unordered_map<string, TBackendDescriptor>& members = update.is_planner ?
       known_recordservice_planners_ :
       known_recordservice_workers_;
-  unique_lock<mutex> l(recordservice_membership_lock_);
-  if (update.type == TMembershipUpdateType::FULL_LIST) members.clear();
+  unique_lock<shared_mutex> l(recordservice_membership_lock_);
+  if (update.type == TMembershipUpdateType::FULL_LIST) {
+    members.clear();
+    if (!update.is_planner) recordservice_workers_host_to_ports_.clear();
+  }
 
-  switch (update.type) {
-    case TMembershipUpdateType::REMOVE:
-      for (int i = 0; i < update.membership.size(); ++i) {
+  for (int i = 0; i < update.membership.size(); ++i) {
+    TBackendDescriptor desc;
+    if (!ServerIdToDescriptor(update.membership[i], &desc)) {
+      LOG(WARNING) << "Could not parse server id: " << update.membership[i] << ".";
+      continue;
+    }
+    switch (update.type) {
+      case TMembershipUpdateType::REMOVE:
         members.erase(update.membership[i]);
-      }
-      break;
-
-    case TMembershipUpdateType::ADD:
-    case TMembershipUpdateType::FULL_LIST:
-      for (int i = 0; i < update.membership.size(); ++i) {
-        TBackendDescriptor desc;
-        if (!ServerIdToDescriptor(update.membership[i], &desc)) {
-          LOG(WARNING) << "Could not parse server id: " << update.membership[i] << ".";
-          continue;
+        if (!update.is_planner) {
+          unordered_map<string, unordered_set<int> >::iterator it =
+              recordservice_workers_host_to_ports_.find(desc.address.hostname);
+          // Remove the host/port from the map.
+          if (it != recordservice_workers_host_to_ports_.end()) {
+            it->second.erase(desc.address.port);
+            if (it->second.empty()) recordservice_workers_host_to_ports_.erase(it);
+          }
         }
+        break;
+
+      case TMembershipUpdateType::ADD:
+      case TMembershipUpdateType::FULL_LIST:
         members.insert(make_pair(update.membership[i], desc));
-      }
-      break;
-    default:
-      DCHECK(false);
+        if (!update.is_planner) {
+          recordservice_workers_host_to_ports_[desc.address.hostname].insert(
+              desc.address.port);
+        }
+        break;
+
+      default:
+        DCHECK(false);
+    }
+  }
+}
+
+void ImpalaServer::ResolveRecordServiceWorkerPorts(vector<TNetworkAddress>* h) {
+  vector<TNetworkAddress>& hosts = *h;
+  shared_lock<shared_mutex> l(recordservice_membership_lock_);
+  for (int i = 0; i < hosts.size(); ++i) {
+    unordered_map<string, unordered_set<int> >::iterator it =
+        recordservice_workers_host_to_ports_.find(hosts[i].hdfs_host_name);
+    if (it == recordservice_workers_host_to_ports_.end()) {
+      hosts[i].port = -1;
+    } else {
+      DCHECK(!it->second.empty());
+      // TODO: should we pick a random instance? This is only used in test
+      // configurations so whatever makes testing better.
+      hosts[i].port = *it->second.begin();
+    }
   }
 }
 
@@ -1615,7 +1647,7 @@ void ImpalaServer::GetRecordServiceMembership(Scheduler::BackendList* planners,
   planners->clear();
   workers->clear();
 
-  unique_lock<mutex> l(recordservice_membership_lock_);
+  shared_lock<shared_mutex> l(recordservice_membership_lock_);
   for (unordered_map<string, TBackendDescriptor>::const_iterator it =
           known_recordservice_planners_.begin();
       it != known_recordservice_planners_.end(); ++it) {

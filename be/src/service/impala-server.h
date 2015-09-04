@@ -295,6 +295,13 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// ZooKeeper.
   void UpdateRecordServiceMembership(const TMembershipUpdate& update);
 
+  // For each address in hosts, populates hosts[i].port with the worker port from
+  // the membership. hosts[i].hdfs_host_name must be populated when this function is
+  // called and on return, the ports are populated with the RecordService worker port
+  // running on that host. If there is no worker running on that host, the port is
+  // set to -1.
+  void ResolveRecordServiceWorkerPorts(std::vector<TNetworkAddress>* hosts);
+
   /// Returns true if Impala is offline (and not accepting queries), false otherwise.
   bool IsOffline() {
     boost::lock_guard<boost::mutex> l(is_offline_lock_);
@@ -1073,9 +1080,18 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// is running the planner service.
   /// Lock protects access to these data structure. Do not do any blocking calls
   /// while holding the lock.
-  boost::mutex recordservice_membership_lock_;
+  boost::shared_mutex recordservice_membership_lock_;
+  // These are mapping of unique ids to the description of the backend.
   boost::unordered_map<std::string, TBackendDescriptor> known_recordservice_workers_;
   boost::unordered_map<std::string, TBackendDescriptor> known_recordservice_planners_;
+  // Map of host to port for the known workers. This is redudant information from
+  // what is in known_recordservice_workers_ but kept as a separate data structure
+  // to optimize some operations. The state stored here is the actual host/port to
+  // connect to.
+  // We allow running multiple services with different ports. The value in the map
+  // is the set of ports running on that host.
+  boost::unordered_map<std::string, boost::unordered_set<int> >
+      recordservice_workers_host_to_ports_;
 
   /// Generate unique session id for HiveServer2 session
   boost::uuids::random_generator uuid_generator_;

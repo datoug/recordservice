@@ -66,8 +66,13 @@ int main(int argc, char** argv) {
   InitFeSupport();
 
   // Generate a service ID that will be unique across the cluster.
+  // If we are running both the planner and worker, use the worker port
+  // as the ID. The planners will parse the port out of the ID and needs
+  // to know where the workers are.
+  // TODO: currently we just use the znode path for membership. We could
+  // also store the port in the znode data instead of this.
   TNetworkAddress service_address(MakeNetworkAddress(FLAGS_hostname,
-    (FLAGS_recordservice_planner_port == 0 ?
+    (FLAGS_recordservice_worker_port != 0 ?
       FLAGS_recordservice_worker_port : FLAGS_recordservice_planner_port)));
   string service_id = Substitute("recordserviced@$0",
       TNetworkAddressToString(service_address));
