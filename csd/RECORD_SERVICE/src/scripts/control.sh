@@ -23,6 +23,18 @@ function log {
   echo "$timestamp: $1"
 }
 
+# Adds a xml config to hdfs-site.xml
+add_to_hdfs_site() {
+  FILE=`find $CONF_DIR/hadoop-conf -name hdfs-site.xml`
+  CONF_END="</configuration>"
+  NEW_PROPERTY="<property><name>$1</name><value>$2</value></property>"
+  TMP_FILE=$CONF_DIR/tmp-hdfs-site
+  cat $FILE | sed "s#$CONF_END#$NEW_PROPERTY#g" > $TMP_FILE
+  cp $TMP_FILE $FILE
+  rm -f $TMP_FILE
+  echo $CONF_END >> $FILE
+}
+
 # RECORDSERVICE_HOME is provided in the recordservice parcel's env script.
 RECORD_SERVICE_BIN_HOME=$RECORDSERVICE_HOME/../../bin
 log "RECORD_SERVICE_BIN_HOME: $RECORD_SERVICE_BIN_HOME"
@@ -52,10 +64,16 @@ case $CMD in
     log "recordservice_webserver_port: $WEBSERVICE_PORT"
     log "webserver_doc_root: $RECORDSERVICE_HOME"
     log "log_dir: $LOG_DIR"
-    log "principal: $PRINCIPAL"
+    log "principal: $RECORD_SERVICE_PRINCIPAL"
     log "keytab_file: $KEYTAB_FILE"
     log "v: $V"
     log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
+
+    # Add zk quorum to hdfs-site.xml
+    add_to_hdfs_site recordservice.zookeeper.connectString $ZK_QUORUM
+
+    # FIXME this is not secure.
+    add_to_hdfs_site recordservice.zookeeper.acl world:anyone:cdrwa
 
     ARGS="\
       -recordservice_planner_port=$PLANNER_PORT \
@@ -71,11 +89,11 @@ case $CMD in
       -profile_log_dir=$LOG_DIR/profiles/ \
       -v=$V
       "
-    if env | grep -q ^recordservice_principal=
+    if env | grep -q ^RECORD_SERVICE_PRINCIPAL=
     then
       echo "Starting kerberized cluster"
       exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \
-        -principal=$PRINCIPAL \
+        -principal=$RECORD_SERVICE_PRINCIPAL \
         -keytab_file=$KEYTAB_FILE \
         -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL
     else

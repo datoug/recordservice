@@ -27,7 +27,8 @@
   "runAs" : {
     "user" : "recordservice",
     "group" : "recordservice",
-    "principal" : "recordservice"
+    /* FIXME: this should be recordservice but the generated keytab is still impala */
+    "principal" : "impala"
   },
   "icon" : "images/icon.png",
   "parcel" : {
@@ -105,22 +106,6 @@
       "default" : "1"
     },
     {
-      "name" : "principal_primary",
-      "label" : "principal primary for kerberos",
-      "description" : "principal primary for kerberos",
-      "required" : "true",
-      "type" : "string",
-      "default" : "impala"
-    },
-    {
-      "name" : "realm",
-      "label" : "realm for kerberos",
-      "description" : "realm for kerberos",
-      "required" : "true",
-      "type" : "string",
-      "default" : ""
-    },
-    {
       "name" : "kerberos_reinit_interval",
       "label" : "kerberos reinit interval",
       "description" : "kerberos reinit interval",
@@ -140,8 +125,8 @@
       },
       "kerberosPrincipals" : [
         {
-          "name" : "recordservice_principal",
-          "primary" : "${principal_primary}",
+          "name" : "RECORD_SERVICE_PRINCIPAL",
+          "primary" : "${principal}",
           "instance" : "${host}"
         }
       ],
@@ -155,7 +140,6 @@
           "HOSTNAME" : "${host}",
           "WEBSERVICE_PORT" : "${webservice_port}",
           "LOG_DIR" : "${log_dir}",
-          "PRINCIPAL" : "${principal_primary}/${host}@${realm}",
           "V" : "${v}",
           "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
         }
