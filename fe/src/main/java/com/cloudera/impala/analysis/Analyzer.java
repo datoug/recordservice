@@ -47,6 +47,7 @@ import com.cloudera.impala.catalog.DatabaseNotFoundException;
 import com.cloudera.impala.catalog.Db;
 import com.cloudera.impala.catalog.HBaseTable;
 import com.cloudera.impala.catalog.HdfsTable;
+import com.cloudera.impala.catalog.IncompleteTable;
 import com.cloudera.impala.catalog.Table;
 import com.cloudera.impala.catalog.TableLoadingException;
 import com.cloudera.impala.catalog.Type;
@@ -2167,6 +2168,12 @@ public class Analyzer {
       missingTbls_.add(new TableName(table.getDb().getName(), table.getName()));
       throw new AnalysisException(
           "Table/view is missing metadata: " + table.getFullName());
+    } else if (table instanceof IncompleteTable) {
+      // If there were problems loading this table's metadata, throw an exception
+      // when it is accessed.
+      ImpalaException cause = ((IncompleteTable) table).getCause();
+      if (cause instanceof TableLoadingException) throw (TableLoadingException) cause;
+      throw new TableLoadingException("Missing metadata for table: " + tableName, cause);
     }
     return table;
   }
