@@ -390,6 +390,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 
   /// Execution state of a query.
   class QueryExecState;
+  struct QueryStateRecord;
 
   /// Relevant ODBC SQL State code; for more info,
   /// goto http://msdn.microsoft.com/en-us/library/ms714687.aspx
@@ -652,6 +653,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// Must be called with query_exec_state_map_lock_ held
   void ArchiveQuery(const QueryExecState& query);
 
+  /// Adds record to the query log.
+  void ArchiveRecord(const QueryStateRecord& record);
+
   /// Checks whether the given user is allowed to delegate as the specified do_as_user.
   /// Returns OK if the authorization suceeds, otherwise returns an status with details
   /// on why the failure occurred.
@@ -844,9 +848,11 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// files in the path. This is built from the suffix of the path.
   /// e.g. if the path is /a/b/*.jar, suffix is *.jar.
   /// If there is no suffix, path_filter is not created.
+  /// record is populated with diagnostic information while planning the request.
   TExecRequest PlanRecordServiceRequest(
       const recordservice::TPlanRequestParams& params,
-      boost::scoped_ptr<re2::RE2>* path_filter);
+      boost::scoped_ptr<re2::RE2>* path_filter,
+      QueryStateRecord* record);
 
   /// Populates session with the session for this client using the client's connection
   /// id. Throws an exception if the session does not exist.

@@ -751,10 +751,14 @@ void ImpalaServer::ArchiveQuery(const QueryExecState& query) {
     lock_guard<SpinLock> lock(*query.coord()->GetExecSummaryLock());
     record.exec_summary = query.coord()->exec_summary();
   }
+  ArchiveRecord(record);
+}
+
+void ImpalaServer::ArchiveRecord(const QueryStateRecord& record) {
   {
     lock_guard<Lock> l(query_log_lock_);
     // Add record to the beginning of the log, and to the lookup index.
-    query_log_index_[query.query_id()] = query_log_.insert(query_log_.begin(), record);
+    query_log_index_[record.id] = query_log_.insert(query_log_.begin(), record);
 
     if (FLAGS_query_log_size > -1 && FLAGS_query_log_size < query_log_.size()) {
       DCHECK_EQ(query_log_.size() - FLAGS_query_log_size, 1);

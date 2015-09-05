@@ -550,8 +550,15 @@ recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
 }
 
 TExecRequest ImpalaServer::PlanRecordServiceRequest(
-    const recordservice::TPlanRequestParams& req, scoped_ptr<re2::RE2>* path_filter) {
+    const recordservice::TPlanRequestParams& req, scoped_ptr<re2::RE2>* path_filter,
+    QueryStateRecord* record) {
   RecordServiceMetrics::NUM_PLAN_REQUESTS->Increment(1);
+  record->num_rows_fetched = 0;
+  record->process_nominator = 0;
+  record->process_denominator = 0;
+  record->default_db = "default";
+  record->stmt_type = TStmtType::PLAN;
+
   if (IsOffline()) {
     ThrowRecordServiceException(recordservice::TErrorCode::SERVICE_BUSY,
         "This RecordServicePlanner is not ready to accept requests."
@@ -619,6 +626,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
           "Unsupported request types. Supported request types are: SQL");
   }
 
+  record->stmt = query_ctx.request.stmt;
   VLOG_REQUEST << "RecordService::PlanRequest: " << query_ctx.request.stmt;
 
   // Populate session information. This includes, among other things, the user
@@ -641,6 +649,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
     session->connected_user = username;
   }
   session->ToThrift(session_id, &query_ctx.session);
+  record->effective_user = session->connected_user;
 
   // Plan the request.
   TExecRequest result;
@@ -655,6 +664,7 @@ TExecRequest ImpalaServer::PlanRecordServiceRequest(
     ThrowRecordServiceException(recordservice::TErrorCode::INVALID_REQUEST,
         "Cannot run non-SELECT statements");
   }
+
   return result;
 }
 
@@ -739,9 +749,11 @@ Status DetermineFileFormat(hdfsFS fs, const string& path,
 //
 void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
   const recordservice::TPlanRequestParams& req) {
+  QueryStateRecord record;
+  record.start_time = TimestampValue::LocalTime();
   try {
     scoped_ptr<re2::RE2> path_filter;
-    TExecRequest result = PlanRecordServiceRequest(req, &path_filter);
+    TExecRequest result = PlanRecordServiceRequest(req, &path_filter, &record);
 
     // FIXME: this port should come from the membership information and return all hosts
     // the workers are running on.
@@ -912,8 +924,14 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     }
   } catch (const recordservice::TRecordServiceException& e) {
     RecordServiceMetrics::NUM_FAILED_PLAN_REQUESTS->Increment(1);
+    record.end_time = TimestampValue::LocalTime();
+    record.query_state = beeswax::QueryState::EXCEPTION;
+    ArchiveRecord(record);
     throw e;
   }
+  record.end_time = TimestampValue::LocalTime();
+  record.query_state = beeswax::QueryState::FINISHED;
+  ArchiveRecord(record);
 }
 
 void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
@@ -922,7 +940,8 @@ void ImpalaServer::GetSchema(recordservice::TGetSchemaResult& return_val,
   try {
     // TODO: fix this to not do the whole planning.
     scoped_ptr<re2::RE2> dummy;
-    TExecRequest result = PlanRecordServiceRequest(req, &dummy);
+    QueryStateRecord dummy_record;
+    TExecRequest result = PlanRecordServiceRequest(req, &dummy, &dummy_record);
     DCHECK(result.__isset.result_set_metadata);
     PopulateResultSchema(result.result_set_metadata, &return_val.schema);
   } catch (const recordservice::TRecordServiceException& e) {

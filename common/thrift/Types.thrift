@@ -94,7 +94,8 @@ enum TStmtType {
   DML, // Data modification e.g. INSERT
   EXPLAIN,
   LOAD, // Statement type for LOAD commands
-  SET
+  SET,
+  PLAN // RecordServicePlanner plan request.
 }
 
 // Level of verboseness for "explain" output.
