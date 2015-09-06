@@ -304,6 +304,7 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   // called and on return, the ports are populated with the RecordService worker port
   // running on that host. If there is no worker running on that host, the port is
   // set to -1.
+  // This also maps localhost to resolved_localhost_ip_ for each host.
   void ResolveRecordServiceWorkerPorts(std::vector<TNetworkAddress>* hosts);
 
   /// Returns true if Impala is offline (and not accepting queries), false otherwise.
@@ -857,6 +858,12 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   /// Returns profile for the first HdfsScanNode in the children of 'coord_profile'.
   /// If there's no HdfsScanNode, returns NULL.
   static RuntimeProfile* GetHdfsScanNodeProfile(RuntimeProfile* coord_profile);
+
+  // The system set hostname for localhost. We generally don't want to return localhost
+  // in any of the RPCs but in test setups, we will see localhost from the other
+  // services (i.e. HDFS). In the cases where we are returning host names, remap
+  // localhost to this value.
+  std::string resolved_localhost_ip_;
 
   /// Guards query_log_ and query_log_index_
   Lock query_log_lock_;

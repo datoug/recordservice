@@ -16,6 +16,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <ifaddrs.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <limits.h>
@@ -80,6 +81,27 @@ Status HostnameToIpAddrs(const string& name, vector<string>* addresses) {
 
   freeaddrinfo(addr_info);
   return Status::OK();
+}
+
+string GetIpAddress() {
+  struct ifaddrs* if_addrs = NULL;
+  if (getifaddrs(&if_addrs) < 0) {
+    return LOCALHOST;
+  }
+
+  string result = LOCALHOST;
+  for (struct ifaddrs* ifa = if_addrs; ifa != NULL; ifa = ifa->ifa_next) {
+    if (!ifa->ifa_addr) continue;
+    if (ifa->ifa_addr->sa_family == AF_INET) {
+      // is a valid IP4 Address
+      void* tmp_addr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
+      char address_buffer[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, tmp_addr, address_buffer, INET_ADDRSTRLEN);
+      if (address_buffer != LOCALHOST) result = address_buffer;
+    }
+  }
+  if (if_addrs != NULL) freeifaddrs(if_addrs);
+  return result;
 }
 
 bool FindFirstNonLocalhost(const vector<string>& addresses, string* addr) {

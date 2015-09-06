@@ -49,6 +49,9 @@ std::string TNetworkAddressToString(const TNetworkAddress& address);
 /// Resolves hostname to ipaddress, returning the first non-local host ip.
 Status ResolveIpAddress(const std::string& hostname, std::string* ipaddress);
 
+/// Returns the ipaddress of this machine.
+std::string GetIpAddress();
+
 /// Prints a hostport as ipaddress:port
 std::ostream& operator<<(std::ostream& out, const TNetworkAddress& hostport);
 

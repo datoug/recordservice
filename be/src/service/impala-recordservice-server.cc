@@ -746,7 +746,7 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     // FIXME: this port should come from the membership information and return all hosts
     // the workers are running on.
     recordservice::TNetworkAddress default_host;
-    default_host.hostname = "localhost";
+    default_host.hostname = resolved_localhost_ip_;
     default_host.port = FLAGS_recordservice_worker_port;
     return_val.hosts.push_back(default_host);
 

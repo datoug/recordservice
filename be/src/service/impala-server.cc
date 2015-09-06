@@ -405,6 +405,12 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
     LOG(ERROR) << "Could not initialize zookeeper. Exiting.";
     exit(1);
   }
+
+  resolved_localhost_ip_ = FLAGS_hostname;
+  if (resolved_localhost_ip_ == "localhost") {
+    resolved_localhost_ip_ = GetIpAddress();
+    LOG(INFO) << "Resolved localhost to IP: " << resolved_localhost_ip_;
+  }
 }
 
 Status ImpalaServer::LogLineageRecord(const TExecRequest& request) {
@@ -1646,6 +1652,11 @@ void ImpalaServer::ResolveRecordServiceWorkerPorts(vector<TNetworkAddress>* h) {
       // TODO: should we pick a random instance? This is only used in test
       // configurations so whatever makes testing better.
       hosts[i].port = *it->second.begin();
+    }
+    // Remap localhost -> resolved_localhost_ip_. This needs to be done
+    // *after* the membership lookup.
+    if (hosts[i].hdfs_host_name == "localhost") {
+      hosts[i].hdfs_host_name = resolved_localhost_ip_;
     }
   }
 }
