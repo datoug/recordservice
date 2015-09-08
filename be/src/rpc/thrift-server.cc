@@ -351,7 +351,8 @@ Status ThriftServer::EnableSsl(const string& certificate, const string& private_
 
 Status ThriftServer::Start() {
   DCHECK(!started_);
-  shared_ptr<TProtocolFactory> protocol_factory(new TBinaryProtocolFactory());
+  shared_ptr<TProtocolFactory> protocol_factory(
+      new TBinaryProtocolFactory(0, 0, true, true));
   shared_ptr<ThreadFactory> thread_factory(
       new ThriftThreadFactory("thrift-server", name_));
 
