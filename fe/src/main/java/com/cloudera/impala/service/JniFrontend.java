@@ -55,10 +55,10 @@ import com.cloudera.impala.authorization.ImpalaInternalAdminUser;
 import com.cloudera.impala.authorization.SentryConfig;
 import com.cloudera.impala.authorization.User;
 import com.cloudera.impala.catalog.CatalogException;
-import com.cloudera.impala.catalog.CatalogServiceCatalog;
 import com.cloudera.impala.catalog.DataSource;
 import com.cloudera.impala.catalog.Function;
 import com.cloudera.impala.catalog.ImpaladCatalog;
+import com.cloudera.impala.catalog.RecordServiceCatalog;
 import com.cloudera.impala.catalog.Role;
 import com.cloudera.impala.common.FileSystemUtil;
 import com.cloudera.impala.common.ImpalaException;
@@ -167,7 +167,7 @@ public class JniFrontend {
     }
     LOG.info(JniUtil.getJavaVersion());
 
-    if (runningPlanner_ || runningWorker_) {
+    if (isRecordService()) {
       if (runningPlanner_) {
         // Check if the Sentry Service is configured. If so, create a configuration
         // object.
@@ -176,19 +176,11 @@ public class JniFrontend {
           sentryConfig = new SentryConfig(sentryConfigFile);
           sentryConfig.loadConfig();
         }
-        // recordserviced directly uses CatalogServiceCatalog, meaning it does not
+        // recordserviced directly uses RecordServiceCatalog, meaning it does not
         // use the statestored to load metadata but goes directly to the other
         // services (HDFS, HMS, etc).
-        // TODO: rename CatalogServiceCatalog
-        CatalogServiceCatalog catalog = new CatalogServiceCatalog(
-            loadInBackground, numMetadataLoadingThreads, sentryConfig,
-            JniCatalog.generateId());
-        try {
-          catalog.reset();
-        } catch (CatalogException e) {
-          LOG.error("Error initializing catalog: ", e.getMessage());
-          throw new InternalException("Error initializing catalog.", e);
-        }
+        RecordServiceCatalog catalog = new RecordServiceCatalog(
+            numMetadataLoadingThreads, sentryConfig, JniCatalog.generateId());
         frontend_ = new Frontend(authConfig, catalog);
       } else {
         // Just running worker, no need to start catalog.
@@ -789,6 +781,13 @@ public class JniFrontend {
     output.append(checkBlockLocationTracking(CONF));
 
     return output.toString();
+  }
+
+  /**
+   * Return true if it is recordservice
+   */
+  private boolean isRecordService() {
+    return runningPlanner_ || runningWorker_;
   }
 
   /**

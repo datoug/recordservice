@@ -1,0 +1,54 @@
+====
+---- QUERY
+set use_record_service=true;select * from tmpDb1.tmpTbl1;
+---- RESULTS
+1,'a'
+2,'b'
+3,'c'
+---- TYPES
+INT, STRING
+====
+---- QUERY
+insert into tmpDb1.tmpTbl1 values (15, 'd'),(-5, 'e');
+set use_record_service=true;select * from tmpDb1.tmpTbl1;
+---- RESULTS
+1,'a'
+2,'b'
+3,'c'
+15,'d'
+-5,'e'
+---- TYPES
+INT, STRING
+====
+---- QUERY
+alter table tmpDb1.tmpTbl1 change column i index float;
+set use_record_service=true;select * from tmpDb1.tmpTbl1;
+---- RESULTS
+1.0,'a'
+2.0,'b'
+3.0,'c'
+15.0,'d'
+-5.0,'e'
+---- TYPES
+FLOAT, STRING
+====
+---- QUERY
+set use_record_service=true;select * from tmpDb1.notExistTbl;
+---- CATCH
+Could not resolve table reference: 'tmpdb1.notexisttbl'
+====
+---- QUERY
+create table if not exists tmpDb1.notExistTbl (i integer, s string);
+insert into tmpDb1.notExistTbl values (1, 'a');
+set use_record_service=true;select * from tmpDb1.notExistTbl;
+---- RESULTS
+1,'a'
+---- TYPES
+INT, STRING
+====
+---- QUERY
+drop table if exists tmpDb1.notExistTbl;
+set use_record_service=true;select * from tmpDb1.notExistTbl;
+---- CATCH
+Could not resolve table reference: 'tmpdb1.notexisttbl'
+====

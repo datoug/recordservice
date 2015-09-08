@@ -244,6 +244,21 @@ public class TableLoadingMgr {
   }
 
   /**
+   * Forces table loader to reload table without using cache.
+   */
+  public LoadRequest load(final TTableName tblName, final Db parentDb) {
+    Preconditions.checkNotNull(
+        parentDb, "Null parentDb given as argument to TableLoadingMgr.load()");
+    FutureTask<Table> tableLoadTask = new FutureTask<Table>(new Callable<Table>() {
+      @Override
+      public Table call() throws Exception {
+        return tblLoader_.load(parentDb, tblName.table_name, null);
+      }});
+    tblLoadingPool_.execute(tableLoadTask);
+    return new LoadRequest(tblName, tableLoadTask);
+  }
+
+  /**
    * Starts table loading threads in a fixed sized thread pool with a size
    * defined by NUM_TBL_LOADING_THREADS. Each thread polls the tableLoadingDeque_
    * for new tables to load.

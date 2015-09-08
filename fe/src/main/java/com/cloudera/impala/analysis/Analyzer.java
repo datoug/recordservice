@@ -17,6 +17,7 @@ package com.cloudera.impala.analysis;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -47,7 +48,7 @@ import com.cloudera.impala.catalog.DatabaseNotFoundException;
 import com.cloudera.impala.catalog.Db;
 import com.cloudera.impala.catalog.HBaseTable;
 import com.cloudera.impala.catalog.HdfsTable;
-import com.cloudera.impala.catalog.IncompleteTable;
+import com.cloudera.impala.catalog.RecordServiceCatalog;
 import com.cloudera.impala.catalog.Table;
 import com.cloudera.impala.catalog.TableLoadingException;
 import com.cloudera.impala.catalog.Type;
@@ -65,6 +66,7 @@ import com.cloudera.impala.thrift.TAccessEvent;
 import com.cloudera.impala.thrift.TCatalogObjectType;
 import com.cloudera.impala.thrift.TNetworkAddress;
 import com.cloudera.impala.thrift.TQueryCtx;
+import com.cloudera.impala.thrift.TTableName;
 import com.cloudera.impala.util.DisjointSet;
 import com.cloudera.impala.util.EventSequence;
 import com.cloudera.impala.util.ListMap;
@@ -261,6 +263,13 @@ public class Analyzer {
 
     public final IdGenerator<EquivalenceClassId> equivClassIdGenerator =
         EquivalenceClassId.createGenerator();
+
+    // For recordservice, not use the dbCache_ in the catalog except for buildinsDb_.
+    // Instead we maintain a per query dbMap_ and tblMap_. Within a single query, all
+    // looks for a single db / table name will resolve to the same object.
+    private final Map<TTableName, Table> tblMap_ = Maps.newHashMap();
+    // Used in getDb() to guarantee a persistent result per query.
+    private final Map<String, Db> dbMap_ = Maps.newHashMap();
 
     // map from equivalence class id to the list of its member slots
     private final Map<EquivalenceClassId, ArrayList<SlotId>> equivClassMembers =
@@ -2143,13 +2152,31 @@ public class Analyzer {
    * Adds the table to this analyzer's "missingTbls_" and throws an AnalysisException if
    * the table has not yet been loaded in the local catalog cache.
    * Throws an AnalysisException if the table or the db does not exist in the Catalog.
-   * This function does not register authorization requests and does not log access events.
+   * This function does not register authorization requests and does not log access
+   * events.
+   * If RecordServiceCatalog is used, get table from globalState_.tblMap_.
+   * If table is not in tblMap_, call RecordServiceCatalog.getTable() to reload table.
    */
   public Table getTable(String dbName, String tableName)
       throws AnalysisException, TableLoadingException {
     Table table = null;
     try {
-      table = getCatalog().getTable(dbName, tableName);
+      if (isRecordService()) {
+        Preconditions.checkState(dbName != null && !dbName.isEmpty(),
+            "Null or empty database name given as argument to getTable()");
+        TTableName ttName = new TTableName(dbName, tableName);
+        // load table from RecordServiceCatalog if table is not contained in tblMap_
+        if (!globalState_.tblMap_.containsKey(ttName)) {
+          table = getCatalog().getTable(dbName, tableName);
+          // Store table into tblMap_
+          if (table != null && table.isLoaded()) {
+            globalState_.tblMap_.put(ttName, table);
+          }
+        }
+        table = globalState_.tblMap_.get(ttName);
+      } else {
+        table = getCatalog().getTable(dbName, tableName);
+      }
     } catch (DatabaseNotFoundException e) {
       throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + dbName);
     } catch (CatalogException e) {
@@ -2168,12 +2195,6 @@ public class Analyzer {
       missingTbls_.add(new TableName(table.getDb().getName(), table.getName()));
       throw new AnalysisException(
           "Table/view is missing metadata: " + table.getFullName());
-    } else if (table instanceof IncompleteTable) {
-      // If there were problems loading this table's metadata, throw an exception
-      // when it is accessed.
-      ImpalaException cause = ((IncompleteTable) table).getCause();
-      if (cause instanceof TableLoadingException) throw (TableLoadingException) cause;
-      throw new TableLoadingException("Missing metadata for table: " + tableName, cause);
     }
     return table;
   }
@@ -2237,6 +2258,9 @@ public class Analyzer {
    *
    * If addAccessEvent is true, this call will add a new entry to accessEvents if the
    * catalog access was successful. If false, no accessEvent will be added.
+   *
+   * If RecordServiceCatalog is used, get db from globalState_.dbMap_.
+   * If db is not in dbMap_, call RecordServiceCatalog.getDb().
    */
   public Db getDb(String dbName, Privilege privilege) throws AnalysisException {
     return getDb(dbName, privilege, true);
@@ -2251,7 +2275,7 @@ public class Analyzer {
       registerPrivReq(pb.allOf(privilege).onDb(dbName).toRequest());
     }
 
-    Db db = getCatalog().getDb(dbName);
+    Db db = getDb(dbName);
     if (db == null && throwIfDoesNotExist) {
       throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + dbName);
     }
@@ -2273,11 +2297,12 @@ public class Analyzer {
     registerPrivReq(new PrivilegeRequestBuilder().allOf(privilege)
         .onTable(dbName,  tableName).toRequest());
     try {
-      Db db = getCatalog().getDb(dbName);
+      Db db = getDb(dbName);
       if (db == null) {
         throw new DatabaseNotFoundException("Database not found: " + dbName);
       }
-      return db.containsTable(tableName);
+      return globalState_.tblMap_.containsKey(new TTableName(dbName, tableName)) ||
+          getCatalog().containsTable(dbName, tableName);
     } catch (DatabaseNotFoundException e) {
       throw new AnalysisException(DB_DOES_NOT_EXIST_ERROR_MSG + dbName);
     }
@@ -2365,6 +2390,36 @@ public class Analyzer {
     Integer count = globalState_.warnings.get(msg);
     if (count == null) count = 0;
     globalState_.warnings.put(msg, count + 1);
+  }
+
+  /**
+   * Return true if using RecordServiceCatalog.
+   */
+  private boolean isRecordService() throws AnalysisException {
+    return getCatalog() instanceof RecordServiceCatalog;
+  }
+
+  /**
+   * Return db according to the name. Return null if db is not found.
+   * If RecordServiceCatalog is used, get table from globalState_.tblMap_. If table is
+   * not in tblMap_, call RecordServiceCatalog.getTable() to reload table.
+   */
+  private Db getDb(String dbName) throws AnalysisException {
+    Db db = null;
+    if (isRecordService()) {
+      // Get db from RecordServiceCatalog if db is not contained in dbMap_.
+      if (!globalState_.dbMap_.containsKey(dbName)) {
+        db = getCatalog().getDb(dbName);
+        // Store db into dbMap_.
+        if (db != null) {
+          globalState_.dbMap_.put(dbName, db);
+        }
+      }
+      db = globalState_.dbMap_.get(dbName);
+    } else {
+      db = getCatalog().getDb(dbName);
+    }
+    return db;
   }
 
   /**

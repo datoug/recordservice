@@ -29,6 +29,7 @@ import com.cloudera.impala.authorization.User;
 import com.cloudera.impala.catalog.CatalogException;
 import com.cloudera.impala.catalog.CatalogServiceCatalog;
 import com.cloudera.impala.catalog.Function;
+import com.cloudera.impala.catalog.RecordServiceCatalog;
 import com.cloudera.impala.common.ImpalaException;
 import com.cloudera.impala.common.InternalException;
 import com.cloudera.impala.common.JniUtil;
@@ -82,10 +83,10 @@ public class JniCatalog {
       String sentryServiceConfig, int impalaLogLevel, int otherLogLevel)
       throws InternalException {
     if (Frontend.Instance() != null &&
-        Frontend.Instance().getCatalog() instanceof CatalogServiceCatalog) {
+        Frontend.Instance().getCatalog() instanceof RecordServiceCatalog) {
       // In this case, we already have a CatalogServiceCatalog instance, just use that.
       // recordserviced runs with this configuration.
-      catalog_ = (CatalogServiceCatalog)Frontend.Instance().getCatalog();
+      catalog_ = (RecordServiceCatalog)Frontend.Instance().getCatalog();
     } else {
       Preconditions.checkArgument(numMetadataLoadingThreads > 0);
       // This trick saves having to pass a TLogLevel enum, which is an object and more

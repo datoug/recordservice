@@ -105,7 +105,7 @@ public class CatalogServiceCatalog extends Catalog {
   protected final AtomicInteger nextTableId_ = new AtomicInteger(0);
 
   // Manages the scheduling of background table loading.
-  private final TableLoadingMgr tableLoadingMgr_;
+  protected final TableLoadingMgr tableLoadingMgr_;
 
   private final boolean loadInBackground_;
 

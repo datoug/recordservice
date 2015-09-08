@@ -1,0 +1,26 @@
+====
+---- QUERY
+alter table tmpDb1.tmpTbl1 change column index i integer;
+set use_record_service=true;select tmpDb1.tmpTbl1.i from tmpDb2.tmpTbl1
+join tmpDb1.tmpTbl1 where tmpDb2.tmpTbl1.s1 = tmpDb1.tmpTbl1.s;
+---- RESULTS
+1
+2
+3
+---- TYPES
+INT
+====
+---- QUERY
+set use_record_service=true;use tmpDb2;select tmpTbl2.i
+from tmpTbl1 join tmpTbl2 where tmpTbl1.s1 = tmpTbl2.s;
+---- RESULTS
+5
+-9
+10
+---- TYPES
+INT
+====
+---- QUERY
+set use_record_service=true;select * from tmpDb2.tmpTbl3;
+---- RESULTS
+====

@@ -1,0 +1,10 @@
+====
+---- QUERY
+set use_record_service=true;select * from tmpDb1.tmpTbl2;
+---- RESULTS
+1
+2
+3
+---- TYPES
+INT
+====
