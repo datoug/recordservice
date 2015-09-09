@@ -1110,6 +1110,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
   boost::unordered_map<std::string, boost::unordered_set<int> >
       recordservice_workers_host_to_ports_;
 
+  // A cached list of worker addresses from the current membership information.
+  std::vector<recordservice::TNetworkAddress> known_recordservice_worker_addresses_;
+
   /// Generate unique session id for HiveServer2 session
   boost::uuids::random_generator uuid_generator_;
 

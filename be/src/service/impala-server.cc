@@ -396,6 +396,12 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
             bind<void>(&ImpalaServer::DetectNmFailures, this)));
   }
 
+  resolved_localhost_ip_ = FLAGS_hostname;
+  if (resolved_localhost_ip_ == "localhost") {
+    resolved_localhost_ip_ = GetIpAddress();
+    LOG(INFO) << "Resolved localhost to IP: " << resolved_localhost_ip_;
+  }
+
   exec_env_->SetImpalaServer(this);
   if (exec_env_->is_record_service()) {
     status = exec_env_->frontend()->InitZooKeeper();
@@ -404,12 +410,6 @@ ImpalaServer::ImpalaServer(ExecEnv* exec_env)
   if (!status.ok()) {
     LOG(ERROR) << "Could not initialize zookeeper. Exiting.";
     exit(1);
-  }
-
-  resolved_localhost_ip_ = FLAGS_hostname;
-  if (resolved_localhost_ip_ == "localhost") {
-    resolved_localhost_ip_ = GetIpAddress();
-    LOG(INFO) << "Resolved localhost to IP: " << resolved_localhost_ip_;
   }
 }
 
@@ -1640,6 +1640,21 @@ void ImpalaServer::UpdateRecordServiceMembership(const TMembershipUpdate& update
       default:
         DCHECK(false);
     }
+  }
+
+  // Also update the cached worker addresses
+  known_recordservice_worker_addresses_.clear();
+  for (unordered_map<string, unordered_set<int> >::iterator it =
+           recordservice_workers_host_to_ports_.begin();
+       it != recordservice_workers_host_to_ports_.end(); ++it) {
+    DCHECK(!it->second.empty());
+    recordservice::TNetworkAddress host;
+    host.hostname = it->first;
+    // TODO: should we pick a random instance? This is only used in test
+    // configurations so whatever makes testing better.
+    host.port = *it->second.begin();
+    if (host.hostname == "localhost") host.hostname = resolved_localhost_ip_;
+    known_recordservice_worker_addresses_.push_back(host);
   }
 }
 

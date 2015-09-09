@@ -755,12 +755,10 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     scoped_ptr<re2::RE2> path_filter;
     TExecRequest result = PlanRecordServiceRequest(req, &path_filter, &record);
 
-    // FIXME: this port should come from the membership information and return all hosts
-    // the workers are running on.
-    recordservice::TNetworkAddress default_host;
-    default_host.hostname = resolved_localhost_ip_;
-    default_host.port = FLAGS_recordservice_worker_port;
-    return_val.hosts.push_back(default_host);
+    {
+      shared_lock<shared_mutex> l(recordservice_membership_lock_);
+      return_val.hosts = known_recordservice_worker_addresses_;
+    }
 
     // Extract the types of the result.
     DCHECK(result.__isset.result_set_metadata);
