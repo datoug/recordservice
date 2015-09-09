@@ -22,9 +22,9 @@
 #include <thrift/protocol/TDebugProtocol.h>
 #include <boost/foreach.hpp>
 #include <boost/algorithm/string.hpp>
+#include <functional>
 #include <gutil/strings/substitute.h>
 #include <openssl/hmac.h>
-
 #include <re2/re2.h>
 #include <re2/stringpiece.h>
 
@@ -51,6 +51,11 @@ using namespace beeswax; // Converting QueryState
 using namespace apache::thrift;
 
 DECLARE_int32(recordservice_worker_port);
+// TODO: should this be defined based on the cluster size? There is good argument
+// for (cluster size ~ desired degree of parallelism). The argument against is
+// that there are single node bottlenecks that cause problems (Application Master, etc).
+DEFINE_int32(max_tasks, 50000,
+    "The default maximum number of tasks to generate per PlanRequest()");
 
 // This value has a big impact on performance. For simple queries (1 bigint col),
 // 5000 is a 2x improvement over a fetch size of 1024.
@@ -744,6 +749,150 @@ Status DetermineFileFormat(hdfsFS fs, const string& path,
   return status;
 }
 
+// Representation of a combined task.
+// It contains the list of hosts they have in common (index into all_hosts)
+// and the index of ranges that are part of this task (index into scan_ranges)
+struct CombinedTask {
+  vector<int> local_hosts;
+  vector<int> ranges;
+
+  CombinedTask() {}
+
+  CombinedTask(const TScanRangeLocations& scan_range, int idx) {
+    ranges.push_back(idx);
+    for (int i = 0; i < scan_range.locations.size(); ++i) {
+      local_hosts.push_back(scan_range.locations[i].host_idx);
+    }
+  }
+};
+
+// Combine scan_ranges. We want to balance locality and evenness of task sizes.
+// max_tasks is the suggested maximum number of tasks to generate. The actual
+// number can either be higher or lower. On return, this returns a list of
+// combined tasks.
+// This current algorithm only combines scan ranges that share two local hosts
+// and leaves the remaining as uncombined.
+// TODO: explore alternate ways to do this.
+void CombineTasks(const vector<TScanRangeLocations>& scan_ranges,
+    int max_tasks, vector<CombinedTask>* tasks) {
+  if (scan_ranges.size() <= max_tasks) {
+    for (int i = 0; i < scan_ranges.size(); ++i) {
+      tasks->push_back(CombinedTask(scan_ranges[i], i));
+    }
+    return;
+  }
+
+  // This is the maximum number of scan ranges we will put into one task. This
+  // is never violated and we will never have combined tasks bigger than this.
+  const int max_task_size = BitUtil::Ceil(scan_ranges.size(), max_tasks);
+
+  // Set to true if ranges[i] has been assigned to a task.
+  vector<bool> assigned;
+  assigned.resize(scan_ranges.size());
+
+  // This is a mapping of <host1, host2> -> set of ranges that are local on those
+  // hosts. This is the core data structure for the algorithm.
+  unordered_map<pair<int, int>, unordered_set<int> > state;
+
+  // First, loop through each range and add to state all the pairs of host it
+  // is part of. For example, if the range is on hosts 4, 6, 7
+  // this would add to state (4, 6), (4, 7), (6, 7).
+  // The sorting guarantees that that in each pair, pair.first < pair.second.
+  for (int i = 0; i < scan_ranges.size(); ++i) {
+    vector<int> hosts;
+    for (int j = 0; j < scan_ranges[i].locations.size(); ++j) {
+      hosts.push_back(scan_ranges[i].locations[j].host_idx);
+    }
+    sort(hosts.begin(), hosts.end());
+
+    for (int j = 0; j < hosts.size(); ++j) {
+      for (int k = j + 1; k < hosts.size(); ++k) {
+        pair<int, int> r(hosts[j], hosts[k]);
+        state[r].insert(i);
+      }
+    }
+  }
+
+  // Step two: keeping looping through state until it is empty. Each entry in
+  // state contains a potential combined task. The key for the entry is the
+  // host pair and the value is the list of ranges that is located on both hosts.
+  // The range might have already been assigned though.
+  //
+  // In each iteration we check:
+  //  1. If the remaining number of ranges is greater than the task size (skipping
+  //     assigned ranges), generate a combined task with a random subset (of task
+  //     size) of the ranges. This marks of all those ranges assigned.
+  //  2. If the number of remaining ranges in the entry is below task_size, remove
+  //     this entry from state.
+  // This guarantees that for each entry, we decrease the number of ranges in it,
+  // until it is smaller than task size, in which case we remove it from state.
+  // This time complexity of this should be O(num_ranges * num_replicas^2), that is
+  // we revisit each range once for each pair of hosts it is on.
+  //
+  // We don't want to generate as many combined tasks from one entry to prevent
+  // skew (it means the first entry we walk in state will get more tasks). By
+  // iterating over the entries, we guarantee other ones get a chance to assign
+  // the ranges.
+  unordered_map<pair<int, int>, unordered_set<int> >::iterator it;
+  vector<int> colocated_ranges;
+  while (state.size() > 0) {
+    for (it = state.begin(); it != state.end();) {
+      // Store the current it and advance it. This is because we might remove the
+      // current entry and need to advance it first.
+      const pair<int, int>& host_indices = it->first;
+      unordered_set<int>& ranges = it->second;
+      unordered_map<pair<int, int>, unordered_set<int> >::iterator state_it = it++;
+
+      // Collect the ranges that are still unassigned. This also removes from ranges
+      // the ones that are assigned.
+      colocated_ranges.clear();
+      for (unordered_set<int>::iterator ranges_it = ranges.begin();
+          ranges_it != ranges.end();) {
+        int idx = *ranges_it;
+        unordered_set<int>::iterator curr_it = ranges_it++;
+        if (assigned[idx]) {
+          // This is an optimization to GC the ranges on this host pair. If we
+          // end up revisiting this entry a lot, this is helpful. It is not required
+          // for correctness though (we will still remove the entry based on the
+          // number of colocated_ranges left).
+          ranges.erase(curr_it);
+          continue;
+        }
+        colocated_ranges.push_back(idx);
+      }
+
+      int num_colocated_ranges = colocated_ranges.size();
+      if (num_colocated_ranges >= max_task_size) {
+        // The entry contains enough ranges to generate a combined task.
+        random_shuffle(colocated_ranges.begin(), colocated_ranges.end());
+        CombinedTask task;
+        task.local_hosts.push_back(host_indices.first);
+        task.local_hosts.push_back(host_indices.second);
+        for (int i = 0; i < max_task_size; ++i) {
+          DCHECK(!assigned[colocated_ranges[i]]);
+          assigned[colocated_ranges[i]] = true;
+          task.ranges.push_back(colocated_ranges[i]);
+        }
+        tasks->push_back(task);
+        num_colocated_ranges -= max_task_size;
+      }
+
+      if (num_colocated_ranges < max_task_size) {
+        state.erase(state_it);
+        continue;
+      }
+    }
+  }
+
+  // For the remaining unassigned ranges, just generate single range
+  // tasks.
+  // TODO: not right. We can also combine these arbitrary.
+  for (int i = 0; i < scan_ranges.size(); ++i) {
+    if (assigned[i]) continue;
+    tasks->push_back(CombinedTask(scan_ranges[i], i));
+  }
+}
+
 //
 // RecordServicePlanner
 //
@@ -769,9 +918,6 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     // Impala, for these queries, will generate one fragment (with a single scan node)
     // and have all the scan ranges in that scan node. We want to generate one task
     // (with the fragment) for each scan range.
-    // FIXME: this needs to be revisited. It scales very poorly. For a scan with 1M
-    // blocks (64MB/block = ~61TB dataset), this generates 1M tasks. Even at 100B
-    // tasks, this is a 100MB response.
     DCHECK(result.__isset.query_exec_request);
     TQueryExecRequest& query_request = result.query_exec_request;
     DCHECK_EQ(query_request.per_node_scan_ranges.size(), 1);
@@ -845,9 +991,31 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     all_hosts.swap(query_request.host_list);
     ResolveRecordServiceWorkerPorts(&all_hosts);
 
-    for (int i = 0; i < scan_ranges.size(); ++i) {
+    // At this point we want to convert scan ranges to tasks. The default behavior
+    // is to generate 1:1 mapping. However if the number of scan ranges is very large,
+    // it can be beneficial to combine them. This reduces task launch overhead as
+    // well as the amount of metadata being distributed across the cluster.
+    // The downside of combining tasks is:
+    //  1. Reduced parallelism
+    //  2. More work to do when there are failures (tasks are bigger)
+    //  3. Reduced locality. The chance of combining two tasks so that they share
+    //     all the local replicas is very unlikely.
+    // To mitigate 1 and 2, we only, by default, combine tasks when there are very
+    // many tasks.
+    // To mitigate 3, we combine tasks that share two hosts preferentially.
+    // The optimal combination is likely NP complete so we will use a greedy solution
+    // instead.
+
+    // This vector contains a list of combined tasks and will be <= scan_ranges.size()
+    vector<CombinedTask> combined_tasks;
+    int max_tasks = req.__isset.max_tasks ? req.max_tasks : FLAGS_max_tasks;
+    if (max_tasks <= 0) max_tasks = FLAGS_max_tasks;
+    CombineTasks(scan_ranges, max_tasks, &combined_tasks);
+
+    for (int i = 0; i < combined_tasks.size(); ++i) {
       recordservice::TTask task;
-      task.results_ordered = false;
+      task.results_ordered = true;
+      task.task_size = combined_tasks[i].ranges.size();
 
       // Generate the task id from the request id. Just increment the lo field. It
       // doesn't matter if this overflows. Return the task ID to the RecordService
@@ -857,37 +1025,18 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
       query_request.record_service_task_id.hi = task.task_id.hi;
       query_request.record_service_task_id.lo = task.task_id.lo;
 
-      TScanRangeLocations& scan_range = scan_ranges[i];
-      // Add the partition metadata.
-      if (scan_range.scan_range.__isset.hdfs_file_split) {
-        // HDFS tasks are always ordered since we single thread the scanner.
-        task.results_ordered = true;
-        if (path_filter != NULL) {
-          const string& base_filename = scan_range.scan_range.hdfs_file_split.file_name;
-          if (!re2::RE2::FullMatch(base_filename, *path_filter.get())) {
-            VLOG_FILE << "File '" << base_filename
-                      << "' did not match pattern: '" << req.path.path << "'";
-            continue;
-          }
-        }
-
-        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
-        int64_t id = scan_range.scan_range.hdfs_file_split.partition_id;
-        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
-            all_partitions[id];
-      }
-
-      // Populate the hosts.
+      // Populate the hosts. We maintain a mapping of global to local host indices. The
+      // global index is the index into all hosts and the local is an index into
+      // task.local_hosts which only contains the hosts for this task.
+      map<int, int> global_to_local_hosts;
       query_request.host_list.clear();
-      for (int j = 0; j < scan_range.locations.size(); ++j) {
-        TScanRangeLocation& loc = scan_range.locations[j];
+      for (int j = 0; j < combined_tasks[i].local_hosts.size(); ++j) {
+        int global_idx = combined_tasks[i].local_hosts[j];
+        const TNetworkAddress& addr = all_hosts[global_idx];
         recordservice::TNetworkAddress host;
-        DCHECK(all_hosts[loc.host_idx].__isset.hdfs_host_name);
-        host.hostname = all_hosts[loc.host_idx].hdfs_host_name;
-        host.port = all_hosts[loc.host_idx].port;
-        // Populate query_request.host_list and remap indices.
-        query_request.host_list.push_back(all_hosts[loc.host_idx]);
-        loc.host_idx = query_request.host_list.size() - 1;
+        DCHECK(addr.__isset.hdfs_host_name);
+        host.hostname = addr.hdfs_host_name;
+        host.port = addr.port;
 
         if (host.port == -1) {
           // This indicates that we have DNs where there is no RecordService
@@ -895,29 +1044,71 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
           VLOG(2) << "No RecordService worker running on host: " << host.hostname;
           continue;
         }
-        task.local_hosts.push_back(host);
+
+        if (global_to_local_hosts.find(global_idx) == global_to_local_hosts.end()) {
+          query_request.host_list.push_back(addr);
+          int idx = task.local_hosts.size();
+          task.local_hosts.push_back(host);
+          global_to_local_hosts[global_idx] = idx;
+        }
       }
 
-      // Add the scan range.
+      // Clear the partitions list, we will just add the ones that are referenced.
+      query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions.clear();
       query_request.per_node_scan_ranges.clear();
-      query_request.per_node_scan_ranges[scan_node_id].push_back(scan_range);
+      for (int j = 0; j < combined_tasks[i].ranges.size(); ++j) {
+        TScanRangeLocations& scan_range = scan_ranges[combined_tasks[i].ranges[j]];
+        if (scan_range.scan_range.__isset.hdfs_file_split) {
+          if (path_filter != NULL) {
+            const string& base_filename = scan_range.scan_range.hdfs_file_split.file_name;
+            if (!re2::RE2::FullMatch(base_filename, *path_filter.get())) {
+              VLOG_FILE << "File '" << base_filename
+                        << "' did not match pattern: '" << req.path.path << "'";
+              continue;
+            }
+          }
+        } else {
+          // Only HDFS tasks are ordered since we single thread the scanner.
+          task.results_ordered = false;
+        }
+
+        // Remap the tasks host index.
+        vector<TScanRangeLocation> local_hosts;
+        local_hosts.swap(scan_range.locations);
+        scan_range.locations.clear();
+        for (int k = 0; k < local_hosts.size(); ++k) {
+          if (global_to_local_hosts.find(local_hosts[k].host_idx) == global_to_local_hosts.end()) {
+            // After combining, this replica is no longer considered local.
+            continue;
+          }
+          local_hosts[k].host_idx = global_to_local_hosts[local_hosts[k].host_idx];
+          scan_range.locations.push_back(local_hosts[k]);
+        }
+
+        // Populate the partition descriptors for the referenced partitions.
+        int64_t id = scan_range.scan_range.hdfs_file_split.partition_id;
+        query_request.desc_tbl.tableDescriptors[0].hdfsTable.partitions[id] =
+            all_partitions[id];
+
+        // Add the range
+        query_request.per_node_scan_ranges[scan_node_id].push_back(scan_range);
+      }
+      if (query_request.per_node_scan_ranges[scan_node_id].empty()) {
+        continue;
+      }
 
       // Now construct an encrypted TRecordServiceTask
       TRecordServiceTask rs_task;
-
       string serialized_request;
       serializer.Serialize<TExecRequest>(&result, &serialized_request);
       compressor->Compress(serialized_request, true, &rs_task.request);
-
       if (!FLAGS_principal.empty()) {
         rs_task.seq = key_response.seq;
         rs_task.hmac = ComputeHMAC(key_response.key, rs_task.request);
         rs_task.__isset.seq = true;
         rs_task.__isset.hmac = true;
       }
-
       serializer.Serialize<TRecordServiceTask>(&rs_task, &task.task);
-
       return_val.tasks.push_back(task);
     }
   } catch (const recordservice::TRecordServiceException& e) {
