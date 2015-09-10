@@ -69,6 +69,9 @@ parser.add_option("--jvm_args", dest="jvm_args", default="",
 
 parser.add_option("--start_recordservice", dest="start_recordservice", action="store_true",
                   default=True, help="Starts recordserviced along with impalad")
+parser.add_option("--rs_args", dest="rs_args", default="",
+                  help="Additional arguments to pass to RecordService during startup")
+
 parser.add_option("--num_planner_servers", type="int", dest="num_planner_servers",
                   default=1, help="Number of daemons that run the planner service.")
 
@@ -127,9 +130,10 @@ def exec_impala_process(cmd, args, stderr_log_file_path):
   cmd = '%s %s %s 2>&1 &' % (cmd, args, redirect_output)
   os.system(cmd)
 
-def exec_recordserviced_process():
+def exec_recordserviced_process(args):
   # TODO: logging redirect
-  os.system(RECORD_SERVICED_PATH + " &")
+  cmd = '%s %s &' % (RECORD_SERVICED_PATH, args)
+  os.system(cmd)
 
 def kill_cluster_processes(force=False):
   kill_matching_processes('catalogd')
@@ -243,7 +247,7 @@ def start_impalad_instances(cluster_size):
     exec_impala_process(IMPALAD_PATH, args, stderr_log_file_path)
 
   if (options.start_recordservice):
-    exec_recordserviced_process()
+    exec_recordserviced_process(options.rs_args)
 
 def wait_for_impala_process_count(impala_cluster, retries=3):
   """Checks that the desired number of impalad/statestored processes are running.

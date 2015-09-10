@@ -14,7 +14,7 @@
 
 package com.cloudera.impala.authorization;
 
-
+import org.apache.hadoop.conf.Configuration;
 import org.apache.sentry.provider.common.HadoopGroupResourceAuthorizationProvider;
 import org.apache.sentry.provider.common.ResourceAuthorizationProvider;
 
@@ -30,6 +30,19 @@ public class AuthorizationConfig {
   private final String policyFile_;
   private final SentryConfig sentryConfig_;
   private final String policyProviderClassName_;
+
+  /**
+   * Creates a new authorization configuration object.
+   * @param sentryConfigFile - Absolute path and file name of the sentry service.
+   */
+  public AuthorizationConfig(String sentryConfigFile) {
+    sentryConfig_ = new SentryConfig(sentryConfigFile);
+    if (!Strings.isNullOrEmpty(sentryConfigFile)) sentryConfig_.loadConfig();
+    Configuration conf = sentryConfig_.getConfig();
+    serverName_ = conf.get(SentryConfig.AUTHZ_SERVER_NAME, "");
+    policyFile_ = conf.get(SentryConfig.AUTHZ_PROVIDER_RESOURCE, "");
+    policyProviderClassName_ = conf.get(SentryConfig.AUTHZ_PROVIDER, "");
+  }
 
   /**
    * Creates a new authorization configuration object.

@@ -18,6 +18,8 @@ import java.io.File;
 import java.net.MalformedURLException;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.sentry.binding.hive.conf.HiveAuthzConf;
+import org.apache.sentry.binding.hive.conf.HiveAuthzConf.AuthzConfVars;
 
 import com.cloudera.impala.common.FileSystemUtil;
 import com.google.common.base.Strings;
@@ -26,11 +28,16 @@ import com.google.common.base.Strings;
  * Class used to load a sentry-site.xml configuration file.
  */
 public class SentryConfig {
+  public static final String AUTHZ_SERVER_NAME = AuthzConfVars.AUTHZ_SERVER_NAME.getVar();
+  public static final String AUTHZ_PROVIDER_RESOURCE =
+      AuthzConfVars.AUTHZ_PROVIDER_RESOURCE.getVar();
+  public static final String AUTHZ_PROVIDER = AuthzConfVars.AUTHZ_PROVIDER.getVar();
+
   // Absolute path to the sentry-site.xml configuration file.
   private final String configFile_;
 
   // The Sentry configuration. Valid only after calling loadConfig().
-  private final Configuration config_;
+  private Configuration config_;
 
   public SentryConfig(String configFilePath) {
     configFile_ = configFilePath;
@@ -59,7 +66,7 @@ public class SentryConfig {
 
     // Load the config.
     try {
-      config_.addResource(configFile.toURI().toURL());
+      config_ = new HiveAuthzConf(configFile.toURI().toURL());
     } catch (MalformedURLException e) {
       throw new RuntimeException("Invalid Sentry config file path: " + configFile_, e);
     }

@@ -148,8 +148,15 @@ public class JniFrontend {
 
     // Validate the authorization configuration before initializing the Frontend.
     // If there are any configuration problems Impala startup will fail.
-    AuthorizationConfig authConfig = new AuthorizationConfig(serverName,
+    AuthorizationConfig authConfig;
+    if (runningPlanner || runningWorker) {
+      // For RecordService, serverName, authorizationPolicyFile, etc., are directly
+      // loaded from Sentry config file.
+      authConfig = new AuthorizationConfig(sentryConfigFile);
+    } else {
+      authConfig = new AuthorizationConfig(serverName,
         authorizationPolicyFile, sentryConfigFile, authPolicyProviderClass);
+    }
     authConfig.validateConfig();
     if (authConfig.isEnabled()) {
       LOG.info(String.format("Authorization is 'ENABLED' using %s",
