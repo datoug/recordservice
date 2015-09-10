@@ -66,6 +66,9 @@ log "principal: $RECORD_SERVICE_PRINCIPAL"
 log "keytab_file: $KEYTAB_FILE"
 log "v: $V"
 log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
+log "mem_limit: $MEM_LIMIT%"
+log "sentry_config: $SENTRY_CONFIG"
+log "advanced_config: $ADVANCED_CONFIG"
 
 # The HDFS default has the wrong units so configure this.
 add_to_hdfs_site dfs.client.file-block-storage-locations.timeout.millis 5000000
@@ -84,7 +87,9 @@ ARGS="\
   -lineage_event_log_dir=$LOG_DIR/lineage \
   -audit_event_log_dir=$LOG_DIR/audit \
   -profile_log_dir=$LOG_DIR/profiles/ \
-  -v=$V
+  -v=$V \
+  -mem_limit=$MEM_LIMIT% \
+  -sentry_config=$SENTRY_CONFIG \
   "
 if env | grep -q ^RECORD_SERVICE_PRINCIPAL=
 then
@@ -94,6 +99,12 @@ then
     -keytab_file=$KEYTAB_FILE \
     -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL\
     "
+fi
+
+if [[ -n $ADVANCED_CONFIG ]];
+then
+  log "Add advanced config:$ADVANCED_CONFIG"
+  ARGS="$ARGS $ADVANCED_CONFIG"
 fi
 
 case $CMD in
@@ -110,7 +121,7 @@ case $CMD in
       -recordservice_planner_port=$PLANNER_PORT \
       -recordservice_worker_port=0
   ;;
-  
+
   (start_worker)
     log "Starting recordserviced running worker service"
     exec $RECORD_SERVICE_BIN_HOME/recordserviced $ARGS \

@@ -112,6 +112,31 @@
       "required" : "true",
       "type" : "long",
       "default" : "100"
+    },
+    {
+      "name" : "mem_limit",
+      "label" : "memory limit",
+      "description" : "memory limit",
+      "required" : "true",
+      "type" : "memory",
+      "unit" : "percent",
+      "max" : "100",
+      "min" : "0",
+      "default" : "20"
+    },
+    {
+      "name" : "sentry_config",
+      "label" : "sentry config",
+      "description" : "sentry config",
+      "type" : "string",
+      "default" : ""
+    },
+    {
+      "name" : "advanced_config",
+      "label" : "Advanced Configration",
+      "description" : "Any configs added here will be overriden by their default values.",
+      "type" : "string",
+      "default" : ""
     }
   ],
   "roles" : [
@@ -141,7 +166,10 @@
           "WEBSERVICE_PORT" : "${webservice_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
+          "MEM_LIMIT" : "${mem_limit}",
+          "SENTRY_CONFIG" : "${sentry_config}",
+          "ADVANCED_CONFIG" : "${advanced_config}"
         }
       },
       "stopRunner" : {
@@ -184,7 +212,10 @@
           "WEBSERVICE_PORT" : "${webservice_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
+          "MEM_LIMIT" : "${mem_limit}",
+          "SENTRY_CONFIG" : "${sentry_config}",
+          "ADVANCED_CONFIG" : "${advanced_config}"
         }
       },
       "stopRunner" : {
@@ -227,7 +258,10 @@
           "WEBSERVICE_PORT" : "${webservice_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}"
+          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
+          "MEM_LIMIT" : "${mem_limit}",
+          "SENTRY_CONFIG" : "${sentry_config}",
+          "ADVANCED_CONFIG" : "${advanced_config}"
         }
       },
       "stopRunner" : {
