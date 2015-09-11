@@ -59,7 +59,7 @@ log "recordservice_planner_port: $PLANNER_PORT"
 log "recordservice_worker_port: $WORKER_PORT"
 log "log_filename: $LOG_FILENAME"
 log "hostname: $HOSTNAME"
-log "recordservice_webserver_port: $WEBSERVICE_PORT"
+log "recordservice_webserver_port: $WEBSERVER_PORT"
 log "webserver_doc_root: $RECORDSERVICE_HOME"
 log "log_dir: $LOG_DIR"
 log "principal: $RECORD_SERVICE_PRINCIPAL"
@@ -80,7 +80,7 @@ add_to_hdfs_site recordservice.zookeeper.acl world:anyone:cdrwa
 ARGS="\
   -log_filename=$LOG_FILENAME \
   -hostname=$HOSTNAME \
-  -recordservice_webserver_port=$WEBSERVICE_PORT \
+  -recordservice_webserver_port=$WEBSERVER_PORT \
   -webserver_doc_root=$RECORDSERVICE_HOME \
   -log_dir=$LOG_DIR \
   -abort_on_config_error=false \
@@ -97,7 +97,6 @@ then
   ARGS=$ARGS"\
     -principal=$RECORD_SERVICE_PRINCIPAL \
     -keytab_file=$KEYTAB_FILE \
-    -kerberos_reinit_interval=$KERBEROS_REINIT_INTERVAL\
     "
 fi
 

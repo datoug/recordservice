@@ -54,12 +54,11 @@
       "required" : "false"
     }
   ],
-  // TODO: add more configs
   "parameters" : [
     {
       "name" : "recordservice_planner_port",
       "label" : "Record Service Planner Port",
-      "description" : "record service planner port number",
+      "description" : "The port the RecordService planner will be set to run on. Clients need to connect on this port.",
       "required" : "true",
           "type" : "port",
           "default" : 40000
@@ -67,15 +66,15 @@
     {
       "name" : "recordservice_worker_port",
       "label" : "Record Service worker Port",
-      "description" : "record service worker port number",
+      "description" : "The port the RecordService worker will be set to run on.",
       "required" : "true",
       "type" : "port",
       "default" : 40100
     },
     {
-      "name" : "webservice_port",
-      "label" : "webservice port for debug",
-      "description" : "webservice port for debug",
+      "name" : "webserver_port",
+      "label" : "webserver port for debug",
+      "description" : "The port for the server debug webpage.",
       "required" : "true",
       "type" : "port",
       "default" : 35000
@@ -99,24 +98,16 @@
     {
       "name" : "v",
       "label" : "Logging level",
-      "description" : "Higher is more verbose",
+      "description" : "Server logging level. Higher is more verbose",
       "required" : "true",
       "type" : "long",
       "min" : "0",
       "default" : "1"
     },
     {
-      "name" : "kerberos_reinit_interval",
-      "label" : "kerberos reinit interval",
-      "description" : "kerberos reinit interval",
-      "required" : "true",
-      "type" : "long",
-      "default" : "100"
-    },
-    {
       "name" : "mem_limit",
       "label" : "memory limit",
-      "description" : "memory limit",
+      "description" : "The maximum memory allocated for each server. The server will fail requests if the memory usage goes above this.",
       "required" : "true",
       "type" : "memory",
       "unit" : "percent",
@@ -127,14 +118,14 @@
     {
       "name" : "sentry_config",
       "label" : "sentry config",
-      "description" : "sentry config",
+      "description" : "sentry-site.xml configuration file.",
       "type" : "string",
       "default" : ""
     },
     {
       "name" : "advanced_config",
       "label" : "Advanced Configration",
-      "description" : "Any configs added here will be overriden by their default values.",
+      "description" : "Any configs added here will be overriden by their default values. This should be specified as --<key>=<value>, separated by spaces.",
       "type" : "string",
       "default" : ""
     }
@@ -147,6 +138,11 @@
       "logging" : {
         "dir" : "/var/log/recordserviced",
         "filename" : "recordserviced.INFO"
+      },
+      "externalLink" : {
+        "name" : "service_web_ui",
+        "label" : "RecordService Web UI",
+        "url" : "http://${host}:${webserver_port}"
       },
       "kerberosPrincipals" : [
         {
@@ -163,10 +159,9 @@
           "WORKER_PORT" : "${recordservice_worker_port}",
           "LOG_FILENAME" : "${log_filename}",
           "HOSTNAME" : "${host}",
-          "WEBSERVICE_PORT" : "${webservice_port}",
+          "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
           "MEM_LIMIT" : "${mem_limit}",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
@@ -195,6 +190,11 @@
         "dir" : "/var/log/recordserviced",
         "filename" : "recordserviced.INFO"
       },
+      "externalLink" : {
+        "name" : "service_web_ui",
+        "label" : "RecordService Web UI",
+        "url" : "http://${host}:${webserver_port}"
+      },
       "kerberosPrincipals" : [
         {
           "name" : "RECORD_SERVICE_PRINCIPAL",
@@ -209,10 +209,9 @@
           "PLANNER_PORT" : "${recordservice_planner_port}",
           "LOG_FILENAME" : "${log_filename}",
           "HOSTNAME" : "${host}",
-          "WEBSERVICE_PORT" : "${webservice_port}",
+          "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
           "MEM_LIMIT" : "${mem_limit}",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
@@ -241,6 +240,11 @@
         "dir" : "/var/log/recordserviced",
         "filename" : "recordserviced.INFO"
       },
+      "externalLink" : {
+        "name" : "service_web_ui",
+        "label" : "RecordService Web UI",
+        "url" : "http://${host}:${webserver_port}"
+      },
       "kerberosPrincipals" : [
         {
           "name" : "RECORD_SERVICE_PRINCIPAL",
@@ -255,10 +259,9 @@
           "WORKER_PORT" : "${recordservice_worker_port}",
           "LOG_FILENAME" : "${log_filename}",
           "HOSTNAME" : "${host}",
-          "WEBSERVICE_PORT" : "${webservice_port}",
+          "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "KERBEROS_REINIT_INTERVAL" : "${kerberos_reinit_interval}",
           "MEM_LIMIT" : "${mem_limit}",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
