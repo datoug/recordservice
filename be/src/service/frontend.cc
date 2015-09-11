@@ -35,6 +35,7 @@ DECLARE_int32(recordservice_worker_port);
 DECLARE_int32(num_metadata_loading_threads);
 
 DEFINE_bool(load_catalog_at_startup, false, "if true, load all catalog data at startup");
+DECLARE_bool(load_catalog_in_background);
 
 // Authorization related flags. Must be set to valid values to properly configure
 // authorization.
@@ -103,7 +104,13 @@ Frontend::Frontend(bool running_planner, bool running_worker) {
     EXIT_IF_ERROR(JniUtil::LoadJniMethod(jni_env, fe_class_, &(methods[i])));
   };
 
-  jboolean lazy = (FLAGS_load_catalog_at_startup ? false : true);
+  jboolean load_catalog_in_background = false;
+  if (running_planner) {
+    load_catalog_in_background = FLAGS_load_catalog_in_background;
+  } else {
+    load_catalog_in_background = (FLAGS_load_catalog_at_startup ? false : true);
+  }
+
   jstring policy_file_path =
       jni_env->NewStringUTF(FLAGS_authorization_policy_file.c_str());
   jstring server_name =
@@ -113,9 +120,9 @@ Frontend::Frontend(bool running_planner, bool running_worker) {
   jstring auth_provider_class =
       jni_env->NewStringUTF(FLAGS_authorization_policy_provider_class.c_str());
 
-  jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, lazy, server_name,
-      policy_file_path, sentry_config, auth_provider_class, FlagToTLogLevel(FLAGS_v),
-      FlagToTLogLevel(FLAGS_non_impala_java_vlog),
+  jobject fe = jni_env->NewObject(fe_class_, fe_ctor_, load_catalog_in_background,
+      server_name, policy_file_path, sentry_config, auth_provider_class,
+      FlagToTLogLevel(FLAGS_v), FlagToTLogLevel(FLAGS_non_impala_java_vlog),
       running_planner, running_worker,
       FLAGS_num_metadata_loading_threads);
 
