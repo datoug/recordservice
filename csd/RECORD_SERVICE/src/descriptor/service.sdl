@@ -105,6 +105,32 @@
       "default" : "1"
     },
     {
+      "name" : "enable_core_dump",
+      "label" : "Enable Core Dump",
+      "description" : "Used to generate a core dump to get more information about a crash. Unless otherwise configured systemwide using /proc/sys/kernel/core_pattern, the dump is generated in the configured core dump directory. The core file can be very large.",
+      "type" : "boolean",
+      "required" : "true",
+      "default" : "false"
+    },
+    {
+      "name" : "core_dump_directory",
+      "label" : "Core Dump Directory",
+      "description" : "If Enable Core Dump is set, RecordService processes will dump cores to this location.",
+      "type" : "path",
+      "pathType" : "serviceSpecific",
+      "required" : "true",
+      "default" : "/var/log/recordserviced"
+    },
+    {
+      "name" : "minidump_directory",
+      "label" : "Mini Dump Directory",
+      "description" : "RecordService processes will dump minidumps to this location on crash.",
+      "type" : "path",
+      "pathType" : "serviceSpecific",
+      "required" : "true",
+      "default" : "/var/log/recordserviced/minidumps"
+    },
+    {
       "name" : "mem_limit",
       "label" : "memory limit",
       "description" : "The maximum memory allocated for each server. The server will fail requests if the memory usage goes above this.",
@@ -261,6 +287,9 @@
           "HOSTNAME" : "${host}",
           "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
+          "ENABLE_CORE_DUMP" : "${enable_core_dump}",
+          "CORE_DUMP_DIRECTORY" : "${core_dump_directory}",
+          "MINIDUMP_DIRECTORY" : "${minidump_directory}",
           "V" : "${v}",
           "MEM_LIMIT" : "${mem_limit}",
           "SENTRY_CONFIG" : "${sentry_config}",

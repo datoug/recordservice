@@ -65,7 +65,7 @@ log "log_dir: $LOG_DIR"
 log "principal: $RECORD_SERVICE_PRINCIPAL"
 log "keytab_file: $KEYTAB_FILE"
 log "v: $V"
-log "kerberos_reinit_interval: $KERBEROS_REINIT_INTERVAL"
+log "minidump_directory: $MINIDUMP_DIRECTORY"
 log "mem_limit: $MEM_LIMIT%"
 log "sentry_config: $SENTRY_CONFIG"
 log "advanced_config: $ADVANCED_CONFIG"
@@ -88,6 +88,7 @@ ARGS="\
   -audit_event_log_dir=$LOG_DIR/audit \
   -profile_log_dir=$LOG_DIR/profiles/ \
   -v=$V \
+  -minidump_path=$MINIDUMP_DIRECTORY \
   -mem_limit=$MEM_LIMIT% \
   -sentry_config=$SENTRY_CONFIG \
   "
@@ -104,6 +105,28 @@ if [[ -n $ADVANCED_CONFIG ]];
 then
   log "Add advanced config:$ADVANCED_CONFIG"
   ARGS="$ARGS $ADVANCED_CONFIG"
+fi
+
+# Enable core dumping if requested.
+if [ "$ENABLE_CORE_DUMP" == "true" ]; then
+  # The core dump directory should already exist.
+  if [ -z "$CORE_DUMP_DIRECTORY" -o ! -d "$CORE_DUMP_DIRECTORY" ]; then
+    log "Could not find core dump directory $CORE_DUMP_DIRECTORY, exiting"
+    exit 1
+  fi
+  # It should also be writable.
+  if [ ! -w "$CORE_DUMP_DIRECTORY" ]; then
+    log "Core dump directory $CORE_DUMP_DIRECTORY is not writable, exiting"
+    exit 1
+  fi
+
+  ulimit -c unlimited
+  cd "$CORE_DUMP_DIRECTORY"
+  STATUS=$?
+  if [ $STATUS != 0 ]; then
+    log "Could not change to core dump directory to $CORE_DUMP_DIRECTORY, exiting"
+    exit $STATUS
+  fi
 fi
 
 case $CMD in

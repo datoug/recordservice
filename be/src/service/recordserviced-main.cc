@@ -38,6 +38,7 @@
 #include "service/fe-support.h"
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaInternalService.h"
+#include "util/minidump.h"
 #include "util/impalad-metrics.h"
 #include "util/thread.h"
 
@@ -49,7 +50,11 @@ using namespace strings;
 DECLARE_int32(recordservice_planner_port);
 DECLARE_int32(recordservice_worker_port);
 
+DEFINE_string(minidump_path, "/tmp/minidumps",
+    "Directory to output minidumps on crash. If empty, minidumps is disabled.");
+
 int main(int argc, char** argv) {
+  if (FLAGS_minidump_path.size() > 0) RegisterMinidump(FLAGS_minidump_path.c_str());
   InitCommonRuntime(argc, argv, true, true);
 
   bool running_planner = FLAGS_recordservice_planner_port != 0;
