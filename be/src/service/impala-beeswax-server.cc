@@ -80,6 +80,9 @@ using namespace beeswax;
     }                                                           \
   } while (false)
 
+DEFINE_bool(always_use_record_service, false,
+    "if true, all impala queries go through RecordService.");
+
 namespace impala {
 
 // Ascii result set for Beeswax.
@@ -537,7 +540,10 @@ Status ImpalaServer::QueryToTQueryContext(const Query& query,
     VLOG_QUERY << "TClientRequest.queryOptions: "
                << ThriftDebugString(query_ctx->request.query_options);
   }
-
+  if (FLAGS_always_use_record_service) {
+    query_ctx->request.query_options.__set_use_record_service(true);
+    LOG(ERROR) << query.query;
+  }
   return Status::OK();
 }
 

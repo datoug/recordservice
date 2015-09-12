@@ -85,21 +85,21 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   DCHECK(tuple_desc_->table_desc() != NULL);
   hdfs_table_ = static_cast<const HdfsTableDescriptor*>(tuple_desc_->table_desc());
   const vector<SlotDescriptor*>& slots = tuple_desc_->slots();
-  if (slots.size() == 0) {
-    // TODO: handle count(*)
-    return Status("count(*) is not currently supported.");
-  }
-  stringstream stmt;
-  stmt << "SELECT ";
   for (size_t i = 0; i < slots.size(); ++i) {
     if (!slots[i]->is_materialized()) continue;
     int col_idx = slots[i]->col_pos();
     materialized_slots_.push_back(slots[i]);
     materialized_col_names_.push_back(hdfs_table_->col_descs()[col_idx].name());
-    if (materialized_col_names_.size() == 1) {
+  }
+
+  stringstream stmt;
+  stmt << "SELECT ";
+  if (materialized_slots_.size() == 0) {
+    stmt << "count(*)";
+  } else {
+    for (size_t i = 0; i < materialized_col_names_.size(); ++i) {
+      if (i != 0) stmt << ", ";
       stmt << materialized_col_names_[i];
-    } else {
-      stmt << ", " << materialized_col_names_[i];
     }
   }
 
@@ -124,7 +124,9 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   try {
     planner.iface()->PlanRequest(result, params);
   } catch (const recordservice::TRecordServiceException& e) {
-    return Status(e.message.c_str());
+    stringstream ss;
+    ss << "Query: " << stmt.str() << "\n" << e.message << " " << e.detail;
+    return Status(ss.str());
   } catch (const std::exception& e) {
     return Status(e.what());
   }
@@ -372,17 +374,37 @@ Status RecordServiceScanNode::ProcessTask(
     const recordservice::TColumnarRecords& input_batch = fetch_result.columnar_records;
 
     // TODO: validate schema.
-    if (input_batch.cols.size() != materialized_slots_.size()) {
-      stringstream ss;
-      ss << "Invalid row batch from RecordService. Expecting "
-        << materialized_slots_.size()
-        << " cols. RecordService returned " << input_batch.cols.size() << " cols.";
-      return Status(ss.str());
-    }
-
-    if (fetch_result.num_records == 0) {
-      DCHECK(fetch_result.done);
+    if (materialized_slots_.size() == 0) {
+      if (input_batch.cols.size() != 1) {
+        return Status("Expecting count(*) to return 1 column.");
+      }
+      if (input_batch.cols[0].data.size() != sizeof(int64_t)) {
+        return Status("Expecting count(*) to return a BIGINT.");
+      }
+      const char* data = input_batch.cols[0].data.data();
+      int64_t count = *reinterpret_cast<const int64_t*>(data);
+      while (count > 0) {
+        int num_rows = min(count, static_cast<int64_t>(state_->batch_size()));
+        RowBatch* batch = new RowBatch(row_desc(), num_rows, mem_tracker());
+        batch->AddRows(num_rows);
+        batch->CommitRows(num_rows);
+        materialized_row_batches_->AddBatch(batch);
+        count -= num_rows;
+      }
       break;
+    } else {
+      if (input_batch.cols.size() != materialized_slots_.size()) {
+        stringstream ss;
+        ss << "Invalid row batch from RecordService. Expecting "
+          << materialized_slots_.size()
+          << " cols. RecordService returned " << input_batch.cols.size() << " cols.";
+        return Status(ss.str());
+      }
+
+      if (fetch_result.num_records == 0) {
+        DCHECK(fetch_result.done);
+        break;
+      }
     }
 
     std::auto_ptr<RowBatch> row_batch(
@@ -485,6 +507,7 @@ void RecordServiceScanNode::Close(RuntimeState* state) {
   DCHECK_EQ(num_active_scanners_, 0);
 
   materialized_row_batches_->Cleanup();
+  state->resource_pool()->SetThreadAvailableCb(NULL);
 
   ScanNode::Close(state);
 }
