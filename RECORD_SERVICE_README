@@ -6,8 +6,8 @@ To build this repo:
   - Make sure RECORD_SERVICE_HOME is set to the home of that repo.
   - Follow the normal Impala build instructions.
 
-Last rebase: 7/17/2015 
-  5a7109c5c68acb6cfd1b1e5e758e492276f4a653: IMPALA-80
+Last rebase: 8/14/2015 
+  d23a8ab747d6bc302f6df94b649e264ebc025e05: Nested Types: Support complex types in
 
 Skipped:
 Add option in generate_metrics.py to output CM mdl
@@ -21,3 +21,16 @@ Change start-impala-cluster.py to append daemon args
 
 Remove debug logging in start-impala-cluster.py
 63f543440e58ec7bea289866104b286eb2084b1b
+
+Python Virtual Env
+d8de07c01e39b2aae4cdbe81b40a9ed1fcf5dc36 
+
+Python Virtual Env
+0e709a9c05662bd06e2602929881dc6522c584c3 
+
+Sentry Version update
+15a60f32aaa19eb6e03069c7214780a74eea73d3 
+
+Nested types array serialization
+9f120e47c115f0b37c9742664fe0e81fef4595c5 
+
