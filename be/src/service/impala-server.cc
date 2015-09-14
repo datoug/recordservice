@@ -1716,19 +1716,22 @@ ImpalaServer::QueryStateRecord::QueryStateRecord(const QueryExecState& exec_stat
   if (coord != NULL) {
     has_coord = true;
     RuntimeState* runtime_state = coord->runtime_state();
+    process_nominator = process_denominator = 0;
     if (runtime_state != NULL && runtime_state->is_record_service_request()) {
       // if we are using RecordService, show:
       // # of bytes processed so far / # of bytes in total.
       RuntimeProfile* profile =
           ImpalaServer::GetHdfsScanNodeProfile(coord->query_profile());
-      DCHECK_NOTNULL(profile);
-      RuntimeProfile::Counter* bytes_read_counter = profile->GetCounter("BytesRead");
-      RuntimeProfile::Counter* bytes_total_counter = profile->GetCounter("BytesAssigned");
-      if (bytes_read_counter != NULL && bytes_total_counter != NULL) {
-        process_nominator = bytes_read_counter->value();
-        process_denominator = bytes_total_counter->value();
-      } else {
-        process_nominator = process_denominator = 0;
+      // profile could be NULL, which might happen if the query is on a cancellation
+      // path. To be safe, we assign 0 here, so it shows up as 'N/A' on the debug page.
+      if (profile != NULL) {
+        RuntimeProfile::Counter* bytes_read_counter = profile->GetCounter("BytesRead");
+        RuntimeProfile::Counter* bytes_total_counter =
+            profile->GetCounter("BytesAssigned");
+        if (bytes_read_counter != NULL && bytes_total_counter != NULL) {
+          process_nominator = bytes_read_counter->value();
+          process_denominator = bytes_total_counter->value();
+        }
       }
     } else {
       process_nominator = coord->progress().num_complete();
