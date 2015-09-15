@@ -23,16 +23,20 @@
 #include <sstream>
 #include <vector>
 #include <boost/algorithm/string.hpp>
+#include <boost/assign/list_of.hpp>
 #include <boost/foreach.hpp>
-
-#include "util/debug-util.h"
-#include "util/error-util.h"
+#include <gutil/strings/substitute.h>
 #include <util/string-parser.h>
 
 #include "common/names.h"
+#include "util/debug-util.h"
+#include "util/error-util.h"
+#include "util/subprocess.h"
+
 
 using boost::algorithm::is_any_of;
 using boost::algorithm::split;
+using namespace strings;
 
 namespace impala {
 
@@ -166,6 +170,68 @@ Status ResolveIpAddress(const string& hostname, string* ipaddress) {
   }
   return Status::OK();
 }
+
+void TryRunLsof(const int port, vector<string>* log) {
+  // Little inline bash script prints the full ancestry of any pid listening
+  // on the same port as 'port'. We could use 'pstree -s', but that option
+  // doesn't exist on el6.
+  string cmd = Substitute(
+      "export PATH=$$PATH:/usr/sbin ; "
+      "lsof -n -i 'TCP:$0' -sTCP:LISTEN ; "
+      "for pid in $$(lsof -F p -n -i 'TCP:$0' -sTCP:LISTEN | cut -f 2 -dp) ; do"
+      "  while [ $$pid -gt 1 ] ; do"
+      "    ps h -fp $$pid ;"
+      "    stat=($$(</proc/$$pid/stat)) ;"
+      "    pid=$${stat[3]} ;"
+      "  done ; "
+      "done",
+      port);
+
+  LOG_STRING(WARNING, log) << "Failed to bind to " << port << ". "
+               << "Trying to use lsof to find any processes listening "
+               << "on the same port:";
+  LOG_STRING(INFO, log) << "$ " << cmd;
+  Subprocess p("/bin/bash", boost::assign::list_of<string>("bash")("-c")(cmd));
+  p.ShareParentStdout(false);
+  bool success = p.Start();
+  if (!success) {
+    LOG_STRING(WARNING, log) << "Unable to fork bash";
+    return;
+  }
+
+  close(p.ReleaseChildStdinFd());
+
+  stringstream results;
+  char buf[1024];
+  while (true) {
+    ssize_t n = read(p.from_child_stdout_fd(), buf, arraysize(buf));
+    if (n == 0) {
+      // EOF
+      break;
+    }
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      LOG_STRING(WARNING, log) << "IO error reading from bash: " << GetStrErrMsg();
+      close(p.ReleaseChildStdoutFd());
+      break;
+    }
+
+    results << buf;
+  }
+
+  int rc;
+  success = p.Wait(&rc);
+  if (!success) {
+    LOG_STRING(WARNING, log) << "Unable to wait for lsof";
+    return;
+  }
+  if (rc != 0) {
+    LOG_STRING(WARNING, log) << "lsof failed";
+  }
+
+  LOG_STRING(WARNING, log) << results;
+}
+
 
 ostream& operator<<(ostream& out, const TNetworkAddress& hostport) {
   out << hostport.hostname << ":" << dec << hostport.port;

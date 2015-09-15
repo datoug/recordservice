@@ -49,6 +49,10 @@ std::string TNetworkAddressToString(const TNetworkAddress& address);
 /// Resolves hostname to ipaddress, returning the first non-local host ip.
 Status ResolveIpAddress(const std::string& hostname, std::string* ipaddress);
 
+/// Output is issued to the log at WARNING level, or appended to 'log' if it
+/// is non-NULL (mostly useful for testing).
+void TryRunLsof(const int port, std::vector<std::string>* log);
+
 /// Returns the ipaddress of this machine.
 std::string GetIpAddress();
 

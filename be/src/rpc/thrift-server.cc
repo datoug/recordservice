@@ -155,6 +155,8 @@ void ThriftServer::ThriftServerEventProcessor::Supervise() {
   try {
     thrift_server_->server_->serve();
   } catch (TException& e) {
+    // Can't bind to the port. Run 'lsof' to determine which process is using that port.
+    TryRunLsof(thrift_server_->port_, NULL);
     LOG(ERROR) << "ThriftServer '" << thrift_server_->name_ << "' (on port: "
                << thrift_server_->port_ << ") exited due to TException: " << e.what();
   }
