@@ -36,6 +36,7 @@
 #include "util/cpu-info.h"
 #include "util/disk-info.h"
 #include "util/mem-info.h"
+#include "util/network-util.h"
 #include "util/os-info.h"
 #include "util/process-state-info.h"
 #include "util/url-coding.h"
@@ -284,6 +285,8 @@ Status Webserver::Start() {
   if (context_ == NULL) {
     stringstream error_msg;
     error_msg << "Webserver: Could not start on address " << http_address_;
+    // Find out which process is using this port
+    TryRunLsof(http_address_.port, NULL);
     return Status(error_msg.str());
   }
 
