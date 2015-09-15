@@ -840,6 +840,7 @@ public class Frontend {
               n.aggregate_functions.get(0).nodes.get(0).fn.name.function_name ==
                   "count" &&
               n.aggregate_functions.get(0).nodes.size() == 1) {
+            request.result_set_metadata.setIs_count_star(true);
             continue;
           }
         }

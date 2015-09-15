@@ -528,6 +528,9 @@ static void PopulateResultSchema(const TResultSetMetadata& metadata,
     schema->cols[i].type = ToRecordServiceType(type);
     schema->cols[i].name = metadata.columns[i].columnName;
   }
+  if (metadata.__isset.is_count_star && metadata.is_count_star) {
+    schema->is_count_star = true;
+  }
 }
 
 recordservice::TProtocolVersion::type ImpalaServer::GetProtocolVersion() {
@@ -1649,7 +1652,7 @@ void ImpalaServer::GetMetric(recordservice::TMetricResponse& return_val,
   MetricGroup* metrics = exec_env_->metrics()->GetChildGroup("record-service");
   Metric* metric = metrics->FindMetricForTesting<Metric>(key);
   if (metric == NULL) return;
-  return_val.__set_metric(metric->ToHumanReadable());
+  return_val.__set_metric_string(metric->ToHumanReadable());
 }
 
 void ImpalaServer::GetDelegationToken(recordservice::TDelegationToken& token,

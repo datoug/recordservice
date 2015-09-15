@@ -45,6 +45,9 @@ struct TRowBatch {
 
 struct TResultSetMetadata {
   1: required list<CatalogObjects.TColumn> columns
+
+  // If true, this is the result for count(*)
+  2: optional bool is_count_star
 }
 
 // List of rows and metadata describing their columns.
