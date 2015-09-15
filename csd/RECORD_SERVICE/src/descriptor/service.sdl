@@ -136,10 +136,9 @@
       "description" : "The maximum memory allocated for each server. The server will fail requests if the memory usage goes above this.",
       "required" : "true",
       "type" : "memory",
-      "unit" : "percent",
-      "max" : "100",
-      "min" : "0",
-      "default" : "20"
+      "unit" : "gigabytes",
+      "min" : "1",
+      "default" : "8"
     },
     {
       "name" : "sentry_config",
@@ -188,7 +187,7 @@
           "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "MEM_LIMIT" : "${mem_limit}",
+          "MEM_LIMIT" : "${mem_limit}G",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
         }
@@ -238,7 +237,7 @@
           "WEBSERVER_PORT" : "${webserver_port}",
           "LOG_DIR" : "${log_dir}",
           "V" : "${v}",
-          "MEM_LIMIT" : "${mem_limit}",
+          "MEM_LIMIT" : "${mem_limit}G",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
         }
@@ -291,7 +290,7 @@
           "CORE_DUMP_DIRECTORY" : "${core_dump_directory}",
           "MINIDUMP_DIRECTORY" : "${minidump_directory}",
           "V" : "${v}",
-          "MEM_LIMIT" : "${mem_limit}",
+          "MEM_LIMIT" : "${mem_limit}G",
           "SENTRY_CONFIG" : "${sentry_config}",
           "ADVANCED_CONFIG" : "${advanced_config}"
         }

@@ -4,14 +4,14 @@ This directory contains the CSD for Record Service
 
 ## Build CSD and schema-validator jar
 <pre>
-$ cd $RECORD_SERVICE_HOME/csd
+$ cd $RECORD_SERVICE_HOME/csd/RECORD_SERVICE
 $ mvn clean install
 </pre>
 
 ## Validate sdl
 <pre>
 $ cd $RECORD_SERVICE_HOME/csd/RECORD_SERVICE
-$ java -jar target/schema-validator-5.4.0.jar -s src/descriptor/service.sdl
+$ java -jar target/schema-validator-*.jar -s src/descriptor/service.sdl
 Validating: src/descriptor/service.sdl
 Validation succeeded.
 </pre>

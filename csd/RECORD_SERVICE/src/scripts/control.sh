@@ -66,7 +66,7 @@ log "principal: $RECORD_SERVICE_PRINCIPAL"
 log "keytab_file: $KEYTAB_FILE"
 log "v: $V"
 log "minidump_directory: $MINIDUMP_DIRECTORY"
-log "mem_limit: $MEM_LIMIT%"
+log "mem_limit: $MEM_LIMIT"
 log "sentry_config: $SENTRY_CONFIG"
 log "advanced_config: $ADVANCED_CONFIG"
 
@@ -89,7 +89,7 @@ ARGS="\
   -profile_log_dir=$LOG_DIR/profiles/ \
   -v=$V \
   -minidump_path=$MINIDUMP_DIRECTORY \
-  -mem_limit=$MEM_LIMIT% \
+  -mem_limit=$MEM_LIMIT \
   -sentry_config=$SENTRY_CONFIG \
   "
 if env | grep -q ^RECORD_SERVICE_PRINCIPAL=
