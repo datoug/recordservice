@@ -75,9 +75,6 @@ DEFINE_int32(state_store_subscriber_port, 23000,
 DEFINE_int32(num_hdfs_worker_threads, 16,
     "(Advanced) The number of threads in the global HDFS operation pool");
 
-DEFINE_int64(record_service_mem_limit_mb, 3072,
-    "The memory limit for RecordService requests. -1 for unlimited.");
-
 DECLARE_int32(state_store_port);
 DECLARE_int32(num_threads_per_core);
 DECLARE_int32(num_cores);
@@ -433,11 +430,6 @@ Status ExecEnv::StartServices() {
   }
   LOG(INFO) << "Using global memory limit: "
             << PrettyPrinter::Print(bytes_limit, TUnit::BYTES);
-
-  int64_t record_service_mem_limit = FLAGS_record_service_mem_limit_mb;
-  if (record_service_mem_limit > 0) record_service_mem_limit *= (1024L * 1024L);
-  record_service_mem_tracker_.reset(new MemTracker(record_service_mem_limit, -1,
-      "RecordService", mem_tracker_.get()));
 
   RETURN_IF_ERROR(disk_io_mgr_->Init(mem_tracker_.get()));
 
