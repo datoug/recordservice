@@ -211,7 +211,9 @@ void TryRunLsof(const int port, vector<string>* log) {
     }
     if (n < 0) {
       if (errno == EINTR) continue;
-      LOG_STRING(WARNING, log) << "IO error reading from bash: " << GetStrErrMsg();
+      LOG_STRING(WARNING, log) << "IO error reading from bash. fd: "
+                               << p.from_child_stdout_fd()
+                               << ", error message: " << GetStrErrMsg();
       close(p.ReleaseChildStdoutFd());
       break;
     }
@@ -229,7 +231,7 @@ void TryRunLsof(const int port, vector<string>* log) {
     LOG_STRING(WARNING, log) << "lsof failed";
   }
 
-  LOG_STRING(WARNING, log) << results;
+  LOG_STRING(WARNING, log) << results.str();
 }
 
 
