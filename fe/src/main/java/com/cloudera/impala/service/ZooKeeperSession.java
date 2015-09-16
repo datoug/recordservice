@@ -88,10 +88,10 @@ public class ZooKeeperSession implements Closeable {
       "recordservice.zookeeper.acl";
 
   // Kerberos settings.
-  public static final String RECORD_SERVICE_PRINCIPAL_CONF =
-      "recordservice.kerberos.principal";
-  public static final String RECORD_SERVICE_KEY_TAB_CONF =
-      "recordservice.kerberos.keytab.file";
+  public static final String RECORD_SERVICE_SERVER_PRINCIPAL_CONF =
+      "recordservice.server.kerberos.principal";
+  public static final String RECORD_SERVICE_SERVER_KEY_TAB_CONF =
+      "recordservice.server.kerberos.keytab.file";
 
   // Zookeeper directory locations
   private static final String PLANNER_MEMBERSHIP_ZNODE = "planners";
@@ -548,9 +548,9 @@ public class ZooKeeperSession implements Closeable {
    * Setup configuration to connect to Zookeeper using kerberos.
    */
   private void setupJAASConfig(Configuration conf) throws IOException {
-    String principal = conf.get(RECORD_SERVICE_PRINCIPAL_CONF);
+    String principal = conf.get(RECORD_SERVICE_SERVER_PRINCIPAL_CONF);
     if (principal != null) {
-      String keytab = conf.get(RECORD_SERVICE_KEY_TAB_CONF);
+      String keytab = conf.get(RECORD_SERVICE_SERVER_KEY_TAB_CONF);
       if (keytab == null || keytab.trim().isEmpty()) {
         throw new IOException("Keytab must be set to connect using kerberos.");
       }
