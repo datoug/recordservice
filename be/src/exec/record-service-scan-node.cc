@@ -117,6 +117,8 @@ Status RecordServiceScanNode::Prepare(RuntimeState* state) {
   recordservice::TPlanRequestParams params;
   params.request_type = recordservice::TRequestType::Sql;
   params.__set_sql_stmt(stmt.str());
+  // Impala doesn't benefit from task combining and it only reduces parallelism.
+  params.__set_max_tasks(0);
   recordservice::TPlanRequestResult result;
 
   QUERY_VLOG_FRAGMENT(state->logger()) << "PlanRequest request: " << params.sql_stmt;

@@ -51,11 +51,25 @@ using namespace beeswax; // Converting QueryState
 using namespace apache::thrift;
 
 DECLARE_int32(recordservice_worker_port);
-// TODO: should this be defined based on the cluster size? There is good argument
-// for (cluster size ~ desired degree of parallelism). The argument against is
-// that there are single node bottlenecks that cause problems (Application Master, etc).
-DEFINE_int32(max_tasks, 50000,
-    "The default maximum number of tasks to generate per PlanRequest()");
+
+// Maximum tasks to generate per plan request.
+// -1: use server default.
+//  0: don't combine tasks.
+DEFINE_int32(max_tasks, -1,
+    "The default maximum number of tasks to generate per PlanRequest(). If set to < 0, "
+    "the server will pick a default based on cluster membership and machine specs. If "
+    "set to 0, no tasks will be combined.");
+
+// Max task size in bytes.
+DEFINE_int64(max_task_size, 2 * 1024L * 1024L * 1024L,
+    "Max task size in bytes. Only used if combining tasks.");
+
+// Number of tasks to generate per core (per host). There is a trade off. The larger
+// the value, the more tasks we will generate per PlanRequest(). This increases
+// parallelism and fault tolerance granularity. The downside is descreased efficiency
+// (more task start up time, less scheduling opportunities when executing a task etc.).
+// This also should vary depending on the task launch overhead.
+DEFINE_int32(tasks_per_core, 10, "Number of tasks to generate per core.");
 
 // This value has a big impact on performance. For simple queries (1 bigint col),
 // 5000 is a 2x improvement over a fetch size of 1024.
@@ -778,7 +792,9 @@ struct CombinedTask {
 // TODO: explore alternate ways to do this.
 void CombineTasks(const vector<TScanRangeLocations>& scan_ranges,
     int max_tasks, vector<CombinedTask>* tasks) {
-  if (scan_ranges.size() <= max_tasks) {
+  VLOG_QUERY << "Combining " << scan_ranges.size()
+             << " tasks. max_tasks=" << max_tasks;
+  if (scan_ranges.size() <= max_tasks || max_tasks <= 0) {
     for (int i = 0; i < scan_ranges.size(); ++i) {
       tasks->push_back(CombinedTask(scan_ranges[i], i));
     }
@@ -787,7 +803,14 @@ void CombineTasks(const vector<TScanRangeLocations>& scan_ranges,
 
   // This is the maximum number of scan ranges we will put into one task. This
   // is never violated and we will never have combined tasks bigger than this.
-  const int max_task_size = BitUtil::Ceil(scan_ranges.size(), max_tasks);
+  const int max_num_tasks = BitUtil::Ceil(scan_ranges.size(), max_tasks);
+
+  // The maximum size (in bytes scanned) of a combined task. We will stop adding
+  // to a combined task if:
+  // 1. It reduces parallelism too much (greater than max_num_tasks)
+  // 2. Or is too big (max_task_size).
+  int64_t max_task_size = FLAGS_max_task_size;
+  if (max_task_size < 0) max_task_size = std::numeric_limits<int64_t>::max();
 
   // Set to true if ranges[i] has been assigned to a task.
   vector<bool> assigned;
@@ -865,22 +888,33 @@ void CombineTasks(const vector<TScanRangeLocations>& scan_ranges,
       }
 
       int num_colocated_ranges = colocated_ranges.size();
-      if (num_colocated_ranges >= max_task_size) {
+      if (num_colocated_ranges > 1) {
         // The entry contains enough ranges to generate a combined task.
         random_shuffle(colocated_ranges.begin(), colocated_ranges.end());
         CombinedTask task;
         task.local_hosts.push_back(host_indices.first);
         task.local_hosts.push_back(host_indices.second);
-        for (int i = 0; i < max_task_size; ++i) {
-          DCHECK(!assigned[colocated_ranges[i]]);
-          assigned[colocated_ranges[i]] = true;
-          task.ranges.push_back(colocated_ranges[i]);
+        int tasks_to_combine = ::min(num_colocated_ranges, max_num_tasks);
+        int64_t combined_task_size = 0;
+        for (int i = 0; i < tasks_to_combine; ++i) {
+          int range_idx = colocated_ranges[i];
+          DCHECK(!assigned[range_idx]);
+          DCHECK(scan_ranges[range_idx].scan_range.__isset.hdfs_file_split);
+          int64_t range_length = scan_ranges[range_idx].scan_range.hdfs_file_split.length;
+          if (i > 0 && combined_task_size + range_length > max_task_size) {
+            // The combined task is too large in bytes, stop combining.
+            // TODO: this is greedy, could replace with 0-1 knapsack.
+            break;
+          }
+          assigned[range_idx] = true;
+          task.ranges.push_back(range_idx);
+          combined_task_size += range_length;
         }
         tasks->push_back(task);
-        num_colocated_ranges -= max_task_size;
+        num_colocated_ranges -= task.ranges.size();
       }
 
-      if (num_colocated_ranges < max_task_size) {
+      if (num_colocated_ranges <= 1) {
         state.erase(state_it);
         continue;
       }
@@ -1012,7 +1046,13 @@ void ImpalaServer::PlanRequest(recordservice::TPlanRequestResult& return_val,
     // This vector contains a list of combined tasks and will be <= scan_ranges.size()
     vector<CombinedTask> combined_tasks;
     int max_tasks = req.__isset.max_tasks ? req.max_tasks : FLAGS_max_tasks;
-    if (max_tasks <= 0) max_tasks = FLAGS_max_tasks;
+    if (max_tasks < 0) max_tasks = FLAGS_max_tasks;
+    if (max_tasks < 0) {
+      // max tasks was not set by the plan request or the server default, compute it
+      // from the membership.
+      max_tasks = return_val.hosts.size() * CpuInfo::num_cores() * FLAGS_tasks_per_core;
+      if (max_tasks < 0) max_tasks = 0;
+    }
     CombineTasks(scan_ranges, max_tasks, &combined_tasks);
 
     for (int i = 0; i < combined_tasks.size(); ++i) {
